@@ -29,10 +29,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Jobs remain queryable by status (pending, in_progress, completed, failed)
   3. Dead letter queue table stores permanently failed jobs for manual review
   4. Queue operations (enqueue, get_pending, update_status, move_to_dlq) work reliably
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 01-01: TBD
+- [ ] 01-01-PLAN.md - Queue infrastructure (manager, models, operations)
+- [ ] 01-02-PLAN.md - Dead letter queue implementation
+- [ ] 01-03-PLAN.md - Hook handler, worker, and plugin entry point
 
 ### Phase 2: Validation & Error Classification
 **Goal**: Invalid data blocked before entering queue; errors classified before retry attempts
@@ -68,7 +70,7 @@ Plans:
 **Depends on**: Phase 3
 **Requirements**: RTRY-01, RTRY-03
 **Success Criteria** (what must be TRUE):
-  1. Failed Plex API calls retry with exponential backoff and jitter (5s → 10s → 20s → 40s → 80s)
+  1. Failed Plex API calls retry with exponential backoff and jitter (5s -> 10s -> 20s -> 40s -> 80s)
   2. Permanently failed operations (max 5 retries or permanent errors) move to dead letter queue
   3. Background worker polls queue every 30s for pending jobs
   4. Sync operations complete even when Plex temporarily unavailable (queued work survives outage)
@@ -94,11 +96,11 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Persistent Queue Foundation | 0/? | Not started | - |
+| 1. Persistent Queue Foundation | 0/3 | Planned | - |
 | 2. Validation & Error Classification | 0/? | Not started | - |
 | 3. Plex API Client | 0/? | Not started | - |
 | 4. Queue Processor with Retry | 0/? | Not started | - |
