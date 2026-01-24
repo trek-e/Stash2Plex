@@ -10,28 +10,28 @@ See: .planning/PROJECT.md (updated 2025-01-24)
 ## Current Position
 
 Phase: 2 of 5 (Validation & Error Classification)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: In progress
-Last activity: 2026-01-24 — Completed 02-01-PLAN.md
+Last activity: 2026-01-24 — Completed 02-02-PLAN.md
 
-Progress: [██████░░░░] 67% (4/6 plans)
+Progress: [████████░░] 83% (5/6 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
-- Average duration: 3 min
-- Total execution time: 0.18 hours
+- Total plans completed: 5
+- Average duration: 2.6 min
+- Total execution time: 0.22 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1. Persistent Queue Foundation | 3 | 9 min | 3 min |
-| 2. Validation & Error Classification | 1 | 2 min | 2 min |
+| 2. Validation & Error Classification | 2 | 4 min | 2 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (5min), 01-02 (1min), 01-03 (3min), 02-01 (2min)
+- Last 5 plans: 01-02 (1min), 01-03 (3min), 02-01 (2min), 02-02 (2min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -42,6 +42,12 @@ Progress: [██████░░░░] 67% (4/6 plans)
 
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
+
+**From 02-02 (Metadata Validation):**
+- Separate validators per field type (title required vs optional fields)
+- validate_metadata returns tuple (model, error) not exception
+- Skip validation when no title present (worker can lookup)
+- Pydantic field_validator mode='before' for sanitization
 
 **From 02-01 (Validation Utilities):**
 - Use unicodedata stdlib for sanitization (no external dependencies)
@@ -81,8 +87,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-24T15:43:43Z
-Stopped at: Completed 02-01-PLAN.md
+Last session: 2026-01-24T15:49:21Z
+Stopped at: Completed 02-02-PLAN.md
 Resume file: None
 
 ## Completed Phases
