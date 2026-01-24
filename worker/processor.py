@@ -3,8 +3,9 @@ Background worker for processing sync jobs.
 
 Implements reliable job processing with acknowledgment workflow:
 - Acknowledges successful jobs
-- Nacks transient failures for retry
+- Retries transient failures with exponential backoff
 - Moves permanently failed jobs to DLQ
+- Circuit breaker pauses processing during Plex outages
 """
 
 import time
@@ -12,10 +13,10 @@ import threading
 from typing import Optional, TYPE_CHECKING
 
 try:
-    from queue.operations import get_pending, ack_job, nack_job, fail_job
+    from queue.operations import get_pending, ack_job, nack_job, fail_job, enqueue
     from queue.dlq import DeadLetterQueue
 except ImportError:
-    get_pending = ack_job = nack_job = fail_job = None
+    get_pending = ack_job = nack_job = fail_job = enqueue = None
     DeadLetterQueue = None
 
 if TYPE_CHECKING:
@@ -39,8 +40,9 @@ class SyncWorker:
 
     Runs in a daemon thread and processes jobs with proper acknowledgment:
     - Success: ack_job
-    - Transient failure: nack_job (retry up to max_retries)
+    - Transient failure: exponential backoff retry with metadata in job
     - Permanent failure or max retries: fail_job + DLQ
+    - Circuit breaker: pauses processing after consecutive failures
     """
 
     def __init__(
@@ -57,7 +59,7 @@ class SyncWorker:
             queue: SQLiteAckQueue instance
             dlq: DeadLetterQueue for permanently failed jobs
             config: PlexSyncConfig with Plex URL, token, and timeouts
-            max_retries: Maximum retry attempts before moving to DLQ
+            max_retries: Maximum retry attempts before moving to DLQ (default for standard errors)
         """
         self.queue = queue
         self.dlq = dlq
@@ -65,8 +67,15 @@ class SyncWorker:
         self.max_retries = max_retries
         self.running = False
         self.thread: Optional[threading.Thread] = None
-        self._retry_counts: dict[int, int] = {}  # pqid -> retry count
         self._plex_client: Optional['PlexClient'] = None
+
+        # Circuit breaker for resilience during Plex outages
+        from worker.circuit_breaker import CircuitBreaker
+        self.circuit_breaker = CircuitBreaker(
+            failure_threshold=5,
+            recovery_timeout=60.0,
+            success_threshold=1
+        )
 
     def start(self):
         """Start the background worker thread"""
@@ -94,52 +103,163 @@ class SyncWorker:
 
         print("[PlexSync Worker] Stopped")
 
+    def _prepare_for_retry(self, job: dict, error: Exception) -> dict:
+        """
+        Add retry metadata to job before re-enqueueing.
+
+        Stores retry_count, next_retry_at, and last_error_type in job dict
+        so retry state survives worker restart (crash-safe).
+
+        Args:
+            job: Job dict to update
+            error: The exception that caused the retry
+
+        Returns:
+            Updated job dict with retry metadata
+        """
+        from worker.backoff import calculate_delay, get_retry_params
+
+        base, cap, max_retries = get_retry_params(error)
+        retry_count = job.get('retry_count', 0) + 1
+        delay = calculate_delay(retry_count - 1, base, cap)  # -1 because we just incremented
+
+        job['retry_count'] = retry_count
+        job['next_retry_at'] = time.time() + delay
+        job['last_error_type'] = type(error).__name__
+        return job
+
+    def _is_ready_for_retry(self, job: dict) -> bool:
+        """
+        Check if job's backoff delay has elapsed.
+
+        Args:
+            job: Job dict with optional next_retry_at field
+
+        Returns:
+            True if job is ready for processing (no delay or delay elapsed)
+        """
+        next_retry_at = job.get('next_retry_at', 0)
+        return time.time() >= next_retry_at
+
+    def _get_max_retries_for_error(self, error: Exception) -> int:
+        """
+        Get max retries based on error type.
+
+        PlexNotFound errors get more retries (12) to allow for library scanning.
+        Other transient errors use the standard max_retries (5).
+
+        Args:
+            error: The exception that triggered the retry
+
+        Returns:
+            Maximum number of retries for this error type
+        """
+        from worker.backoff import get_retry_params
+        _, _, max_retries = get_retry_params(error)
+        return max_retries
+
+    def _requeue_with_metadata(self, job: dict):
+        """
+        Re-enqueue job with updated retry metadata.
+
+        persist-queue's nack() doesn't support modifying job data,
+        so we ack the current job and enqueue a fresh copy with
+        updated metadata.
+
+        Args:
+            job: Job dict with retry metadata already added
+        """
+        # Extract original job fields for re-enqueue
+        scene_id = job.get('scene_id')
+        update_type = job.get('update_type')
+        data = job.get('data', {})
+
+        # Create new job with all metadata preserved
+        new_job = {
+            'scene_id': scene_id,
+            'update_type': update_type,
+            'data': data,
+            'enqueued_at': job.get('enqueued_at', time.time()),
+            'job_key': job.get('job_key', f"scene_{scene_id}"),
+            # Preserve retry metadata
+            'retry_count': job.get('retry_count', 0),
+            'next_retry_at': job.get('next_retry_at', 0),
+            'last_error_type': job.get('last_error_type'),
+        }
+
+        # Ack the old job (removes from queue)
+        ack_job(self.queue, job)
+        # Enqueue fresh copy with metadata
+        self.queue.put(new_job)
+
     def _worker_loop(self):
         """Main worker loop - runs in background thread"""
+        from worker.circuit_breaker import CircuitState
+
         while self.running:
             try:
+                # Check circuit breaker first - pause if Plex is down
+                if not self.circuit_breaker.can_execute():
+                    print(f"[PlexSync Worker] Circuit OPEN, sleeping {self.config.poll_interval}s")
+                    time.sleep(self.config.poll_interval)
+                    continue
+
                 # Get next pending job (10 second timeout)
                 item = get_pending(self.queue, timeout=10)
                 if item is None:
                     # Timeout, continue loop
                     continue
 
+                # Check if backoff delay has elapsed
+                if not self._is_ready_for_retry(item):
+                    # Put back in queue - not ready yet
+                    nack_job(self.queue, item)
+                    time.sleep(0.1)  # Small delay to avoid tight loop
+                    continue
+
                 pqid = item.get('pqid')
                 scene_id = item.get('scene_id')
-                print(f"[PlexSync Worker] Processing job {pqid} for scene {scene_id}")
+                retry_count = item.get('retry_count', 0)
+                print(f"[PlexSync Worker] Processing job {pqid} for scene {scene_id} (attempt {retry_count + 1})")
 
                 try:
-                    # Process the job (stub for now, real implementation in Phase 3)
+                    # Process the job
                     self._process_job(item)
 
-                    # Success: acknowledge job
+                    # Success: acknowledge job and record with circuit breaker
                     ack_job(self.queue, item)
-                    self._retry_counts.pop(pqid, None)
+                    self.circuit_breaker.record_success()
                     print(f"[PlexSync Worker] Job {pqid} completed")
 
                 except TransientError as e:
-                    # Transient error: retry up to max_retries
-                    retry_count = self._retry_counts.get(pqid, 0) + 1
-                    self._retry_counts[pqid] = retry_count
+                    # Record failure with circuit breaker
+                    self.circuit_breaker.record_failure()
+                    if self.circuit_breaker.state == CircuitState.OPEN:
+                        print("[PlexSync Worker] Circuit breaker OPENED - pausing processing")
 
-                    if retry_count >= self.max_retries:
-                        print(f"[PlexSync Worker] Job {pqid} exceeded max retries, moving to DLQ")
+                    # Prepare job for retry with backoff metadata
+                    job = self._prepare_for_retry(item, e)
+                    max_retries = self._get_max_retries_for_error(e)
+                    job_retry_count = job.get('retry_count', 0)
+
+                    if job_retry_count >= max_retries:
+                        print(f"[PlexSync Worker] Job {pqid} exceeded max retries ({max_retries}), moving to DLQ")
                         fail_job(self.queue, item)
-                        self.dlq.add(item, e, retry_count)
-                        self._retry_counts.pop(pqid, None)
+                        self.dlq.add(job, e, job_retry_count)
                     else:
-                        print(f"[PlexSync Worker] Job {pqid} failed (attempt {retry_count}/{self.max_retries}), will retry: {e}")
-                        nack_job(self.queue, item)
+                        delay = job.get('next_retry_at', 0) - time.time()
+                        print(f"[PlexSync Worker] Job {pqid} failed (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s: {e}")
+                        self._requeue_with_metadata(job)
 
                 except PermanentError as e:
-                    # Permanent error: move to DLQ immediately
+                    # Permanent error: move to DLQ immediately (doesn't count against circuit)
                     print(f"[PlexSync Worker] Job {pqid} permanent failure, moving to DLQ: {e}")
                     fail_job(self.queue, item)
-                    self.dlq.add(item, e, self._retry_counts.get(pqid, 0))
-                    self._retry_counts.pop(pqid, None)
+                    self.dlq.add(item, e, item.get('retry_count', 0))
 
                 except Exception as e:
-                    # Unknown error: treat as transient
+                    # Unknown error: treat as transient with circuit breaker
+                    self.circuit_breaker.record_failure()
                     print(f"[PlexSync Worker] Job {pqid} unexpected error (treating as transient): {e}")
                     nack_job(self.queue, item)
 
