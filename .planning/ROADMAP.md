@@ -79,10 +79,13 @@ Plans:
   3. Background worker polls queue every 30s for pending jobs
   4. Sync operations complete even when Plex temporarily unavailable (queued work survives outage)
   5. User can review dead letter queue for failed operations requiring manual intervention
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 04-01: TBD
+- [ ] 04-01-PLAN.md - Exponential backoff calculator with full jitter (TDD)
+- [ ] 04-02-PLAN.md - Circuit breaker state machine and DLQ config
+- [ ] 04-03-PLAN.md - Retry orchestration integration into SyncWorker
+- [ ] 04-04-PLAN.md - DLQ monitoring and cleanup integration
 
 ### Phase 5: Late Update Detection
 **Goal**: Stash metadata updates after initial sync propagate to Plex; matching confidence tracked
@@ -107,5 +110,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 1. Persistent Queue Foundation | 3/3 | Complete | 2026-01-24 |
 | 2. Validation & Error Classification | 3/3 | Complete | 2026-01-24 |
 | 3. Plex API Client | 3/3 | Complete | 2026-01-24 |
-| 4. Queue Processor with Retry | 0/? | Not started | - |
+| 4. Queue Processor with Retry | 0/4 | Not started | - |
 | 5. Late Update Detection | 0/? | Not started | - |
