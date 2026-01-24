@@ -69,6 +69,10 @@ class SyncWorker:
         self.thread: Optional[threading.Thread] = None
         self._plex_client: Optional['PlexClient'] = None
 
+        # DLQ status logging interval
+        self._jobs_since_dlq_log = 0
+        self._dlq_log_interval = 10  # Log DLQ status every 10 jobs
+
         # Circuit breaker for resilience during Plex outages
         from worker.circuit_breaker import CircuitBreaker
         self.circuit_breaker = CircuitBreaker(
@@ -83,10 +87,29 @@ class SyncWorker:
             print("[PlexSync Worker] Already running")
             return
 
+        # Cleanup old DLQ entries
+        retention_days = getattr(self.config, 'dlq_retention_days', 30)
+        self.dlq.delete_older_than(days=retention_days)
+
+        # Log DLQ status on startup
+        self._log_dlq_status()
+
         self.running = True
         self.thread = threading.Thread(target=self._worker_loop, daemon=True)
         self.thread.start()
         print("[PlexSync Worker] Started")
+
+    def _log_dlq_status(self):
+        """Log DLQ status if jobs present."""
+        count = self.dlq.get_count()
+        if count > 0:
+            print(f"[PlexSync Worker] WARNING: DLQ contains {count} failed jobs requiring review")
+            recent = self.dlq.get_recent(limit=5)
+            for entry in recent:
+                print(
+                    f"  DLQ #{entry['id']}: scene {entry['scene_id']} - "
+                    f"{entry['error_type']}: {entry['error_message'][:80]}"
+                )
 
     def stop(self):
         """Stop the background worker thread"""
@@ -230,6 +253,12 @@ class SyncWorker:
                     ack_job(self.queue, item)
                     self.circuit_breaker.record_success()
                     print(f"[PlexSync Worker] Job {pqid} completed")
+
+                    # Periodic DLQ status logging
+                    self._jobs_since_dlq_log += 1
+                    if self._jobs_since_dlq_log >= self._dlq_log_interval:
+                        self._log_dlq_status()
+                        self._jobs_since_dlq_log = 0
 
                 except TransientError as e:
                     # Record failure with circuit breaker
