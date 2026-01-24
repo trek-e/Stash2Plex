@@ -62,10 +62,12 @@ Plans:
   2. Matching logic finds Plex items by file path with reduced false negatives
   3. Plex API errors return classified exceptions (PlexTemporaryError vs PlexPermanentError)
   4. Immediate retries (tenacity) handle network blips (100ms, 200ms, 400ms backoff)
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 03-01: TBD
+- [ ] 03-01-PLAN.md - Plex exception hierarchy and config timeout settings
+- [ ] 03-02-PLAN.md - PlexClient wrapper and file path matcher
+- [ ] 03-03-PLAN.md - Worker integration with PlexClient
 
 ### Phase 4: Queue Processor with Retry
 **Goal**: Background worker processes queue with exponential backoff and dead letter queue
@@ -104,6 +106,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 |-------|----------------|--------|-----------|
 | 1. Persistent Queue Foundation | 3/3 | Complete | 2026-01-24 |
 | 2. Validation & Error Classification | 3/3 | Complete | 2026-01-24 |
-| 3. Plex API Client | 0/? | Not started | - |
+| 3. Plex API Client | 0/3 | Planned | - |
 | 4. Queue Processor with Retry | 0/? | Not started | - |
 | 5. Late Update Detection | 0/? | Not started | - |
