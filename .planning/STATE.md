@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2025-01-24)
 
 **Core value:** Reliable sync — when metadata changes in Stash, it eventually reaches Plex
-**Current focus:** Phase 4 planning complete, ready to execute Queue Processor with Retry
+**Current focus:** Phase 4 execution in progress
 
 ## Current Position
 
-Phase: 4 of 5 (Queue Processor with Retry) - PLANNED
-Plan: 0 of 4 in current phase
-Status: Planning complete, ready to execute
-Last activity: 2026-01-24 — Created 04-01 through 04-04 plans
+Phase: 4 of 5 (Queue Processor with Retry) - IN PROGRESS
+Plan: 1 of 4 in current phase
+Status: In progress
+Last activity: 2026-01-24 — Completed 04-01-PLAN.md
 
-Progress: [█████████░] 60% (9/~15 plans)
+Progress: [██████████░] 67% (10/~15 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 9
-- Average duration: 2.8 min
-- Total execution time: 0.42 hours
+- Total plans completed: 10
+- Average duration: 2.7 min
+- Total execution time: 0.45 hours
 
 **By Phase:**
 
@@ -30,9 +30,10 @@ Progress: [█████████░] 60% (9/~15 plans)
 | 1. Persistent Queue Foundation | 3 | 9 min | 3 min |
 | 2. Validation & Error Classification | 3 | 7 min | 2.3 min |
 | 3. Plex API Client | 3 | 9 min | 3 min |
+| 4. Queue Processor with Retry | 1 | 2 min | 2 min |
 
 **Recent Trend:**
-- Last 5 plans: 02-03 (3min), 03-01 (2min), 03-02 (3min), 03-03 (4min)
+- Last 5 plans: 03-01 (2min), 03-02 (3min), 03-03 (4min), 04-01 (2min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -43,6 +44,12 @@ Progress: [█████████░] 60% (9/~15 plans)
 
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
+
+**From 04-01 (Exponential Backoff):**
+- Use seeded random.Random for deterministic testing
+- PlexNotFound gets 30s base, 600s cap, 12 retries (~2hr window)
+- Standard errors get 5s base, 80s cap, 5 retries
+- Lazy import of PlexNotFound to avoid circular dependencies
 
 **From 03-03 (Worker Plex Integration):**
 - Mock _get_plex_client method in tests to avoid queue module shadowing issue
@@ -111,8 +118,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-24T16:30:00Z
-Stopped at: Completed 03-03-PLAN.md (Phase 3 complete)
+Last session: 2026-01-24T17:14:11Z
+Stopped at: Completed 04-01-PLAN.md
 Resume file: None
 
 ## Completed Phases
