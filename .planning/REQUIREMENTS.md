@@ -7,9 +7,9 @@
 
 ### Retry & Reliability
 
-- [ ] **RTRY-01**: Failed Plex API calls retry with exponential backoff and jitter
+- [x] **RTRY-01**: Failed Plex API calls retry with exponential backoff and jitter
 - [x] **RTRY-02**: Transient errors (network, 5xx, timeout) trigger retry; permanent errors (4xx except 429) do not
-- [ ] **RTRY-03**: Permanently failed operations go to dead letter queue for manual review
+- [x] **RTRY-03**: Permanently failed operations go to dead letter queue for manual review
 - [x] **RTRY-04**: All Plex API calls have explicit connect and read timeouts
 
 ### Queue & Persistence
@@ -66,8 +66,8 @@
 | RTRY-02 | Phase 2 | Complete |
 | MATCH-01 | Phase 3 | Complete |
 | RTRY-04 | Phase 3 | Complete |
-| RTRY-01 | Phase 4 | Pending |
-| RTRY-03 | Phase 4 | Pending |
+| RTRY-01 | Phase 4 | Complete |
+| RTRY-03 | Phase 4 | Complete |
 | MATCH-02 | Phase 5 | Pending |
 | MATCH-03 | Phase 5 | Pending |
 
@@ -78,4 +78,4 @@
 
 ---
 *Requirements defined: 2025-01-24*
-*Last updated: 2026-01-24 after Phase 3 completion*
+*Last updated: 2026-01-24 after Phase 4 completion*

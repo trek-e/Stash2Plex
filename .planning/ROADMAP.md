@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Persistent Queue Foundation** - SQLite-backed queue with dead letter queue for durable sync job storage
 - [x] **Phase 2: Validation & Error Classification** - Input validation and error handling before retry logic
 - [x] **Phase 3: Plex API Client** - Plex integration with timeouts and improved matching
-- [ ] **Phase 4: Queue Processor with Retry** - Background worker with exponential backoff orchestration
+- [x] **Phase 4: Queue Processor with Retry** - Background worker with exponential backoff orchestration
 - [ ] **Phase 5: Late Update Detection** - Confidence-based matching and late metadata sync
 
 ## Phase Details
@@ -82,10 +82,10 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
-- [ ] 04-01-PLAN.md - Exponential backoff calculator with full jitter (TDD)
-- [ ] 04-02-PLAN.md - Circuit breaker state machine and DLQ config
-- [ ] 04-03-PLAN.md - Retry orchestration integration into SyncWorker
-- [ ] 04-04-PLAN.md - DLQ monitoring and cleanup integration
+- [x] 04-01-PLAN.md - Exponential backoff calculator with full jitter (TDD)
+- [x] 04-02-PLAN.md - Circuit breaker state machine and DLQ config
+- [x] 04-03-PLAN.md - Retry orchestration integration into SyncWorker
+- [x] 04-04-PLAN.md - DLQ monitoring and cleanup integration
 
 ### Phase 5: Late Update Detection
 **Goal**: Stash metadata updates after initial sync propagate to Plex; matching confidence tracked
@@ -110,5 +110,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 1. Persistent Queue Foundation | 3/3 | Complete | 2026-01-24 |
 | 2. Validation & Error Classification | 3/3 | Complete | 2026-01-24 |
 | 3. Plex API Client | 3/3 | Complete | 2026-01-24 |
-| 4. Queue Processor with Retry | 0/4 | Planned | - |
+| 4. Queue Processor with Retry | 4/4 | Complete | 2026-01-24 |
 | 5. Late Update Detection | 0/? | Not started | - |
