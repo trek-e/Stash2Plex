@@ -147,7 +147,7 @@ def initialize(config_dict: dict = None):
     dlq = DeadLetterQueue(data_dir)
 
     # Start background worker with config values
-    worker = SyncWorker(queue_manager.get_queue(), dlq, max_retries=config.max_retries)
+    worker = SyncWorker(queue_manager.get_queue(), dlq, config, max_retries=config.max_retries)
     worker.start()
 
     print("[PlexSync] Initialization complete")
