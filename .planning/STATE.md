@@ -10,28 +10,28 @@ See: .planning/PROJECT.md (updated 2025-01-24)
 ## Current Position
 
 Phase: 1 of 5 (Persistent Queue Foundation)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: In progress
-Last activity: 2026-01-24 — Completed 01-01-PLAN.md
+Last activity: 2026-01-24 — Completed 01-02-PLAN.md
 
-Progress: [█░░░░░░░░░] 6% (1/15 plans)
+Progress: [██░░░░░░░░] 13% (2/15 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: 5 min
-- Total execution time: 0.08 hours
+- Total plans completed: 2
+- Average duration: 3 min
+- Total execution time: 0.10 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1. Persistent Queue Foundation | 1 | 5 min | 5 min |
+| 1. Persistent Queue Foundation | 2 | 6 min | 3 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (5min)
-- Trend: First plan completed
+- Last 5 plans: 01-01 (5min), 01-02 (1min)
+- Trend: Accelerating
 
 *Updated after each plan completion*
 
@@ -41,6 +41,11 @@ Progress: [█░░░░░░░░░] 6% (1/15 plans)
 
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
+
+**From 01-02 (Dead Letter Queue):**
+- Separate DLQ database (dlq.db) from main queue for long retention
+- Store full job_data as pickled BLOB for complete error context
+- 30-day default retention period for DLQ cleanup
 
 **From 01-01 (Queue Infrastructure):**
 - Used persist-queue SQLiteAckQueue for built-in crash recovery (vs custom SQLite queue)
@@ -61,6 +66,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-24T14:55:56Z
-Stopped at: Completed 01-01-PLAN.md (Queue Infrastructure)
+Last session: 2026-01-24T14:59:59Z
+Stopped at: Completed 01-02-PLAN.md (Dead Letter Queue)
 Resume file: None
