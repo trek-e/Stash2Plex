@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2025-01-24)
 
 **Core value:** Reliable sync — when metadata changes in Stash, it eventually reaches Plex
-**Current focus:** Phase 1: Persistent Queue Foundation
+**Current focus:** Phase 2: Validation & Error Classification
 
 ## Current Position
 
-Phase: 1 of 5 (Persistent Queue Foundation)
-Plan: 3 of 3 in current phase (Phase 1 complete)
-Status: Phase complete
-Last activity: 2026-01-24 — Completed 01-03-PLAN.md
+Phase: 2 of 5 (Validation & Error Classification)
+Plan: 0 of ? in current phase
+Status: Ready to plan
+Last activity: 2026-01-24 — Phase 1 verified complete
 
-Progress: [███░░░░░░░] 20% (3/15 plans)
+Progress: [███░░░░░░░] 20% (3/~15 plans)
 
 ## Performance Metrics
 
@@ -74,6 +74,18 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-24T15:05:54Z
-Stopped at: Completed 01-03-PLAN.md (Hook Handler & Background Worker)
+Last session: 2026-01-24
+Stopped at: Phase 1 complete and verified
 Resume file: None
+
+## Completed Phases
+
+### Phase 1: Persistent Queue Foundation (Complete 2026-01-24)
+**Verification:** PASSED (6/6 must-haves)
+**Commits:** 9ae922a → 6922352 (12 commits)
+**Key deliverables:**
+- SQLiteAckQueue with crash recovery (auto_resume=True)
+- Dead letter queue for permanently failed jobs
+- Hook handler with <100ms enqueue
+- Background worker with ack/nack/fail workflow
+- Plugin entry point (PlexSync.py)

@@ -14,9 +14,9 @@
 
 ### Queue & Persistence
 
-- [ ] **QUEUE-01**: Sync jobs persist to SQLite-backed queue (survives process restart)
-- [ ] **QUEUE-02**: Hook handler captures events quickly (<100ms) and enqueues for background processing
-- [ ] **QUEUE-03**: Background worker processes queue with retry orchestration
+- [x] **QUEUE-01**: Sync jobs persist to SQLite-backed queue (survives process restart)
+- [x] **QUEUE-02**: Hook handler captures events quickly (<100ms) and enqueues for background processing
+- [x] **QUEUE-03**: Background worker processes queue with retry orchestration
 
 ### Input Validation
 
@@ -57,9 +57,9 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| QUEUE-01 | Phase 1 | Pending |
-| QUEUE-02 | Phase 1 | Pending |
-| QUEUE-03 | Phase 1 | Pending |
+| QUEUE-01 | Phase 1 | Complete |
+| QUEUE-02 | Phase 1 | Complete |
+| QUEUE-03 | Phase 1 | Complete |
 | VALID-01 | Phase 2 | Pending |
 | VALID-02 | Phase 2 | Pending |
 | VALID-03 | Phase 2 | Pending |
