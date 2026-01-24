@@ -49,7 +49,7 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 02-01-PLAN.md - Sanitizers and error classification utilities
+- [x] 02-01-PLAN.md - Sanitizers and error classification utilities
 - [ ] 02-02-PLAN.md - Metadata validation model and hook integration
 - [ ] 02-03-PLAN.md - Config validation and plugin init integration
 
@@ -103,7 +103,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Persistent Queue Foundation | 3/3 | Complete | 2026-01-24 |
-| 2. Validation & Error Classification | 0/3 | In Progress | - |
+| 2. Validation & Error Classification | 1/3 | In Progress | - |
 | 3. Plex API Client | 0/? | Not started | - |
 | 4. Queue Processor with Retry | 0/? | Not started | - |
 | 5. Late Update Detection | 0/? | Not started | - |
