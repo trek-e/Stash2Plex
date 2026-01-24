@@ -133,18 +133,25 @@ def get_stats(queue_path: str) -> dict:
 
     conn = sqlite3.connect(db_path)
     try:
-        cursor = conn.execute('''
-            SELECT
-                CASE status
-                    WHEN 0 THEN 'inited'
-                    WHEN 1 THEN 'pending'
-                    WHEN 2 THEN 'in_progress'
-                    WHEN 5 THEN 'completed'
-                    WHEN 9 THEN 'failed'
-                    ELSE 'unknown'
-                END as status_name,
-                COUNT(*) as count
-            FROM ack_queue
+        # Find the ack_queue table (persist-queue uses ack_queue_default by default)
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ack_queue%'"
+        )
+        table = cursor.fetchone()
+        if not table:
+            # Table doesn't exist yet (no jobs enqueued)
+            return {
+                'pending': 0,
+                'in_progress': 0,
+                'completed': 0,
+                'failed': 0
+            }
+
+        table_name = table[0]
+
+        cursor = conn.execute(f'''
+            SELECT status, COUNT(*) as count
+            FROM {table_name}
             GROUP BY status
         ''')
 
@@ -156,10 +163,19 @@ def get_stats(queue_path: str) -> dict:
         }
 
         for row in cursor:
-            status_name = row[0]
+            status_code = row[0]
             count = row[1]
-            if status_name in stats:
-                stats[status_name] = count
+
+            # Map status codes to categories
+            # 0 and 1 are both "pending" (ready to process)
+            if status_code in (0, 1):
+                stats['pending'] += count
+            elif status_code == 2:
+                stats['in_progress'] += count
+            elif status_code == 5:
+                stats['completed'] += count
+            elif status_code == 9:
+                stats['failed'] += count
 
         return stats
 
