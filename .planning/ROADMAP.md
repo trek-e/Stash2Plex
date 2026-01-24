@@ -13,7 +13,7 @@ This roadmap transforms PlexSync from synchronous, fragile metadata sync to a re
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Persistent Queue Foundation** - SQLite-backed queue with dead letter queue for durable sync job storage
-- [ ] **Phase 2: Validation & Error Classification** - Input validation and error handling before retry logic
+- [x] **Phase 2: Validation & Error Classification** - Input validation and error handling before retry logic
 - [ ] **Phase 3: Plex API Client** - Plex integration with timeouts and improved matching
 - [ ] **Phase 4: Queue Processor with Retry** - Background worker with exponential backoff orchestration
 - [ ] **Phase 5: Late Update Detection** - Confidence-based matching and late metadata sync
@@ -50,8 +50,8 @@ Plans:
 
 Plans:
 - [x] 02-01-PLAN.md - Sanitizers and error classification utilities
-- [ ] 02-02-PLAN.md - Metadata validation model and hook integration
-- [ ] 02-03-PLAN.md - Config validation and plugin init integration
+- [x] 02-02-PLAN.md - Metadata validation model and hook integration
+- [x] 02-03-PLAN.md - Config validation and plugin init integration
 
 ### Phase 3: Plex API Client
 **Goal**: Reliable Plex communication with timeouts and improved scene matching
@@ -103,7 +103,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Persistent Queue Foundation | 3/3 | Complete | 2026-01-24 |
-| 2. Validation & Error Classification | 1/3 | In Progress | - |
+| 2. Validation & Error Classification | 3/3 | Complete | 2026-01-24 |
 | 3. Plex API Client | 0/? | Not started | - |
 | 4. Queue Processor with Retry | 0/? | Not started | - |
 | 5. Late Update Detection | 0/? | Not started | - |

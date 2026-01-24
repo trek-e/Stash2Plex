@@ -8,7 +8,7 @@
 ### Retry & Reliability
 
 - [ ] **RTRY-01**: Failed Plex API calls retry with exponential backoff and jitter
-- [ ] **RTRY-02**: Transient errors (network, 5xx, timeout) trigger retry; permanent errors (4xx except 429) do not
+- [x] **RTRY-02**: Transient errors (network, 5xx, timeout) trigger retry; permanent errors (4xx except 429) do not
 - [ ] **RTRY-03**: Permanently failed operations go to dead letter queue for manual review
 - [ ] **RTRY-04**: All Plex API calls have explicit connect and read timeouts
 
@@ -20,9 +20,9 @@
 
 ### Input Validation
 
-- [ ] **VALID-01**: Metadata validated against schema before sending to Plex
-- [ ] **VALID-02**: Special characters sanitized to prevent API errors
-- [ ] **VALID-03**: Plugin configuration validated against schema on load
+- [x] **VALID-01**: Metadata validated against schema before sending to Plex
+- [x] **VALID-02**: Special characters sanitized to prevent API errors
+- [x] **VALID-03**: Plugin configuration validated against schema on load
 
 ### Matching & Late Updates
 
@@ -60,10 +60,10 @@
 | QUEUE-01 | Phase 1 | Complete |
 | QUEUE-02 | Phase 1 | Complete |
 | QUEUE-03 | Phase 1 | Complete |
-| VALID-01 | Phase 2 | Pending |
-| VALID-02 | Phase 2 | Pending |
-| VALID-03 | Phase 2 | Pending |
-| RTRY-02 | Phase 2 | Pending |
+| VALID-01 | Phase 2 | Complete |
+| VALID-02 | Phase 2 | Complete |
+| VALID-03 | Phase 2 | Complete |
+| RTRY-02 | Phase 2 | Complete |
 | MATCH-01 | Phase 3 | Pending |
 | RTRY-04 | Phase 3 | Pending |
 | RTRY-01 | Phase 4 | Pending |
@@ -78,4 +78,4 @@
 
 ---
 *Requirements defined: 2025-01-24*
-*Last updated: 2026-01-24 after roadmap creation*
+*Last updated: 2026-01-24 after Phase 2 completion*
