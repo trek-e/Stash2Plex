@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2025-01-24)
 
 **Core value:** Reliable sync — when metadata changes in Stash, it eventually reaches Plex
-**Current focus:** Phase 4 execution in progress
+**Current focus:** Phase 4 COMPLETE, ready for Phase 5
 
 ## Current Position
 
-Phase: 4 of 5 (Queue Processor with Retry) - IN PROGRESS
-Plan: 3 of 4 in current phase
-Status: In progress
-Last activity: 2026-01-24 — Completed 04-03-PLAN.md
+Phase: 4 of 5 (Queue Processor with Retry) - COMPLETE
+Plan: 4 of 4 in current phase
+Status: Phase complete
+Last activity: 2026-01-24 — Completed 04-04-PLAN.md
 
-Progress: [████████████░] 80% (12/~15 plans)
+Progress: [█████████████░] 87% (13/~15 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 12
-- Average duration: 2.6 min
-- Total execution time: 0.52 hours
+- Total plans completed: 13
+- Average duration: 2.5 min
+- Total execution time: 0.55 hours
 
 **By Phase:**
 
@@ -30,10 +30,10 @@ Progress: [████████████░] 80% (12/~15 plans)
 | 1. Persistent Queue Foundation | 3 | 9 min | 3 min |
 | 2. Validation & Error Classification | 3 | 7 min | 2.3 min |
 | 3. Plex API Client | 3 | 9 min | 3 min |
-| 4. Queue Processor with Retry | 3 | 7 min | 2.3 min |
+| 4. Queue Processor with Retry | 4 | 9 min | 2.25 min |
 
 **Recent Trend:**
-- Last 5 plans: 03-03 (4min), 04-01 (2min), 04-02 (2min), 04-03 (3min)
+- Last 5 plans: 04-01 (2min), 04-02 (2min), 04-03 (3min), 04-04 (2min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -44,6 +44,11 @@ Progress: [████████████░] 80% (12/~15 plans)
 
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
+
+**From 04-04 (DLQ Monitoring):**
+- Log DLQ status every 10 jobs (not time-based) for predictable monitoring
+- DLQ cleanup runs before status logging on startup (see clean state)
+- Cleanup uses config.dlq_retention_days with 30-day default fallback
 
 **From 04-03 (Retry Orchestration):**
 - Re-enqueue pattern: ack + put instead of nack for metadata updates
@@ -129,11 +134,22 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-24T17:20:37Z
-Stopped at: Completed 04-03-PLAN.md
+Last session: 2026-01-24T17:24:35Z
+Stopped at: Completed 04-04-PLAN.md (Phase 4 complete)
 Resume file: None
 
 ## Completed Phases
+
+### Phase 4: Queue Processor with Retry (Complete 2026-01-24)
+**Verification:** PASSED (all must-haves)
+**Commits:** e1e9adc → 517fa83 (2 commits in 04-04, 8 total in phase)
+**Key deliverables:**
+- Exponential backoff with jitter (5s base, 80s cap for standard; 30s base, 600s cap for PlexNotFound)
+- Circuit breaker with CLOSED/OPEN/HALF_OPEN states
+- Retry orchestration with crash-safe job metadata
+- DLQ monitoring: status logging on startup and every 10 jobs
+- Automatic DLQ cleanup using config retention days
+- 46 tests for retry components
 
 ### Phase 3: Plex API Client (Complete 2026-01-24)
 **Verification:** PASSED (all must-haves)
