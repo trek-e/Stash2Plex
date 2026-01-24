@@ -19,11 +19,13 @@ from queue.manager import QueueManager
 from queue.dlq import DeadLetterQueue
 from worker.processor import SyncWorker
 from hooks.handlers import on_scene_update
+from validation.config import validate_config, PlexSyncConfig
 
 # Globals (initialized in main)
 queue_manager = None
 dlq = None
 worker = None
+config: PlexSyncConfig = None
 
 
 def get_plugin_data_dir():
@@ -43,9 +45,99 @@ def get_plugin_data_dir():
     return data_dir
 
 
-def initialize():
-    """Initialize queue, DLQ, and worker."""
-    global queue_manager, dlq, worker
+def extract_config_from_input(input_data: dict) -> dict:
+    """
+    Extract Plex configuration from Stash input data.
+
+    Tries several locations where Stash might pass plugin config,
+    then falls back to environment variables.
+
+    Args:
+        input_data: Input data from Stash plugin protocol
+
+    Returns:
+        Dictionary with config values (may be empty if nothing found)
+    """
+    config_dict = {}
+
+    # Try Stash plugin settings locations
+    # Location 1: server_connection (some Stash versions)
+    if 'server_connection' in input_data:
+        conn = input_data['server_connection']
+        if 'plex_url' in conn:
+            config_dict['plex_url'] = conn['plex_url']
+        if 'plex_token' in conn:
+            config_dict['plex_token'] = conn['plex_token']
+
+    # Location 2: args.config (alternate location)
+    args = input_data.get('args', {})
+    if 'config' in args:
+        cfg = args['config']
+        if isinstance(cfg, dict):
+            config_dict.update(cfg)
+
+    # Location 3: pluginSettings (another Stash pattern)
+    if 'pluginSettings' in input_data:
+        settings = input_data['pluginSettings']
+        if isinstance(settings, dict):
+            for key in ['plex_url', 'plex_token', 'enabled', 'max_retries',
+                        'poll_interval', 'strict_mode']:
+                if key in settings:
+                    config_dict[key] = settings[key]
+
+    # Fallback to environment variables
+    if 'plex_url' not in config_dict:
+        env_url = os.getenv('PLEX_URL')
+        if env_url:
+            config_dict['plex_url'] = env_url
+
+    if 'plex_token' not in config_dict:
+        env_token = os.getenv('PLEX_TOKEN')
+        if env_token:
+            config_dict['plex_token'] = env_token
+
+    return config_dict
+
+
+def initialize(config_dict: dict = None):
+    """
+    Initialize queue, DLQ, and worker with validated configuration.
+
+    Args:
+        config_dict: Optional configuration dictionary. If not provided,
+                     will attempt to read from environment variables.
+
+    Raises:
+        SystemExit: If configuration validation fails
+    """
+    global queue_manager, dlq, worker, config
+
+    # Validate configuration
+    if config_dict is None:
+        config_dict = {}
+
+    # If no config provided, try environment variables as fallback
+    if not config_dict:
+        env_url = os.getenv('PLEX_URL')
+        env_token = os.getenv('PLEX_TOKEN')
+        if env_url:
+            config_dict['plex_url'] = env_url
+        if env_token:
+            config_dict['plex_token'] = env_token
+
+    validated_config, error = validate_config(config_dict)
+    if error:
+        error_msg = f"PlexSync configuration error: {error}"
+        print(f"[PlexSync] ERROR: {error_msg}", file=sys.stderr)
+        raise SystemExit(1)
+
+    config = validated_config
+    config.log_config()
+
+    # Check if plugin is disabled
+    if not config.enabled:
+        print("[PlexSync] Plugin is disabled via configuration")
+        return
 
     data_dir = get_plugin_data_dir()
     print(f"[PlexSync] Initializing with data directory: {data_dir}")
@@ -54,8 +146,8 @@ def initialize():
     queue_manager = QueueManager(data_dir)
     dlq = DeadLetterQueue(data_dir)
 
-    # Start background worker
-    worker = SyncWorker(queue_manager.get_queue(), dlq)
+    # Start background worker with config values
+    worker = SyncWorker(queue_manager.get_queue(), dlq, max_retries=config.max_retries)
     worker.start()
 
     print("[PlexSync] Initialization complete")
@@ -112,9 +204,16 @@ def main():
         sys.exit(1)
 
     # Initialize on first call
-    global queue_manager
+    global queue_manager, config
     if queue_manager is None:
-        initialize()
+        # Extract config from Stash input
+        config_dict = extract_config_from_input(input_data)
+        initialize(config_dict)
+
+    # Check if plugin is disabled (config may have loaded but plugin disabled)
+    if config and not config.enabled:
+        print(json.dumps({"output": "disabled"}))
+        return
 
     # Handle the hook
     if "args" in input_data and "hookContext" in input_data["args"]:
