@@ -10,7 +10,7 @@
 - [ ] **RTRY-01**: Failed Plex API calls retry with exponential backoff and jitter
 - [x] **RTRY-02**: Transient errors (network, 5xx, timeout) trigger retry; permanent errors (4xx except 429) do not
 - [ ] **RTRY-03**: Permanently failed operations go to dead letter queue for manual review
-- [ ] **RTRY-04**: All Plex API calls have explicit connect and read timeouts
+- [x] **RTRY-04**: All Plex API calls have explicit connect and read timeouts
 
 ### Queue & Persistence
 
@@ -26,7 +26,7 @@
 
 ### Matching & Late Updates
 
-- [ ] **MATCH-01**: Improved matching logic reduces false negatives when finding Plex items
+- [x] **MATCH-01**: Improved matching logic reduces false negatives when finding Plex items
 - [ ] **MATCH-02**: Late metadata updates in Stash trigger re-sync to Plex
 - [ ] **MATCH-03**: Matches scored with confidence; low-confidence matches logged for review
 
@@ -64,8 +64,8 @@
 | VALID-02 | Phase 2 | Complete |
 | VALID-03 | Phase 2 | Complete |
 | RTRY-02 | Phase 2 | Complete |
-| MATCH-01 | Phase 3 | Pending |
-| RTRY-04 | Phase 3 | Pending |
+| MATCH-01 | Phase 3 | Complete |
+| RTRY-04 | Phase 3 | Complete |
 | RTRY-01 | Phase 4 | Pending |
 | RTRY-03 | Phase 4 | Pending |
 | MATCH-02 | Phase 5 | Pending |
@@ -78,4 +78,4 @@
 
 ---
 *Requirements defined: 2025-01-24*
-*Last updated: 2026-01-24 after Phase 2 completion*
+*Last updated: 2026-01-24 after Phase 3 completion*
