@@ -46,10 +46,12 @@ Plans:
   3. Plugin configuration validated on load (required fields checked, types enforced)
   4. Errors classified as transient (retry) or permanent (DLQ) based on HTTP status and error type
   5. Hook handler completes in <100ms (non-blocking enqueue)
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 02-01: TBD
+- [ ] 02-01-PLAN.md - Sanitizers and error classification utilities
+- [ ] 02-02-PLAN.md - Metadata validation model and hook integration
+- [ ] 02-03-PLAN.md - Config validation and plugin init integration
 
 ### Phase 3: Plex API Client
 **Goal**: Reliable Plex communication with timeouts and improved scene matching
@@ -101,7 +103,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Persistent Queue Foundation | 3/3 | Complete | 2026-01-24 |
-| 2. Validation & Error Classification | 0/? | Not started | - |
+| 2. Validation & Error Classification | 0/3 | In Progress | - |
 | 3. Plex API Client | 0/? | Not started | - |
 | 4. Queue Processor with Retry | 0/? | Not started | - |
 | 5. Late Update Detection | 0/? | Not started | - |
