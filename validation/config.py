@@ -27,6 +27,7 @@ class PlexSyncConfig(BaseModel):
         strict_mode: If True, reject invalid metadata; if False, sanitize and continue (default: False)
         plex_connect_timeout: Connection timeout in seconds (default: 5.0, range: 1.0-30.0)
         plex_read_timeout: Read timeout in seconds (default: 30.0, range: 5.0-120.0)
+        dlq_retention_days: Days to retain failed jobs in DLQ (default: 30, range: 1-365)
     """
 
     # Required fields
@@ -42,6 +43,9 @@ class PlexSyncConfig(BaseModel):
     # Plex connection timeouts (in seconds)
     plex_connect_timeout: float = Field(default=5.0, ge=1.0, le=30.0)
     plex_read_timeout: float = Field(default=30.0, ge=5.0, le=120.0)
+
+    # DLQ settings
+    dlq_retention_days: int = Field(default=30, ge=1, le=365)
 
     @field_validator('plex_url', mode='after')
     @classmethod
@@ -74,7 +78,8 @@ class PlexSyncConfig(BaseModel):
             f"max_retries={self.max_retries}, enabled={self.enabled}, "
             f"strict_mode={self.strict_mode}, "
             f"connect_timeout={self.plex_connect_timeout}s, "
-            f"read_timeout={self.plex_read_timeout}s"
+            f"read_timeout={self.plex_read_timeout}s, "
+            f"dlq_retention_days={self.dlq_retention_days}"
         )
 
 
