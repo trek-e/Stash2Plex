@@ -25,6 +25,8 @@ class PlexSyncConfig(BaseModel):
         max_retries: Retry attempts before DLQ (default: 5, range: 1-20)
         poll_interval: Worker poll interval in seconds (default: 1.0, range: 0.1-60.0)
         strict_mode: If True, reject invalid metadata; if False, sanitize and continue (default: False)
+        plex_connect_timeout: Connection timeout in seconds (default: 5.0, range: 1.0-30.0)
+        plex_read_timeout: Read timeout in seconds (default: 30.0, range: 5.0-120.0)
     """
 
     # Required fields
@@ -36,6 +38,10 @@ class PlexSyncConfig(BaseModel):
     max_retries: int = Field(default=5, ge=1, le=20)
     poll_interval: float = Field(default=1.0, ge=0.1, le=60.0)
     strict_mode: bool = False
+
+    # Plex connection timeouts (in seconds)
+    plex_connect_timeout: float = Field(default=5.0, ge=1.0, le=30.0)
+    plex_read_timeout: float = Field(default=30.0, ge=5.0, le=120.0)
 
     @field_validator('plex_url', mode='after')
     @classmethod
@@ -66,7 +72,9 @@ class PlexSyncConfig(BaseModel):
         log.info(
             f"PlexSync config: url={self.plex_url}, token={masked}, "
             f"max_retries={self.max_retries}, enabled={self.enabled}, "
-            f"strict_mode={self.strict_mode}"
+            f"strict_mode={self.strict_mode}, "
+            f"connect_timeout={self.plex_connect_timeout}s, "
+            f"read_timeout={self.plex_read_timeout}s"
         )
 
 
