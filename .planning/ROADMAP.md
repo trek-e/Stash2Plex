@@ -110,5 +110,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 1. Persistent Queue Foundation | 3/3 | Complete | 2026-01-24 |
 | 2. Validation & Error Classification | 3/3 | Complete | 2026-01-24 |
 | 3. Plex API Client | 3/3 | Complete | 2026-01-24 |
-| 4. Queue Processor with Retry | 0/4 | Not started | - |
+| 4. Queue Processor with Retry | 0/4 | Planned | - |
 | 5. Late Update Detection | 0/? | Not started | - |
