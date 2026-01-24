@@ -57,25 +57,25 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| RTRY-01 | TBD | Pending |
-| RTRY-02 | TBD | Pending |
-| RTRY-03 | TBD | Pending |
-| RTRY-04 | TBD | Pending |
-| QUEUE-01 | TBD | Pending |
-| QUEUE-02 | TBD | Pending |
-| QUEUE-03 | TBD | Pending |
-| VALID-01 | TBD | Pending |
-| VALID-02 | TBD | Pending |
-| VALID-03 | TBD | Pending |
-| MATCH-01 | TBD | Pending |
-| MATCH-02 | TBD | Pending |
-| MATCH-03 | TBD | Pending |
+| QUEUE-01 | Phase 1 | Pending |
+| QUEUE-02 | Phase 1 | Pending |
+| QUEUE-03 | Phase 1 | Pending |
+| VALID-01 | Phase 2 | Pending |
+| VALID-02 | Phase 2 | Pending |
+| VALID-03 | Phase 2 | Pending |
+| RTRY-02 | Phase 2 | Pending |
+| MATCH-01 | Phase 3 | Pending |
+| RTRY-04 | Phase 3 | Pending |
+| RTRY-01 | Phase 4 | Pending |
+| RTRY-03 | Phase 4 | Pending |
+| MATCH-02 | Phase 5 | Pending |
+| MATCH-03 | Phase 5 | Pending |
 
 **Coverage:**
 - v1 requirements: 13 total
-- Mapped to phases: 0
-- Unmapped: 13 ⚠️
+- Mapped to phases: 13
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2025-01-24*
-*Last updated: 2025-01-24 after initial definition*
+*Last updated: 2026-01-24 after roadmap creation*
