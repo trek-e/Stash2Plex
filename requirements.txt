@@ -1,0 +1,2 @@
+persist-queue>=1.1.0
+stashapi
