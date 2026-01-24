@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2025-01-24)
 ## Current Position
 
 Phase: 4 of 5 (Queue Processor with Retry) - IN PROGRESS
-Plan: 2 of 4 in current phase
+Plan: 3 of 4 in current phase
 Status: In progress
-Last activity: 2026-01-24 — Completed 04-02-PLAN.md
+Last activity: 2026-01-24 — Completed 04-03-PLAN.md
 
-Progress: [███████████░] 73% (11/~15 plans)
+Progress: [████████████░] 80% (12/~15 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 11
+- Total plans completed: 12
 - Average duration: 2.6 min
-- Total execution time: 0.47 hours
+- Total execution time: 0.52 hours
 
 **By Phase:**
 
@@ -30,10 +30,10 @@ Progress: [███████████░] 73% (11/~15 plans)
 | 1. Persistent Queue Foundation | 3 | 9 min | 3 min |
 | 2. Validation & Error Classification | 3 | 7 min | 2.3 min |
 | 3. Plex API Client | 3 | 9 min | 3 min |
-| 4. Queue Processor with Retry | 2 | 4 min | 2 min |
+| 4. Queue Processor with Retry | 3 | 7 min | 2.3 min |
 
 **Recent Trend:**
-- Last 5 plans: 03-02 (3min), 03-03 (4min), 04-01 (2min), 04-02 (2min)
+- Last 5 plans: 03-03 (4min), 04-01 (2min), 04-02 (2min), 04-03 (3min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -44,6 +44,12 @@ Progress: [███████████░] 73% (11/~15 plans)
 
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
+
+**From 04-03 (Retry Orchestration):**
+- Re-enqueue pattern: ack + put instead of nack for metadata updates
+- Small 0.1s delay after nack to avoid tight loop on not-ready jobs
+- Permanent errors don't count against circuit breaker
+- Job metadata pattern: retry_count, next_retry_at, last_error_type in job dict
 
 **From 04-02 (Circuit Breaker & DLQ Config):**
 - Default failure_threshold=5 before circuit opens
@@ -123,8 +129,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-24T17:14:23Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-01-24T17:20:37Z
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None
 
 ## Completed Phases
