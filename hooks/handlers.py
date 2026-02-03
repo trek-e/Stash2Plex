@@ -84,6 +84,49 @@ def is_scene_pending(scene_id: int) -> bool:
     return scene_id in _pending_scene_ids
 
 
+def is_scan_running(stash) -> bool:
+    """
+    Check if a library scan or generate job is currently running.
+
+    Args:
+        stash: StashInterface instance
+
+    Returns:
+        True if scan/generate job is active
+    """
+    if not stash:
+        return False
+
+    try:
+        # Query active jobs
+        result = stash.call_GQL("""
+            query {
+                jobQueue {
+                    id
+                    type
+                    status
+                    description
+                }
+            }
+        """)
+
+        jobs = result.get('jobQueue', []) if result else []
+
+        # Check for scan/generate jobs
+        scan_types = ['SCAN', 'AUTO_TAG', 'GENERATE', 'IDENTIFY']
+        for job in jobs:
+            job_type = job.get('type', '').upper()
+            status = job.get('status', '').upper()
+            if status in ('RUNNING', 'READY') and any(t in job_type for t in scan_types):
+                log_trace(f"Scan job active: {job.get('description', job_type)}")
+                return True
+
+    except Exception as e:
+        log_trace(f"Could not check job queue: {e}")
+
+    return False
+
+
 def requires_plex_sync(update_data: dict) -> bool:
     """
     Check if update contains sync-worthy changes.
@@ -146,6 +189,11 @@ def on_scene_update(
         True if job was enqueued, False if filtered out or validation failed
     """
     start = time.time()
+
+    # Skip if scan/generate job is running
+    if is_scan_running(stash):
+        log_trace(f"Scene {scene_id} skipped - scan job active")
+        return False
 
     # Filter non-sync events before enqueueing
     if not requires_plex_sync(update_data):
