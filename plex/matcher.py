@@ -19,6 +19,52 @@ if TYPE_CHECKING:
 logger = logging.getLogger('PlexSync.plex.matcher')
 
 
+def _item_has_file(item, path_or_filename: str, exact: bool = True, case_insensitive: bool = False) -> bool:
+    """
+    Check if a Plex item has a media file matching the given path or filename.
+
+    Args:
+        item: Plex video item
+        path_or_filename: Full path or just filename to match
+        exact: If True, match full path; if False, match filename only
+        case_insensitive: If True, compare case-insensitively
+
+    Returns:
+        True if item has matching file
+    """
+    try:
+        if not hasattr(item, 'media') or not item.media:
+            return False
+
+        compare_val = path_or_filename.lower() if case_insensitive else path_or_filename
+
+        for media in item.media:
+            if not hasattr(media, 'parts') or not media.parts:
+                continue
+            for part in media.parts:
+                if not hasattr(part, 'file') or not part.file:
+                    continue
+
+                file_path = part.file
+                if case_insensitive:
+                    file_path = file_path.lower()
+
+                if exact:
+                    if file_path == compare_val:
+                        return True
+                else:
+                    # Match filename only
+                    if file_path.endswith('/' + compare_val) or file_path.endswith('\\' + compare_val):
+                        return True
+                    # Also check without path separator for edge cases
+                    if Path(file_path).name == (Path(path_or_filename).name if not case_insensitive else Path(path_or_filename).name.lower()):
+                        return True
+    except Exception as e:
+        logger.debug(f"Error checking item files: {e}")
+
+    return False
+
+
 class MatchConfidence(Enum):
     HIGH = "high"   # Single unique match - auto-sync safe
     LOW = "low"     # Multiple candidates - needs review
@@ -69,45 +115,51 @@ def find_plex_item_by_path(
             search_path = plex_path_prefix + stash_path[len(stash_path_prefix):]
             logger.debug(f"Path mapped: {stash_path} -> {search_path}")
 
-    # Strategy 1: Exact path match (most accurate)
-    try:
-        results = library.search(Media__Part__file=search_path)
-        if results:
-            logger.debug(f"Found by exact path: {search_path}")
-            return results[0]
-    except Exception as e:
-        logger.warning(f"Exact path search failed: {e}")
+    # Strategy 1: Search by title derived from filename, then verify file path
+    # Extract title from filename (remove extension)
+    title_search = path.stem
+    # Clean up common suffixes like resolution, year, etc.
+    import re
+    title_search = re.sub(r'\s*[-_]\s*(WEBDL|WEB-DL|HDTV|BluRay|BDRip|DVDRip|720p|1080p|2160p|4K).*$', '', title_search, flags=re.IGNORECASE)
 
-    # Strategy 2: Filename-only match (handles directory differences)
-    # Use endswith with leading slash to match full filename only
     try:
-        results = library.search(Media__Part__file__endswith=f"/{filename}")
-        if len(results) == 1:
-            logger.debug(f"Found by filename: {filename}")
-            return results[0]
-        elif len(results) > 1:
+        # Search by title
+        results = library.search(title=title_search)
+        for item in results:
+            # Check if any media file matches our path
+            if _item_has_file(item, search_path):
+                logger.debug(f"Found by title+path match: {title_search}")
+                return item
+            if _item_has_file(item, filename, exact=False):
+                logger.debug(f"Found by title+filename match: {filename}")
+                return item
+    except Exception as e:
+        logger.warning(f"Title search failed: {e}")
+
+    # Strategy 2: Iterate through all items (slower but comprehensive)
+    try:
+        # Only do this for smaller libraries or as fallback
+        all_items = library.all()
+        matches = []
+        filename_lower = filename.lower()
+
+        for item in all_items:
+            if _item_has_file(item, search_path):
+                logger.debug(f"Found by exact path iteration: {search_path}")
+                return item
+            if _item_has_file(item, filename_lower, exact=False, case_insensitive=True):
+                matches.append(item)
+
+        if len(matches) == 1:
+            logger.debug(f"Found by filename iteration: {filename}")
+            return matches[0]
+        elif len(matches) > 1:
             logger.warning(
                 f"Ambiguous filename match for '{filename}': "
-                f"{len(results)} items found, skipping"
-            )
-            # Don't return - try case-insensitive as last resort
-    except Exception as e:
-        logger.warning(f"Filename search failed: {e}")
-
-    # Strategy 3: Case-insensitive filename match (Windows/macOS)
-    # Note: __iendswith is case-insensitive endswith
-    try:
-        results = library.search(Media__Part__file__iendswith=f"/{filename.lower()}")
-        if len(results) == 1:
-            logger.debug(f"Found by case-insensitive filename: {filename}")
-            return results[0]
-        elif len(results) > 1:
-            logger.warning(
-                f"Ambiguous case-insensitive match for '{filename}': "
-                f"{len(results)} items found"
+                f"{len(matches)} items found, skipping"
             )
     except Exception as e:
-        logger.warning(f"Case-insensitive search failed: {e}")
+        logger.warning(f"Iteration search failed: {e}")
 
     # No match found
     logger.debug(f"No Plex item found for path: {stash_path}")
@@ -157,33 +209,40 @@ def find_plex_items_with_confidence(
 
     # Collect all matches from each strategy
     candidates = []
+    import re
 
-    # Strategy 1: Exact path match (most accurate)
-    try:
-        results = library.search(Media__Part__file=search_path)
-        if results:
-            candidates.extend(results)
-            logger.debug(f"Found {len(results)} by exact path: {search_path}")
-    except Exception as e:
-        logger.warning(f"Exact path search failed: {e}")
+    # Strategy 1: Search by title derived from filename, then verify file path
+    title_search = path.stem
+    # Clean up common suffixes
+    title_search = re.sub(r'\s*[-_]\s*(WEBDL|WEB-DL|HDTV|BluRay|BDRip|DVDRip|720p|1080p|2160p|4K).*$', '', title_search, flags=re.IGNORECASE)
 
-    # Strategy 2: Filename-only match (handles directory differences)
     try:
-        results = library.search(Media__Part__file__endswith=f"/{filename}")
-        if results:
-            candidates.extend(results)
-            logger.debug(f"Found {len(results)} by filename: {filename}")
+        results = library.search(title=title_search)
+        for item in results:
+            if _item_has_file(item, search_path):
+                candidates.append(item)
+                logger.debug(f"Found by title+exact path: {search_path}")
+            elif _item_has_file(item, filename, exact=False):
+                candidates.append(item)
+                logger.debug(f"Found by title+filename: {filename}")
     except Exception as e:
-        logger.warning(f"Filename search failed: {e}")
+        logger.warning(f"Title search failed: {e}")
 
-    # Strategy 3: Case-insensitive filename match (Windows/macOS)
-    try:
-        results = library.search(Media__Part__file__iendswith=f"/{filename.lower()}")
-        if results:
-            candidates.extend(results)
-            logger.debug(f"Found {len(results)} by case-insensitive filename: {filename}")
-    except Exception as e:
-        logger.warning(f"Case-insensitive search failed: {e}")
+    # Strategy 2: Iterate through all items if no matches yet
+    if not candidates:
+        try:
+            all_items = library.all()
+            filename_lower = filename.lower()
+
+            for item in all_items:
+                if _item_has_file(item, search_path):
+                    candidates.append(item)
+                    logger.debug(f"Found by exact path iteration: {search_path}")
+                elif _item_has_file(item, filename_lower, exact=False, case_insensitive=True):
+                    candidates.append(item)
+                    logger.debug(f"Found by filename iteration: {filename}")
+        except Exception as e:
+            logger.warning(f"Iteration search failed: {e}")
 
     # Deduplicate candidates (same item might match multiple strategies)
     # Use ratingKey as unique identifier
