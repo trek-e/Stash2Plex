@@ -64,7 +64,7 @@ Plans:
 
 ### Phase 3: Integration Tests
 **Goal:** End-to-end tests with mocked external services
-**Plans:** 3 plans
+**Plans:** 4 plans
 
 - Full sync workflow with mocked Plex/Stash
 - Error scenarios (Plex down, Stash timeout, etc.)
@@ -75,8 +75,9 @@ Plans:
 
 Plans:
 - [ ] 03-01-PLAN.md — Test infrastructure (freezegun, integration fixtures)
-- [ ] 03-02-PLAN.md — Sync workflow and error scenario tests
+- [ ] 03-02-PLAN.md — Sync workflow tests (happy path metadata sync)
 - [ ] 03-03-PLAN.md — Queue persistence and circuit breaker tests
+- [ ] 03-04-PLAN.md — Error scenario tests (Plex down, not found, permanent errors)
 
 ---
 
@@ -261,7 +262,7 @@ Note: Phase 2.1 (Bugfix) can run in parallel with Phase 3 - it's independent.
 | 1. Test Infrastructure | Medium | 2 |
 | 2. Core Unit Tests | High | 4 |
 | 2.1. Plex Device Registration | Low | 1 |
-| 3. Integration Tests | High | 3 |
+| 3. Integration Tests | High | 4 |
 | 4. User Documentation | Medium | 2-3 |
 | 5. Architecture Docs | Medium | 2-3 |
 | 6. API Documentation | Low | 1-2 |
@@ -273,7 +274,7 @@ Note: Phase 2.1 (Bugfix) can run in parallel with Phase 3 - it's independent.
 | 12. Process Queue Button | Low | 1-2 |
 | 13. Dynamic Queue Timeout | Medium | 1-2 |
 
-**Total:** ~26-39 plans across 14 phases
+**Total:** ~27-40 plans across 14 phases
 
 ---
 *Created: 2026-02-03*
