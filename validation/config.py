@@ -47,6 +47,16 @@ class PlexSyncConfig(BaseModel):
     # DLQ settings
     dlq_retention_days: int = Field(default=30, ge=1, le=365)
 
+    # Late update detection flags
+    strict_matching: bool = Field(
+        default=True,
+        description="Skip sync on low-confidence matches (safer). False = sync anyway with warning logged."
+    )
+    preserve_plex_edits: bool = Field(
+        default=False,
+        description="Preserve manual Plex edits. True = only update empty fields, False = Stash always wins."
+    )
+
     @field_validator('plex_url', mode='after')
     @classmethod
     def validate_plex_url(cls, v: str) -> str:
@@ -67,6 +77,21 @@ class PlexSyncConfig(BaseModel):
             raise ValueError('plex_token appears invalid (too short)')
         return v
 
+    @field_validator('strict_matching', 'preserve_plex_edits', mode='before')
+    @classmethod
+    def validate_booleans(cls, v):
+        """Ensure boolean fields are actual booleans, not truthy strings."""
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            lower = v.lower()
+            if lower in ('true', '1', 'yes'):
+                return True
+            if lower in ('false', '0', 'no'):
+                return False
+            raise ValueError(f"Invalid boolean value: {v}")
+        raise ValueError(f"Expected boolean, got {type(v).__name__}")
+
     def log_config(self) -> None:
         """Log configuration with masked token for security."""
         if len(self.plex_token) > 8:
@@ -79,7 +104,9 @@ class PlexSyncConfig(BaseModel):
             f"strict_mode={self.strict_mode}, "
             f"connect_timeout={self.plex_connect_timeout}s, "
             f"read_timeout={self.plex_read_timeout}s, "
-            f"dlq_retention_days={self.dlq_retention_days}"
+            f"dlq_retention_days={self.dlq_retention_days}, "
+            f"strict_matching={self.strict_matching}, "
+            f"preserve_plex_edits={self.preserve_plex_edits}"
         )
 
 
