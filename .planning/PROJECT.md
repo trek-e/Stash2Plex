@@ -17,18 +17,42 @@ Reliable sync: when metadata changes in Stash, it eventually reaches Plex — ev
 - [x] Input sanitization — validate/clean data before sending to Plex API
 - [x] Improved matching logic — confidence scoring, reduced false negatives
 
-### Active
+### Active (v1.1)
 
-(None — v1.0 complete, ready for next milestone)
+**Testing (thorough coverage):**
+- [ ] pytest infrastructure with fixtures for Plex/Stash mocking
+- [ ] Unit tests for all core modules (queue, worker, matching, validation)
+- [ ] Integration tests with mocked Plex/Stash APIs
+- [ ] Coverage reporting and CI integration
 
-### Out of Scope
+**Documentation (thorough coverage):**
+- [ ] User guide: installation, configuration, troubleshooting
+- [ ] Architecture docs: component diagrams, data flow, design decisions
+- [ ] API reference: auto-generated from docstrings
+
+**Performance:**
+- [ ] Plex library caching to reduce API calls
+- [ ] Optimized matching algorithms
+- [ ] Batch operations where applicable
+
+**Observability:**
+- [ ] Structured logging improvements
+- [ ] Sync statistics and metrics
+- [ ] Error reporting enhancements
+
+**Reliability:**
+- [ ] Edge case handling (unicode, special characters, long titles)
+- [ ] Recovery improvements beyond current DLQ system
+
+### Out of Scope (v1.1)
 
 - Plex → Stash sync — Stash remains the primary metadata source
-- New features unrelated to reliability/security — focus is fixing existing functionality
+- New metadata fields — deferred to v1.2+
+- Bi-directional sync — deferred to v1.2+
 
 ## Context
 
-**Current state:** PlexSync v1.0 complete. Queue-based architecture with SQLite persistence, exponential backoff, circuit breaker, confidence-scored matching, and late update detection.
+**Current state:** PlexSync v1.0 shipped. Solid queue-based architecture working in production. v1.1 focuses on foundation hardening — comprehensive tests, thorough documentation, then performance/observability/reliability improvements.
 
 **Source:** https://github.com/stashapp/CommunityScripts/tree/main/plugins/PlexSync
 
@@ -54,6 +78,7 @@ Reliable sync: when metadata changes in Stash, it eventually reaches Plex — ev
 | Version | Status | Date | Notes |
 |---------|--------|------|-------|
 | v1.0 | Complete | 2026-02-03 | 5 phases, 16 plans, 76 commits |
+| v1.1 | Active | — | Foundation hardening: tests, docs, performance |
 
 ---
-*Last updated: 2026-02-03 after v1.0 completion*
+*Last updated: 2026-02-03 — v1.1 milestone started*
