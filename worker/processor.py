@@ -357,9 +357,22 @@ class SyncWorker:
         try:
             client = self._get_plex_client()
 
-            # Search all library sections, collect ALL candidates
+            # Get library section(s) to search
+            if self.config.plex_library:
+                # Search only the configured library
+                try:
+                    sections = [client.server.library.section(self.config.plex_library)]
+                    print(f"[PlexSync Worker] Searching library: {self.config.plex_library}", file=sys.stderr)
+                except Exception as e:
+                    raise PermanentError(f"Library '{self.config.plex_library}' not found: {e}")
+            else:
+                # Search all libraries (slow)
+                sections = client.server.library.sections()
+                print(f"[PlexSync Worker] Searching all {len(sections)} libraries (set plex_library to speed up)", file=sys.stderr)
+
+            # Search library sections, collect ALL candidates
             all_candidates = []
-            for section in client.server.library.sections():
+            for section in sections:
                 try:
                     confidence, item, candidates = find_plex_items_with_confidence(section, file_path)
                     all_candidates.extend(candidates)

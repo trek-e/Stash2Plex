@@ -47,6 +47,12 @@ class PlexSyncConfig(BaseModel):
     # DLQ settings
     dlq_retention_days: int = Field(default=30, ge=1, le=365)
 
+    # Plex library to sync (required - e.g., "Adult", "Movies")
+    plex_library: Optional[str] = Field(
+        default=None,
+        description="Name of Plex library section to sync. If not set, searches all libraries (slow)."
+    )
+
     # Late update detection flags
     strict_matching: bool = Field(
         default=True,
