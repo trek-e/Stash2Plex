@@ -10,14 +10,19 @@ Implements reliable job processing with acknowledgment workflow:
 
 import time
 import threading
+import logging
 from typing import Optional, TYPE_CHECKING
 
 try:
-    from queue.operations import get_pending, ack_job, nack_job, fail_job, enqueue
+    from queue.operations import get_pending, ack_job, nack_job, fail_job, enqueue, save_sync_timestamp
     from queue.dlq import DeadLetterQueue
+    from hooks.handlers import unmark_scene_pending
 except ImportError:
-    get_pending = ack_job = nack_job = fail_job = enqueue = None
+    get_pending = ack_job = nack_job = fail_job = enqueue = save_sync_timestamp = None
     DeadLetterQueue = None
+    unmark_scene_pending = None
+
+logger = logging.getLogger('PlexSync.worker')
 
 if TYPE_CHECKING:
     from validation.config import PlexSyncConfig
@@ -50,6 +55,7 @@ class SyncWorker:
         queue,
         dlq: 'DeadLetterQueue',
         config: 'PlexSyncConfig',
+        data_dir: Optional[str] = None,
         max_retries: int = 5,
     ):
         """
@@ -59,11 +65,13 @@ class SyncWorker:
             queue: SQLiteAckQueue instance
             dlq: DeadLetterQueue for permanently failed jobs
             config: PlexSyncConfig with Plex URL, token, and timeouts
+            data_dir: Plugin data directory for sync timestamp updates
             max_retries: Maximum retry attempts before moving to DLQ (default for standard errors)
         """
         self.queue = queue
         self.dlq = dlq
         self.config = config
+        self.data_dir = data_dir
         self.max_retries = max_retries
         self.running = False
         self.thread: Optional[threading.Thread] = None
@@ -334,17 +342,10 @@ class SyncWorker:
             TransientError: For retry-able errors (network, timeout)
             PermanentError: For permanent failures (missing path, bad data)
         """
-        # Import Plex exceptions lazily to avoid circular import
-        from plex.exceptions import (
-            PlexTemporaryError,
-            PlexPermanentError,
-            PlexNotFound,
-            translate_plex_exception,
-        )
-        from plex.matcher import find_plex_item_by_path
+        from plex.exceptions import PlexTemporaryError, PlexPermanentError, PlexNotFound, translate_plex_exception
+        from plex.matcher import find_plex_items_with_confidence, MatchConfidence
 
         scene_id = job.get('scene_id')
-        update_type = job.get('update_type')
         data = job.get('data', {})
         file_path = data.get('path')
 
@@ -352,30 +353,66 @@ class SyncWorker:
             raise PermanentError(f"Job {scene_id} missing file path")
 
         try:
-            # Get Plex client (lazy init)
             client = self._get_plex_client()
 
-            # Search all library sections to find the item
-            plex_item = None
+            # Search all library sections, collect ALL candidates
+            all_candidates = []
             for section in client.server.library.sections():
-                plex_item = find_plex_item_by_path(section, file_path)
-                if plex_item:
-                    break
+                try:
+                    confidence, item, candidates = find_plex_items_with_confidence(section, file_path)
+                    all_candidates.extend(candidates)
+                except PlexNotFound:
+                    continue  # No match in this section, try next
 
-            if not plex_item:
+            # Deduplicate candidates (same item might be in multiple sections)
+            seen_keys = set()
+            unique_candidates = []
+            for c in all_candidates:
+                if c.key not in seen_keys:
+                    seen_keys.add(c.key)
+                    unique_candidates.append(c)
+
+            # Apply confidence scoring
+            if len(unique_candidates) == 0:
                 raise PlexNotFound(f"Could not find Plex item for path: {file_path}")
-
-            # Update metadata based on update_type
-            if update_type == 'metadata':
+            elif len(unique_candidates) == 1:
+                # HIGH confidence - single unique match
+                plex_item = unique_candidates[0]
                 self._update_metadata(plex_item, data)
             else:
-                print(f"[PlexSync Worker] Unknown update_type: {update_type}")
+                # LOW confidence - multiple matches
+                paths = [c.media[0].parts[0].file if c.media and c.media[0].parts else c.key for c in unique_candidates]
+                if self.config.strict_matching:
+                    logger.warning(
+                        f"[PlexSync] LOW CONFIDENCE SKIPPED: scene {scene_id}\n"
+                        f"  Stash path: {file_path}\n"
+                        f"  Plex candidates ({len(unique_candidates)}): {paths}"
+                    )
+                    raise PermanentError(f"Low confidence match skipped (strict_matching=true)")
+                else:
+                    plex_item = unique_candidates[0]
+                    logger.warning(
+                        f"[PlexSync] LOW CONFIDENCE SYNCED: scene {scene_id}\n"
+                        f"  Chosen: {paths[0]}\n"
+                        f"  Other candidates: {paths[1:]}"
+                    )
+                    self._update_metadata(plex_item, data)
+
+            # Update sync timestamp after successful sync
+            if self.data_dir is not None:
+                save_sync_timestamp(self.data_dir, scene_id, time.time())
+
+            # Remove from pending set (always, even on failure - will be re-added on retry)
+            if unmark_scene_pending is not None:
+                unmark_scene_pending(scene_id)
 
         except (PlexTemporaryError, PlexPermanentError, PlexNotFound):
-            # Re-raise already classified exceptions
+            if unmark_scene_pending is not None:
+                unmark_scene_pending(scene_id)  # Allow re-enqueue on next hook
             raise
         except Exception as e:
-            # Translate unknown Plex/network errors to our hierarchy
+            if unmark_scene_pending is not None:
+                unmark_scene_pending(scene_id)
             raise translate_plex_exception(e)
 
     def _update_metadata(self, plex_item, data: dict):
@@ -389,19 +426,36 @@ class SyncWorker:
             plex_item: Plex Video item to update
             data: Dict containing metadata fields (title, studio, etc.)
         """
-        # Build edits dict for plex_item.edit()
         edits = {}
-        if 'title' in data:
-            edits['title.value'] = data['title']
-        if 'studio' in data:
-            edits['studio.value'] = data['studio']
-        if 'summary' in data:
-            edits['summary.value'] = data['summary']
-        if 'tagline' in data:
-            edits['tagline.value'] = data['tagline']
-        # Add more fields as needed in future phases
+
+        if self.config.preserve_plex_edits:
+            # Only update fields that are None or empty string in Plex
+            # Simplified logic: any existing value = preserve it
+            if 'title' in data:
+                if not plex_item.title:  # None or empty string
+                    edits['title.value'] = data['title']
+            if 'studio' in data:
+                if not plex_item.studio:
+                    edits['studio.value'] = data['studio']
+            if 'summary' in data:
+                if not plex_item.summary:
+                    edits['summary.value'] = data['summary']
+            if 'tagline' in data:
+                if not getattr(plex_item, 'tagline', None):
+                    edits['tagline.value'] = data['tagline']
+        else:
+            # Stash always wins - overwrite all fields
+            if 'title' in data:
+                edits['title.value'] = data['title']
+            if 'studio' in data:
+                edits['studio.value'] = data['studio']
+            if 'summary' in data:
+                edits['summary.value'] = data['summary']
+            if 'tagline' in data:
+                edits['tagline.value'] = data['tagline']
 
         if edits:
             plex_item.edit(**edits)
             plex_item.reload()
-            print(f"[PlexSync Worker] Updated metadata for: {plex_item.title}")
+            mode = "preserved" if self.config.preserve_plex_edits else "overwrite"
+            print(f"[PlexSync Worker] Updated metadata ({mode} mode): {plex_item.title}")
