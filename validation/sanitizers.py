@@ -10,6 +10,8 @@ import unicodedata
 from typing import Optional
 import logging
 
+from validation.limits import MAX_TITLE_LENGTH
+
 
 # Mapping for smart quote conversion to ASCII equivalents
 # Unicode left/right double quotes -> straight double quote
@@ -27,10 +29,42 @@ QUOTE_MAP = str.maketrans({
 })
 
 
+def strip_emojis(text: str) -> str:
+    """
+    Remove emoji characters from text.
+
+    Removes Unicode characters in the 'So' (Symbol, Other) category,
+    which includes most emoji characters. This can help prevent potential
+    display or encoding issues in Plex.
+
+    Args:
+        text: The text to process
+
+    Returns:
+        Text with emoji characters removed
+
+    Example:
+        >>> strip_emojis("Hello World")
+        'Hello World'
+        >>> strip_emojis("Test")
+        'Test'
+    """
+    if not text:
+        return ''
+
+    # Remove characters in the 'So' (Symbol, Other) category
+    # This category contains most emoji characters
+    return ''.join(
+        char for char in text
+        if unicodedata.category(char) != 'So'
+    )
+
+
 def sanitize_for_plex(
     text: str,
-    max_length: int = 255,
-    logger: Optional[logging.Logger] = None
+    max_length: int = MAX_TITLE_LENGTH,
+    logger: Optional[logging.Logger] = None,
+    strip_emoji: bool = False
 ) -> str:
     """
     Sanitize text for safe use with Plex API.
@@ -39,14 +73,16 @@ def sanitize_for_plex(
     1. Returns empty string if text is None or empty
     2. Normalizes Unicode to NFC form
     3. Removes control characters (Cc) and format characters (Cf)
-    4. Converts smart quotes and dashes to ASCII equivalents
-    5. Collapses multiple whitespace to single spaces
-    6. Truncates at max_length, preferring word boundaries
+    4. Optionally removes emoji characters (if strip_emoji=True)
+    5. Converts smart quotes and dashes to ASCII equivalents
+    6. Collapses multiple whitespace to single spaces
+    7. Truncates at max_length, preferring word boundaries
 
     Args:
         text: The text to sanitize
         max_length: Maximum length (0 = no limit). Default 255.
         logger: Optional logger for debug output
+        strip_emoji: If True, remove emoji characters. Default False.
 
     Returns:
         Sanitized text string
@@ -66,6 +102,10 @@ def sanitize_for_plex(
         char for char in text
         if unicodedata.category(char) not in ('Cc', 'Cf')
     )
+
+    # Optionally remove emoji characters (Symbol, Other category)
+    if strip_emoji:
+        text = strip_emojis(text)
 
     # Convert smart quotes and dashes to ASCII equivalents
     text = text.translate(QUOTE_MAP)

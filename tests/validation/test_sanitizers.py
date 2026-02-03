@@ -2,12 +2,12 @@
 Tests for sanitize_for_plex function.
 
 Tests text sanitization including control character removal, smart quote
-conversion, whitespace normalization, and truncation behavior.
+conversion, whitespace normalization, truncation behavior, and emoji handling.
 """
 
 import pytest
 
-from validation.sanitizers import sanitize_for_plex
+from validation.sanitizers import sanitize_for_plex, strip_emojis
 
 
 class TestSanitizeForPlexBasicInput:
@@ -298,4 +298,131 @@ class TestSanitizeForPlexEdgeCases:
         """Text exactly at max_length is unchanged."""
         text = "x" * 255
         result = sanitize_for_plex(text, max_length=255)
+        assert len(result) == 255
+
+
+class TestStripEmojis:
+    """Tests for strip_emojis function."""
+
+    def test_returns_empty_for_none(self):
+        """None input returns empty string."""
+        assert strip_emojis(None) == ""
+
+    def test_returns_empty_for_empty_string(self):
+        """Empty string returns empty string."""
+        assert strip_emojis("") == ""
+
+    def test_preserves_normal_text(self):
+        """Normal ASCII text is unchanged."""
+        assert strip_emojis("Hello World") == "Hello World"
+
+    def test_preserves_unicode_letters(self):
+        """Unicode letters are preserved."""
+        assert strip_emojis("Cafe") == "Cafe"
+        assert strip_emojis("Bonjour") == "Bonjour"
+
+    def test_removes_face_emoji(self):
+        """Face emojis are removed."""
+        # U+1F600 GRINNING FACE is in 'So' category
+        result = strip_emojis("Hello \U0001F600 World")
+        assert "\U0001F600" not in result
+        # Ensure text content is preserved
+        assert "Hello" in result
+        assert "World" in result
+
+    def test_removes_common_emojis(self):
+        """Common emojis are removed."""
+        # U+1F389 PARTY POPPER, U+1F525 FIRE are in 'So' category
+        result = strip_emojis("Test \U0001F389 \U0001F525 symbols")
+        assert "\U0001F389" not in result
+        assert "\U0001F525" not in result
+        assert "Test" in result
+        assert "symbols" in result
+
+    def test_removes_symbol_emojis(self):
+        """Symbol emojis (hearts, stars, etc) are removed."""
+        # U+2B50 WHITE MEDIUM STAR is in 'So' category
+        text = "Star \u2B50 text"
+        result = strip_emojis(text)
+        assert "\u2B50" not in result
+        assert "Star" in result
+        assert "text" in result
+
+    def test_preserves_numbers_and_punctuation(self):
+        """Numbers and punctuation are preserved."""
+        assert strip_emojis("Test 123!") == "Test 123!"
+        assert strip_emojis("Hello, World.") == "Hello, World."
+
+    def test_removes_flag_emojis(self):
+        """Flag emojis are removed."""
+        # U+1F1FA U+1F1F8 is US flag (regional indicator symbols)
+        # Regional indicators are in 'So' category
+        result = strip_emojis("USA \U0001F1FA\U0001F1F8 text")
+        assert "\U0001F1FA" not in result
+        assert "\U0001F1F8" not in result
+        assert "text" in result
+
+    def test_only_emojis_returns_empty(self):
+        """String of only emojis returns empty."""
+        # U+1F600 U+1F389 U+2B50 - all 'So' category
+        result = strip_emojis("\U0001F600\U0001F389\u2B50")
+        assert result == ""
+
+
+class TestSanitizeForPlexEmojiHandling:
+    """Tests for emoji handling in sanitize_for_plex."""
+
+    def test_emojis_preserved_by_default(self):
+        """Emojis are preserved when strip_emoji=False (default)."""
+        # Default behavior preserves emojis
+        # U+1F600 GRINNING FACE
+        result = sanitize_for_plex("Hello \U0001F600 World")
+        # The emoji should still be there since strip_emoji defaults to False
+        # and emojis are not in Cc/Cf categories
+        assert "Hello" in result
+        assert "World" in result
+        assert "\U0001F600" in result
+
+    def test_emojis_removed_when_strip_emoji_true(self):
+        """Emojis are removed when strip_emoji=True."""
+        # U+1F600 GRINNING FACE
+        result = sanitize_for_plex("Hello \U0001F600 World", strip_emoji=True)
+        assert "\U0001F600" not in result
+        assert "Hello" in result
+        assert "World" in result
+
+    def test_strip_emoji_false_explicitly(self):
+        """Emojis preserved when strip_emoji=False explicitly."""
+        # U+2B50 WHITE MEDIUM STAR
+        result = sanitize_for_plex("Test \u2B50", strip_emoji=False)
+        assert "Test" in result
+        # The star in 'So' is preserved when strip_emoji=False
+        assert "\u2B50" in result
+
+    def test_emoji_stripping_combined_with_other_sanitization(self):
+        """Emoji stripping works with other sanitization steps."""
+        # Text with emoji, control chars (U+1F525 FIRE)
+        text = "Hello\x00World \U0001F525"
+        result = sanitize_for_plex(text, strip_emoji=True)
+        # Control char removed
+        assert "\x00" not in result
+        # Emoji removed
+        assert "\U0001F525" not in result
+        # Text preserved
+        assert "Hello" in result
+        assert "World" in result
+
+    def test_emoji_stripping_with_truncation(self):
+        """Emoji stripping works with max_length truncation."""
+        # Long text with emojis (U+2B50 WHITE MEDIUM STAR)
+        text = "\u2B50 " * 100 + "x" * 200
+        result = sanitize_for_plex(text, max_length=255, strip_emoji=True)
+        assert len(result) <= 255
+        assert "\u2B50" not in result
+
+    def test_default_max_length_unchanged_after_emoji_feature(self):
+        """Default max_length is still 255 after adding emoji feature."""
+        # Verify the default still works
+        text = "x" * 300
+        result = sanitize_for_plex(text)
         assert len(result) == 255
