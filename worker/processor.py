@@ -137,6 +137,40 @@ class SyncWorker:
                     f"{entry['error_type']}: {entry['error_message'][:80]}"
                 )
 
+    def _log_batch_summary(self):
+        """Log periodic summary of sync operations with JSON stats."""
+        import json
+
+        stats = self._stats
+
+        # Human-readable summary line
+        log_info(
+            f"Sync summary: {stats.jobs_succeeded}/{stats.jobs_processed} succeeded "
+            f"({stats.success_rate:.1f}%), avg {stats.avg_processing_time*1000:.0f}ms, "
+            f"confidence: {stats.high_confidence_matches} high / {stats.low_confidence_matches} low"
+        )
+
+        # JSON batch summary for machine parsing
+        stats_dict = {
+            "processed": stats.jobs_processed,
+            "succeeded": stats.jobs_succeeded,
+            "failed": stats.jobs_failed,
+            "to_dlq": stats.jobs_to_dlq,
+            "success_rate": f"{stats.success_rate:.1f}%",
+            "avg_time_ms": int(stats.avg_processing_time * 1000),
+            "high_confidence": stats.high_confidence_matches,
+            "low_confidence": stats.low_confidence_matches,
+            "errors_by_type": stats.errors_by_type,
+        }
+        log_info(f"Stats: {json.dumps(stats_dict)}")
+
+        # DLQ summary if items present (using get_error_summary method)
+        dlq_summary = self.dlq.get_error_summary()
+        if dlq_summary:
+            total = sum(dlq_summary.values())
+            breakdown = ", ".join(f"{count} {err_type}" for err_type, count in dlq_summary.items())
+            log_warn(f"DLQ contains {total} items: {breakdown}")
+
     def stop(self):
         """Stop the background worker thread"""
         if not self.running:
