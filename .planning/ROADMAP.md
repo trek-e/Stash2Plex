@@ -177,14 +177,20 @@ Plans:
 ---
 
 ### Phase 9: Reliability Hardening
-**Goal:** Handle edge cases gracefully
+**Goal:** Handle edge cases gracefully - prevent crashes from malformed input data
+**Plans:** 2 plans
 
-- Unicode/special character handling in titles
-- Very long title/description truncation
-- Malformed API response handling
-- Partial failure recovery
+- Field limits module with Plex constants
+- LOCKED decision: Missing optional fields clear existing Plex values
+- Emoji handling (safe stripping option)
+- Partial failure recovery (per-field error handling)
+- Response validation for silent failures
 
 **Success:** No crashes from malformed input data
+
+Plans:
+- [ ] 09-01-PLAN.md — Field limits, LOCKED missing field handling, emoji sanitization
+- [ ] 09-02-PLAN.md — Partial failure recovery, response validation
 
 ---
 
@@ -303,7 +309,7 @@ Note: Phase 2.1 (Bugfix) can run in parallel with Phase 3 - it's independent.
 | 6. API Documentation | Low | 1 |
 | 7. Performance | Medium | 3 |
 | 8. Observability | Medium | 2 |
-| 9. Reliability | Medium | 2-3 |
+| 9. Reliability | Medium | 2 |
 | 10. Metadata Sync Toggles | Medium | 2-3 |
 | 11. Queue Management UI | Low | 1-2 |
 | 12. Process Queue Button | Low | 1-2 |
