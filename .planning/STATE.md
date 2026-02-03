@@ -5,16 +5,24 @@
 See: .planning/PROJECT.md (updated 2026-02-03)
 
 **Core value:** Reliable sync — when metadata changes in Stash, it eventually reaches Plex
-**Current focus:** v1.0 complete, ready for next milestone
+**Current focus:** v1.1 Foundation Hardening - Testing and Documentation
 
 ## Current Position
 
-Phase: 1 - Testing Infrastructure
-Plan: Planned (2 plans ready)
-Status: v1.1 in progress
-Last activity: 2026-02-03 — Phase 1 planned
+Phase: 1 of 1 (Testing Infrastructure)
+Plan: 1 of 2 complete
+Status: In progress
+Last activity: 2026-02-03 - Completed 01-01-PLAN.md (pytest configuration)
 
-Progress: [░░░░░░░░░░░░░░░░] 0% (v1.1 Phase 1 ready to execute)
+Progress: [========--------] 50% (1/2 plans in Phase 1)
+
+## Decisions Log
+
+| Date | Phase | Decision | Rationale |
+|------|-------|----------|-----------|
+| 2026-02-03 | 01-01 | 80% coverage threshold | Enforced via --cov-fail-under to ensure test quality |
+| 2026-02-03 | 01-01 | Separate dev dependencies | requirements-dev.txt keeps test tools separate from runtime |
+| 2026-02-03 | 01-01 | All modules covered | plex, sync_queue, worker, validation, hooks included in coverage |
 
 ## Roadmap Evolution
 
@@ -52,11 +60,9 @@ Progress: [░░░░░░░░░░░░░░░░] 0% (v1.1 Phase 1 re
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Milestone v1.0 complete
+Stopped at: Completed 01-01-PLAN.md
 Resume file: None
 
 ## Next Steps
 
-Ready to start next milestone. Options:
-- `/gsd:new-milestone` to define v2.0 requirements and roadmap
-- Review v2 requirements in archived REQUIREMENTS.md (ADV-01, ADV-02, ADV-03, OBS-01, OBS-02, OBS-03)
+Continue with 01-02-PLAN.md (conftest fixtures for pytest)
