@@ -8,6 +8,7 @@ Focus: Comprehensive testing, thorough documentation, then performance/observabi
 
 ### Phase 1: Testing Infrastructure
 **Goal:** pytest setup with fixtures for mocking Plex/Stash APIs
+**Plans:** 2 plans
 
 - pytest configuration (pytest.ini, conftest.py)
 - Mock fixtures for PlexServer, StashInterface
@@ -15,6 +16,10 @@ Focus: Comprehensive testing, thorough documentation, then performance/observabi
 - Coverage reporting setup (pytest-cov)
 
 **Success:** `pytest` runs with mock infrastructure ready
+
+Plans:
+- [ ] 01-01-PLAN.md — pytest.ini and requirements-dev.txt configuration
+- [ ] 01-02-PLAN.md — conftest.py fixtures and test directory structure
 
 ---
 
@@ -118,19 +123,19 @@ Focus: Comprehensive testing, thorough documentation, then performance/observabi
 
 ```
 Phase 1 (Test Infra)
-    ↓
-Phase 2 (Unit Tests) ──→ Phase 3 (Integration Tests)
-                              ↓
-              ┌───────────────┴───────────────┐
-              ↓                               ↓
+    |
+Phase 2 (Unit Tests) --> Phase 3 (Integration Tests)
+                              |
+              +---------------+---------------+
+              |                               |
 Phase 4 (User Docs)                Phase 5 (Arch Docs)
-              ↓                               ↓
-              └───────────────┬───────────────┘
-                              ↓
+              |                               |
+              +---------------+---------------+
+                              |
                     Phase 6 (API Docs)
-                              ↓
-              ┌───────────────┼───────────────┐
-              ↓               ↓               ↓
+                              |
+              +---------------+---------------+
+              |               |               |
       Phase 7          Phase 8          Phase 9
     (Performance)   (Observability)  (Reliability)
 ```
@@ -139,7 +144,7 @@ Phase 4 (User Docs)                Phase 5 (Arch Docs)
 
 | Phase | Complexity | Plans |
 |-------|------------|-------|
-| 1. Test Infrastructure | Medium | 2-3 |
+| 1. Test Infrastructure | Medium | 2 |
 | 2. Core Unit Tests | High | 4-5 |
 | 3. Integration Tests | High | 3-4 |
 | 4. User Documentation | Medium | 2-3 |
