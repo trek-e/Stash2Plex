@@ -11,9 +11,20 @@ interface: raw
 
 hooks:
   - name: Sync Scene to Plex
-    description: Syncs scene metadata to Plex when a scene is updated
+    description: Syncs scene metadata to Plex when a scene is updated or created
     triggeredBy:
+      - Scene.Create.Post
       - Scene.Update.Post
+
+tasks:
+  - name: Sync All Scenes to Plex
+    description: Force sync all scenes to Plex (use sparingly - may take a long time)
+    defaultArgs:
+      mode: all
+  - name: Sync Recent Scenes to Plex
+    description: Sync scenes updated in the last 24 hours
+    defaultArgs:
+      mode: recent
 
 settings:
   plex_url:

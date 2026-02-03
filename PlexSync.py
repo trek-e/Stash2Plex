@@ -280,9 +280,9 @@ def handle_hook(hook_context: dict, stash=None):
     input_data = hook_context.get("input", {})
     print(f"[PlexSync] hook_type={hook_type}, input_data keys={list(input_data.keys()) if input_data else 'None'}", file=sys.stderr)
 
-    if hook_type == "Scene.Update.Post":
+    if hook_type in ("Scene.Update.Post", "Scene.Create.Post"):
         scene_id = input_data.get("id")
-        print(f"[PlexSync] Scene.Update.Post: scene_id={scene_id}", file=sys.stderr)
+        print(f"[PlexSync] {hook_type}: scene_id={scene_id}", file=sys.stderr)
         if scene_id:
             data_dir = get_plugin_data_dir()
             print(f"[PlexSync] Calling on_scene_update for scene {scene_id}...", file=sys.stderr)
@@ -301,9 +301,71 @@ def handle_hook(hook_context: dict, stash=None):
                 import traceback
                 traceback.print_exc()
         else:
-            print("[PlexSync] WARNING: Scene.Update.Post hook missing scene ID", file=sys.stderr)
+            print(f"[PlexSync] WARNING: {hook_type} hook missing scene ID", file=sys.stderr)
     else:
         print(f"[PlexSync] Unhandled hook type: {hook_type}", file=sys.stderr)
+
+
+def handle_task(task_args: dict, stash=None):
+    """
+    Handle manual task trigger from Stash UI.
+
+    Args:
+        task_args: Task arguments (mode: 'all' or 'recent')
+        stash: StashInterface for API calls
+    """
+    mode = task_args.get('mode', 'recent')
+    print(f"[PlexSync Task] Starting task with mode: {mode}", file=sys.stderr)
+
+    if not stash:
+        print("[PlexSync Task] ERROR: No Stash connection available", file=sys.stderr)
+        return
+
+    try:
+        # Query scenes based on mode
+        if mode == 'all':
+            print("[PlexSync Task] Fetching all scenes...", file=sys.stderr)
+            scenes = stash.find_scenes(fragment="id")
+        else:  # recent - last 24 hours
+            import datetime
+            yesterday = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+            print(f"[PlexSync Task] Fetching scenes updated since {yesterday}...", file=sys.stderr)
+            scenes = stash.find_scenes(
+                f={"updated_at": {"value": yesterday, "modifier": "GREATER_THAN"}},
+                fragment="id"
+            )
+
+        if not scenes:
+            print("[PlexSync Task] No scenes found to sync", file=sys.stderr)
+            return
+
+        print(f"[PlexSync Task] Found {len(scenes)} scenes to sync", file=sys.stderr)
+
+        # Queue each scene for sync
+        data_dir = get_plugin_data_dir()
+        queued = 0
+        for scene in scenes:
+            scene_id = scene.get('id')
+            if scene_id:
+                try:
+                    on_scene_update(
+                        int(scene_id),
+                        {'id': scene_id},
+                        queue_manager.get_queue(),
+                        data_dir=data_dir,
+                        sync_timestamps=None,  # Force sync, ignore timestamps
+                        stash=stash
+                    )
+                    queued += 1
+                except Exception as e:
+                    print(f"[PlexSync Task] Failed to queue scene {scene_id}: {e}", file=sys.stderr)
+
+        print(f"[PlexSync Task] Queued {queued} scenes for sync", file=sys.stderr)
+
+    except Exception as e:
+        print(f"[PlexSync Task] ERROR: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
 
 
 def main():
@@ -337,23 +399,31 @@ def main():
         print(json.dumps({"output": "disabled"}))
         return
 
-    # Handle the hook
-    print(f"[PlexSync] Checking for hook: 'args' in input_data={('args' in input_data)}", file=sys.stderr)
-    if "args" in input_data:
-        print(f"[PlexSync] args keys: {list(input_data['args'].keys())}", file=sys.stderr)
-        print(f"[PlexSync] 'hookContext' in args={('hookContext' in input_data['args'])}", file=sys.stderr)
+    # Handle hook or task
+    args = input_data.get("args", {})
 
-    if "args" in input_data and "hookContext" in input_data["args"]:
+    if "hookContext" in args:
+        # Hook triggered
         print("[PlexSync] Calling handle_hook...", file=sys.stderr)
         try:
-            handle_hook(input_data["args"]["hookContext"], stash=stash_interface)
+            handle_hook(args["hookContext"], stash=stash_interface)
             print("[PlexSync] handle_hook completed", file=sys.stderr)
         except Exception as e:
             print(f"[PlexSync] handle_hook exception: {e}", file=sys.stderr)
             import traceback
             traceback.print_exc()
+    elif "mode" in args:
+        # Task triggered (has mode argument)
+        print("[PlexSync] Calling handle_task...", file=sys.stderr)
+        try:
+            handle_task(args, stash=stash_interface)
+            print("[PlexSync] handle_task completed", file=sys.stderr)
+        except Exception as e:
+            print(f"[PlexSync] handle_task exception: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
     else:
-        print("[PlexSync] No hookContext in input, skipping", file=sys.stderr)
+        print("[PlexSync] No hookContext or task mode in input, skipping", file=sys.stderr)
 
     # Give worker time to process pending jobs before exiting
     # Worker thread is daemon, so it dies when main process exits
