@@ -337,7 +337,7 @@ def on_scene_update(
                 sanitized_data['tags'] = validated.tags
 
             # Preserve any extra fields from original update_data that we don't validate
-            for key in ['studio_id', 'performer_ids', 'tag_ids', 'rating']:
+            for key in ['studio_id', 'performer_ids', 'tag_ids', 'rating', 'path', 'poster_url', 'background_url']:
                 if key in update_data:
                     sanitized_data[key] = update_data[key]
 
