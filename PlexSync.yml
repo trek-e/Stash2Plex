@@ -1,0 +1,61 @@
+name: PlexSync
+description: Sync metadata from Stash to Plex with queue-based reliability
+version: 1.0.0
+url: https://github.com/stashapp/CommunityScripts/tree/main/plugins/PlexSync
+
+exec:
+  - python3
+  - "{pluginDir}/PlexSync.py"
+
+interface: raw
+
+hooks:
+  - name: Sync Scene to Plex
+    description: Syncs scene metadata to Plex when a scene is updated
+    triggeredBy:
+      - Scene.Update.Post
+
+settings:
+  plex_url:
+    displayName: Plex URL
+    description: "URL of your Plex server (e.g., http://localhost:32400)"
+    type: STRING
+  plex_token:
+    displayName: Plex Token
+    description: "Your Plex authentication token (X-Plex-Token)"
+    type: STRING
+  enabled:
+    displayName: Enabled
+    description: "Enable or disable the plugin"
+    type: BOOLEAN
+    default: true
+  max_retries:
+    displayName: Max Retries
+    description: "Maximum retry attempts for failed syncs (1-20)"
+    type: NUMBER
+    default: 5
+  poll_interval:
+    displayName: Poll Interval
+    description: "Seconds between queue polls (0.1-60)"
+    type: NUMBER
+    default: 30
+  strict_matching:
+    displayName: Strict Matching
+    description: "Skip sync when multiple Plex matches found (safer)"
+    type: BOOLEAN
+    default: true
+  preserve_plex_edits:
+    displayName: Preserve Plex Edits
+    description: "Skip fields that already have values in Plex"
+    type: BOOLEAN
+    default: false
+  connect_timeout:
+    displayName: Connect Timeout
+    description: "Plex connection timeout in seconds (1-30)"
+    type: NUMBER
+    default: 5
+  read_timeout:
+    displayName: Read Timeout
+    description: "Plex read timeout in seconds (5-120)"
+    type: NUMBER
+    default: 30
