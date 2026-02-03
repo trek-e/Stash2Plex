@@ -1,1 +1,1 @@
-# Test package for worker module (processor, backoff, circuit breaker)
+"""Unit tests for worker module."""
