@@ -22,14 +22,9 @@ def log_info(msg): print(f"\x01i\x02[PlexSync Worker] {msg}", file=sys.stderr)
 def log_warn(msg): print(f"\x01w\x02[PlexSync Worker] {msg}", file=sys.stderr)
 def log_error(msg): print(f"\x01e\x02[PlexSync Worker] {msg}", file=sys.stderr)
 
-try:
-    from sync_queue.operations import get_pending, ack_job, nack_job, fail_job, enqueue, save_sync_timestamp
-    from sync_queue.dlq import DeadLetterQueue
-    from hooks.handlers import unmark_scene_pending
-except ImportError:
-    get_pending = ack_job = nack_job = fail_job = enqueue = save_sync_timestamp = None
-    DeadLetterQueue = None
-    unmark_scene_pending = None
+# Lazy imports to avoid module-level pollution in tests
+# These functions are imported inside methods that use them
+# to ensure imports are fresh and not polluted by test mocking
 
 logger = logging.getLogger('PlexSync.worker')
 
@@ -209,6 +204,9 @@ class SyncWorker:
         Args:
             job: Job dict with retry metadata already added
         """
+        # Lazy import to avoid module-level import pollution in tests
+        from sync_queue.operations import ack_job as _ack_job
+
         # Extract original job fields for re-enqueue
         scene_id = job.get('scene_id')
         update_type = job.get('update_type')
@@ -228,13 +226,15 @@ class SyncWorker:
         }
 
         # Ack the old job (removes from queue)
-        ack_job(self.queue, job)
+        _ack_job(self.queue, job)
         # Enqueue fresh copy with metadata
         self.queue.put(new_job)
 
     def _worker_loop(self):
         """Main worker loop - runs in background thread"""
         from worker.circuit_breaker import CircuitState
+        # Lazy imports to avoid module-level pollution in tests
+        from sync_queue.operations import get_pending, ack_job, nack_job, fail_job
 
         while self.running:
             try:
@@ -392,6 +392,9 @@ class SyncWorker:
         """
         from plex.exceptions import PlexTemporaryError, PlexPermanentError, PlexNotFound, translate_plex_exception
         from plex.matcher import find_plex_items_with_confidence, MatchConfidence
+        # Lazy imports to avoid module-level pollution in tests
+        from sync_queue.operations import save_sync_timestamp
+        from hooks.handlers import unmark_scene_pending
 
         scene_id = job.get('scene_id')
         data = job.get('data', {})
@@ -464,16 +467,13 @@ class SyncWorker:
                 save_sync_timestamp(self.data_dir, scene_id, time.time())
 
             # Remove from pending set (always, even on failure - will be re-added on retry)
-            if unmark_scene_pending is not None:
-                unmark_scene_pending(scene_id)
+            unmark_scene_pending(scene_id)
 
         except (PlexTemporaryError, PlexPermanentError, PlexNotFound):
-            if unmark_scene_pending is not None:
-                unmark_scene_pending(scene_id)  # Allow re-enqueue on next hook
+            unmark_scene_pending(scene_id)  # Allow re-enqueue on next hook
             raise
         except Exception as e:
-            if unmark_scene_pending is not None:
-                unmark_scene_pending(scene_id)
+            unmark_scene_pending(scene_id)
             raise translate_plex_exception(e)
 
     def _update_metadata(self, plex_item, data: dict):

@@ -145,6 +145,7 @@ class TestQueuePersistenceAcrossRestart:
     def test_requeue_preserves_all_job_fields(self, mock_queue, mock_dlq, mock_config, tmp_path):
         """_requeue_with_metadata preserves original job data plus retry metadata."""
         from worker.processor import SyncWorker
+        from unittest.mock import patch
 
         mock_queue.put = Mock()
 
@@ -168,7 +169,9 @@ class TestQueuePersistenceAcrossRestart:
             'last_error_type': 'TransientError',
         }
 
-        worker._requeue_with_metadata(job)
+        # Patch ack_job in sync_queue.operations (lazy import in _requeue_with_metadata)
+        with patch('sync_queue.operations.ack_job', Mock()):
+            worker._requeue_with_metadata(job)
 
         # Verify new job was put with all fields
         mock_queue.put.assert_called_once()

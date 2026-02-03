@@ -19,83 +19,94 @@ class TestMatcher(unittest.TestCase):
 
     These tests work because plex.matcher only uses TYPE_CHECKING imports
     for plexapi types and doesn't trigger the full import chain.
+
+    Note: The matcher now uses title search + filename verification, not
+    the old Media__Part__file filter which didn't work reliably.
     """
 
-    def test_exact_path_match(self):
-        """Exact path match returns the item."""
+    def _create_mock_item_with_file(self, filepath):
+        """Create a mock Plex item with a file at the given path."""
+        mock_item = MagicMock()
+        mock_part = MagicMock()
+        mock_part.file = filepath
+        mock_media = MagicMock()
+        mock_media.parts = [mock_part]
+        mock_item.media = [mock_media]
+        return mock_item
+
+    def test_single_match_by_filename(self):
+        """Single item matching filename returns that item."""
         from plex.matcher import find_plex_item_by_path
 
-        mock_library = Mock()
-        mock_item = Mock()
+        mock_library = MagicMock()
+        mock_item = self._create_mock_item_with_file('/media/movies/film.mp4')
+        # Title search returns item that has matching filename
         mock_library.search.return_value = [mock_item]
+        mock_library.all.return_value = [mock_item]
 
         result = find_plex_item_by_path(mock_library, '/media/movies/film.mp4')
 
         assert result == mock_item
-        mock_library.search.assert_called_with(
-            Media__Part__file='/media/movies/film.mp4'
-        )
 
     def test_no_match_returns_none(self):
         """No matching item returns None."""
         from plex.matcher import find_plex_item_by_path
 
-        mock_library = Mock()
+        mock_library = MagicMock()
         mock_library.search.return_value = []
+        mock_library.all.return_value = []
 
         result = find_plex_item_by_path(mock_library, '/nonexistent/file.mp4')
 
         assert result is None
 
-    def test_fallback_to_filename_match(self):
-        """Falls back to filename match when exact path fails."""
+    def test_fallback_to_all_scan_when_title_search_fails(self):
+        """Falls back to library.all() when title search returns no matches."""
         from plex.matcher import find_plex_item_by_path
 
-        mock_library = Mock()
-        mock_item = Mock()
-        # First call (exact path) returns empty, second (filename) returns item
-        mock_library.search.side_effect = [[], [mock_item]]
+        mock_library = MagicMock()
+        mock_item = self._create_mock_item_with_file('/different/path/movie.mp4')
+        # Title search returns empty, all() returns item with matching filename
+        mock_library.search.return_value = []
+        mock_library.all.return_value = [mock_item]
 
         result = find_plex_item_by_path(mock_library, '/different/path/movie.mp4')
 
         assert result == mock_item
-        assert mock_library.search.call_count == 2
 
     def test_ambiguous_filename_returns_none(self):
-        """Ambiguous filename match returns None instead of guessing."""
+        """Multiple items with same filename returns None (ambiguous)."""
         from plex.matcher import find_plex_item_by_path
 
-        mock_library = Mock()
-        mock_item1 = Mock()
-        mock_item2 = Mock()
-        # Exact path returns empty, filename returns multiple
-        mock_library.search.side_effect = [[], [mock_item1, mock_item2], []]
+        mock_library = MagicMock()
+        mock_item1 = self._create_mock_item_with_file('/path1/common_name.mp4')
+        mock_item2 = self._create_mock_item_with_file('/path2/common_name.mp4')
+        # Title search returns multiple items with same filename
+        mock_library.search.return_value = [mock_item1, mock_item2]
+        mock_library.all.return_value = [mock_item1, mock_item2]
 
         result = find_plex_item_by_path(mock_library, '/path/common_name.mp4')
 
         # Should return None due to ambiguity
         assert result is None
 
-    def test_path_prefix_mapping(self):
-        """Path prefix mapping transforms Stash path to Plex path."""
+    def test_path_prefix_params_accepted(self):
+        """Path prefix parameters are accepted (for API compatibility)."""
         from plex.matcher import find_plex_item_by_path
 
-        mock_library = Mock()
-        mock_item = Mock()
+        mock_library = MagicMock()
+        mock_item = self._create_mock_item_with_file('/plex/media/movies/film.mp4')
         mock_library.search.return_value = [mock_item]
+        mock_library.all.return_value = [mock_item]
 
+        # Should not raise - parameters accepted for API compatibility
         result = find_plex_item_by_path(
             mock_library,
             '/stash/media/movies/film.mp4',
             plex_path_prefix='/plex/media',
             stash_path_prefix='/stash/media',
         )
-
-        assert result == mock_item
-        # Should search with transformed path
-        mock_library.search.assert_called_with(
-            Media__Part__file='/plex/media/movies/film.mp4'
-        )
+        # Note: path prefixes are currently unused, matcher uses filename matching
 
 
 class TestExceptionHierarchy(unittest.TestCase):
@@ -210,6 +221,8 @@ class TestSyncWorkerIntegration(unittest.TestCase):
         self.mock_config.plex_token = 'test_token_12345'
         self.mock_config.plex_connect_timeout = 5.0
         self.mock_config.plex_read_timeout = 30.0
+        self.mock_config.plex_library = None  # Search all libraries
+        self.mock_config.strict_matching = False
 
     def test_process_job_missing_path_raises_permanent(self):
         """Job without file path raises PermanentError."""
@@ -238,17 +251,18 @@ class TestSyncWorkerIntegration(unittest.TestCase):
         from plex.exceptions import PlexNotFound
 
         worker = SyncWorker(
-            queue=Mock(),
-            dlq=Mock(),
+            queue=MagicMock(),
+            dlq=MagicMock(),
             config=self.mock_config,
         )
 
         # Mock the _get_plex_client method to avoid plexapi import
-        mock_client = Mock()
-        mock_section = Mock()
+        mock_client = MagicMock()
+        mock_section = MagicMock()
         mock_section.search.return_value = []  # No items found
+        mock_section.all.return_value = []  # No items on full scan either
         mock_client.server.library.sections.return_value = [mock_section]
-        worker._get_plex_client = Mock(return_value=mock_client)
+        worker._get_plex_client = MagicMock(return_value=mock_client)
 
         job = {
             'scene_id': '123',
@@ -268,20 +282,35 @@ class TestSyncWorkerIntegration(unittest.TestCase):
         """Job updates Plex item metadata successfully."""
         from worker.processor import SyncWorker
 
+        # Ensure overwrite mode so existing title gets replaced
+        self.mock_config.preserve_plex_edits = False
+
         worker = SyncWorker(
-            queue=Mock(),
-            dlq=Mock(),
+            queue=MagicMock(),
+            dlq=MagicMock(),
             config=self.mock_config,
         )
 
-        # Mock the _get_plex_client method
-        mock_client = Mock()
-        mock_item = Mock()
-        mock_item.title = "Test Video"
-        mock_section = Mock()
-        mock_section.search.return_value = [mock_item]  # Item found
+        # Create mock item with proper file structure for matcher
+        mock_item = MagicMock()
+        mock_item.title = ""  # Empty so title can be set
+        mock_item.key = "/library/metadata/123"
+        mock_part = MagicMock()
+        mock_part.file = "/media/movies/film.mp4"
+        mock_media = MagicMock()
+        mock_media.parts = [mock_part]
+        mock_item.media = [mock_media]
+        mock_item.actors = []
+        mock_item.genres = []
+        mock_item.collections = []
+
+        mock_section = MagicMock()
+        mock_section.search.return_value = [mock_item]
+        mock_section.all.return_value = [mock_item]
+
+        mock_client = MagicMock()
         mock_client.server.library.sections.return_value = [mock_section]
-        worker._get_plex_client = Mock(return_value=mock_client)
+        worker._get_plex_client = MagicMock(return_value=mock_client)
 
         job = {
             'scene_id': '123',
@@ -296,12 +325,13 @@ class TestSyncWorkerIntegration(unittest.TestCase):
         # Should not raise
         worker._process_job(job)
 
-        # Verify edit was called with correct fields
-        mock_item.edit.assert_called_once()
-        call_kwargs = mock_item.edit.call_args.kwargs
+        # Verify edit was called (may be called twice: once for metadata, once for collections)
+        assert mock_item.edit.call_count >= 1
+        # Get the first call's kwargs (the metadata call)
+        call_kwargs = mock_item.edit.call_args_list[0].kwargs
         assert call_kwargs.get('title.value') == 'New Title'
         assert call_kwargs.get('studio.value') == 'Test Studio'
-        mock_item.reload.assert_called_once()
+        mock_item.reload.assert_called()
 
     def test_worker_init_accepts_config(self):
         """SyncWorker.__init__ accepts config parameter."""

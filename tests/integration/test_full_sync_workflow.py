@@ -131,7 +131,7 @@ class TestFullSyncWorkflow:
         worker, mock_plex_item = integration_worker
         # Worker already has tmp_path as data_dir from fixture
 
-        with patch('worker.processor.save_sync_timestamp') as mock_save:
+        with patch('sync_queue.operations.save_sync_timestamp') as mock_save:
             worker._process_job(sample_sync_job)
 
             mock_save.assert_called_once()
@@ -143,7 +143,7 @@ class TestFullSyncWorkflow:
         """Scene removed from pending set after processing."""
         worker, mock_plex_item = integration_worker
 
-        with patch('worker.processor.unmark_scene_pending') as mock_unmark:
+        with patch('hooks.handlers.unmark_scene_pending') as mock_unmark:
             worker._process_job(sample_sync_job)
 
             mock_unmark.assert_called_once_with(sample_sync_job['scene_id'])

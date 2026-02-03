@@ -351,6 +351,7 @@ class TestRetrySurvivesRestart:
     def test_requeue_preserves_retry_metadata(self):
         """_requeue_with_metadata preserves all retry fields."""
         from worker.processor import SyncWorker
+        from unittest.mock import patch
 
         mock_queue = Mock()
         mock_queue.put = Mock()
@@ -374,7 +375,9 @@ class TestRetrySurvivesRestart:
             'last_error_type': 'TransientError',
         }
 
-        worker._requeue_with_metadata(job)
+        # Patch ack_job in sync_queue.operations (lazy import in _requeue_with_metadata)
+        with patch('sync_queue.operations.ack_job', Mock()):
+            worker._requeue_with_metadata(job)
 
         # Verify new job was put in queue
         mock_queue.put.assert_called_once()

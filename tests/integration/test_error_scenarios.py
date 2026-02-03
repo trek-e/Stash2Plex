@@ -420,7 +420,7 @@ class TestSceneUnmarkedOnError:
             'pqid': 1,
         }
 
-        with patch('worker.processor.unmark_scene_pending') as mock_unmark:
+        with patch('hooks.handlers.unmark_scene_pending') as mock_unmark:
             try:
                 worker._process_job(job)
             except (TransientError, PlexTemporaryError):
@@ -441,7 +441,7 @@ class TestSceneUnmarkedOnError:
             'pqid': 1,
         }
 
-        with patch('worker.processor.unmark_scene_pending') as mock_unmark:
+        with patch('hooks.handlers.unmark_scene_pending') as mock_unmark:
             try:
                 worker._process_job(job)
             except PlexNotFound:
@@ -504,7 +504,7 @@ class TestSceneUnmarkedOnError:
             'pqid': 1,
         }
 
-        with patch('worker.processor.unmark_scene_pending') as mock_unmark:
+        with patch('hooks.handlers.unmark_scene_pending') as mock_unmark:
             try:
                 worker._process_job(job)
             except (PlexTemporaryError, Exception):
@@ -529,7 +529,7 @@ class TestSceneUnmarkedOnError:
             'pqid': 1,
         }
 
-        with patch('worker.processor.unmark_scene_pending') as mock_unmark:
+        with patch('hooks.handlers.unmark_scene_pending') as mock_unmark:
             try:
                 worker._process_job(job)
             except PermanentError:
