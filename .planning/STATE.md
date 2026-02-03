@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 10 of 13 (Metadata Sync Toggles)
-Plan: 1 of 2 complete
-Status: In progress
-Last activity: 2026-02-03 - Completed 10-01-PLAN.md
+Plan: 2 of 2 complete
+Status: Phase complete
+Last activity: 2026-02-03 - Completed 10-02-PLAN.md
 
-Progress: [████████████████░░] 89% (14/16 plans complete)
+Progress: [█████████████████░] 94% (15/16 plans complete)
 
 ## Decisions Log
 
@@ -92,6 +92,9 @@ Progress: [████████████████░░] 89% (14/16 pl
 | 2026-02-03 | 10-01 | All toggles default True | Backward compatible - existing users get same behavior |
 | 2026-02-03 | 10-01 | Toggle summary log line | Groups disabled fields instead of 10 separate lines |
 | 2026-02-03 | 10-01 | snake_case setting keys | Match Python field names exactly for consistency |
+| 2026-02-03 | 10-02 | Toggle OFF skips field entirely | No clear, no sync - Plex keeps existing value |
+| 2026-02-03 | 10-02 | Toggle checks use getattr with True default | Backward compatible with existing configs |
+| 2026-02-03 | 10-02 | Master toggle checked first | Early return before any field processing |
 
 ## Roadmap Evolution
 
@@ -271,12 +274,12 @@ Progress: [████████████████░░] 89% (14/16 pl
 8. **Response validation** - _validate_edit_result detects silent API failures (09-02)
 9. **31 new tests** - Unit and integration tests for partial failure recovery (09-02)
 
-### v1.1 Phase 10: Metadata Sync Toggles (In Progress)
+### v1.1 Phase 10: Metadata Sync Toggles (Complete 2026-02-03)
 
 **Stats:**
-- 1 of 2 plans complete
-- 3 commits
-- 3 files modified
+- 2 of 2 plans complete
+- 6 commits (10-01: 3, 10-02: 3)
+- 6 files modified
 
 **Accomplishments (Plan 01):**
 1. **10 sync toggle fields** - sync_master + 9 individual field toggles in PlexSyncConfig
@@ -285,18 +288,23 @@ Progress: [████████████████░░] 89% (14/16 pl
 4. **Toggle summary logging** - Grouped log output instead of 10 lines
 5. **8 new tests** - TestSyncToggles class with comprehensive coverage
 
+**Accomplishments (Plan 02):**
+1. **Toggle-aware processor** - Master toggle check + individual field toggle checks
+2. **Toggle OFF behavior** - Skips field entirely (no clear, no sync)
+3. **11 new tests** - TestSyncToggles in test_processor.py (47 total)
+4. **Field Sync Settings docs** - New section in config.md with table and examples
+
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 10-01-PLAN.md (Toggle Config)
+Stopped at: Completed 10-02-PLAN.md (Toggle Integration)
 Resume file: None
 
 ## Next Steps
 
-Phase 10 Plan 01 complete. Ready for Plan 02 (Toggle Integration).
+Phase 10 complete. Ready for Phase 11: Queue Management UI.
 
 Next plans:
-- 10-02: Integrate toggles into processor.py
 - Phase 11: Queue Management UI
 - Phase 12: Process Queue Button
 - Phase 13: Dynamic Queue Timeout
