@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 4 of 11 (User Documentation) - In Progress
-Plan: 2 of 4 complete
-Status: Installation guide complete
-Last activity: 2026-02-03 - Completed 04-02-PLAN.md
+Plan: 3 of 4 complete
+Status: Configuration reference complete
+Last activity: 2026-02-03 - Completed 04-03-PLAN.md
 
 Progress: [██████░░░░░░░░░░] 36% (4/11 phases complete)
 
@@ -52,6 +52,8 @@ Progress: [██████░░░░░░░░░░] 36% (4/11 phases co
 | 2026-02-03 | 04-01 | No screenshots in docs | Per user decision in CONTEXT.md |
 | 2026-02-03 | 04-02 | Two installation methods | Plugin repo (recommended) and manual for flexibility |
 | 2026-02-03 | 04-02 | Docker path mapping emphasis | Critical for matching - paths must be identical between Stash and Plex |
+| 2026-02-03 | 04-03 | Markdown tables for settings | Quick scanning of type, default, range for each setting |
+| 2026-02-03 | 04-03 | 5 named scenario examples | Cover common user setups: basic, preserve edits, relaxed, network, Docker |
 
 ## Roadmap Evolution
 
@@ -145,24 +147,24 @@ Progress: [██████░░░░░░░░░░] 36% (4/11 phases co
 ### v1.1 Phase 4: User Documentation (In Progress)
 
 **Stats:**
-- 2 of 4 plans complete
-- 3 commits
-- 3 files created
+- 3 of 4 plans complete
+- 4 commits
+- 4 files created
 
 **Accomplishments:**
 1. **README.md** - Project overview, quick start guide, documentation links (04-01)
 2. **docs/install.md** - Complete installation guide with PythonDepManager, Docker/bare metal (04-02)
+3. **docs/config.md** - Configuration reference with all 10 settings, 5 examples, validation rules (04-03)
 
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 04-02-PLAN.md (docs/install.md)
+Stopped at: Completed 04-03-PLAN.md (docs/config.md)
 Resume file: None
 
 ## Next Steps
 
-Phase 4 Plan 2 complete. Installation guide created.
+Phase 4 Plan 3 complete. Configuration reference created.
 
 Ready for:
-- 04-03: Configuration Reference (docs/config.md)
 - 04-04: Troubleshooting Guide (docs/troubleshoot.md)
