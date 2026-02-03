@@ -1,27 +1,25 @@
 """
-Disk-backed cache for Plex library data.
+Disk-backed caching for Plex library data and match results.
 
-Provides a PlexCache class that stores Plex library data on disk using diskcache
-with TTL-based expiration. This reduces Plex API calls by caching:
-- Library items (all() results)
-- Search results
+Provides two cache classes:
+- PlexCache: Library data cache (all() results, search results) with TTL expiration
+- MatchCache: Path-to-item key mappings with no TTL (invalidate on stale detection)
 
 Key design decisions:
 - SQLite-backed storage via diskcache (same pattern as persist-queue)
 - Store only essential item data (key, title, file paths) to avoid memory bloat
 - 1-hour TTL for library data (balances freshness vs API savings)
-- 100MB default size limit to prevent unbounded growth
+- No TTL for match results (invalidate on failure detection)
+- Size limits to prevent unbounded growth
 
 Example:
-    >>> from plex.cache import PlexCache
-    >>> cache = PlexCache("/path/to/data_dir")
-    >>> # Cache library items
-    >>> items = plex_library.all()
-    >>> cache.set_library_items("Movies", items)
-    >>> # Later retrieval (cache hit)
-    >>> cached = cache.get_library_items("Movies")
-    >>> if cached is not None:
-    ...     print(f"Cache hit: {len(cached)} items")
+    >>> from plex.cache import PlexCache, MatchCache
+    >>> # Library cache for search/all results
+    >>> lib_cache = PlexCache("/path/to/data_dir")
+    >>> lib_cache.set_library_items("Movies", plex_library.all())
+    >>> # Match cache for path-to-key mappings
+    >>> match_cache = MatchCache("/path/to/data_dir")
+    >>> match_cache.set_match("Movies", "/media/movie.mp4", "/library/metadata/123")
 """
 
 import logging
@@ -346,5 +344,252 @@ class PlexCache:
             f"PlexCache(data_dir={self._data_dir!r}, "
             f"ttl={self._library_ttl}, "
             f"items={stats['count']}, "
+            f"hit_rate={stats['hit_rate']:.1f}%)"
+        )
+
+
+class MatchCache:
+    """
+    Cache for file path to Plex item key mappings.
+
+    Stores path-to-key mappings with no TTL expiration (matches are stable
+    until library changes). Supports auto-invalidation on match failure
+    to detect stale cache entries.
+
+    Key differences from PlexCache:
+    - No TTL expiration (matches are stable until library changes)
+    - Keys are f"match:{library_name}:{file_path}" (lowercased path)
+    - Stores only the Plex item key (string), not full item data
+    - Auto-invalidate on match failure (stale cache detection)
+
+    Args:
+        data_dir: Base directory for cache storage (match_cache/ subdirectory created)
+        size_limit: Maximum cache size in bytes (default: 50MB)
+
+    Example:
+        >>> from plex.cache import MatchCache
+        >>> cache = MatchCache("/data/plexsync")
+        >>> cache.set_match("Movies", "/media/movie.mp4", "/library/metadata/123")
+        >>> key = cache.get_match("Movies", "/media/movie.mp4")
+        >>> print(key)  # /library/metadata/123
+    """
+
+    # Default size limit: 50MB
+    DEFAULT_SIZE_LIMIT = 50 * 1024 * 1024
+
+    def __init__(
+        self,
+        data_dir: str,
+        size_limit: int = DEFAULT_SIZE_LIMIT,
+    ) -> None:
+        """
+        Initialize cache in data_dir/match_cache/ directory.
+
+        Args:
+            data_dir: Base directory (match_cache/ subdirectory will be created)
+            size_limit: Maximum cache size in bytes
+        """
+        self._data_dir = data_dir
+        self._size_limit = size_limit
+
+        # Create cache directory
+        cache_dir = os.path.join(data_dir, 'match_cache')
+        os.makedirs(cache_dir, exist_ok=True)
+
+        # Initialize diskcache with size limit
+        self._cache = Cache(cache_dir, size_limit=size_limit)
+
+        # Enable statistics tracking
+        self._cache.stats(enable=True)
+
+        # Track custom stats for this session
+        self._hits = 0
+        self._misses = 0
+
+        logger.debug(f"MatchCache initialized at {cache_dir} (limit: {size_limit} bytes)")
+
+    def _make_key(self, library_name: str, file_path: str) -> str:
+        """Generate cache key for match result."""
+        # Use lowercase file path for case-insensitive matching consistency
+        return f"match:{library_name}:{file_path.lower()}"
+
+    def get_match(self, library_name: str, file_path: str) -> Optional[str]:
+        """
+        Get cached Plex item key for file path.
+
+        Args:
+            library_name: Name of the Plex library section
+            file_path: File path from Stash (lowercased for matching)
+
+        Returns:
+            Plex item key (string) if cached, None if cache miss
+
+        Example:
+            >>> key = cache.get_match("Movies", "/media/movie.mp4")
+            >>> if key is not None:
+            ...     # Use key to fetch item directly: library.fetchItem(key)
+            ...     pass
+        """
+        cache_key = self._make_key(library_name, file_path)
+        result = self._cache.get(cache_key)
+
+        if result is not None:
+            self._hits += 1
+            logger.debug(f"Match cache hit for '{file_path}' -> {result}")
+        else:
+            self._misses += 1
+            logger.debug(f"Match cache miss for '{file_path}'")
+
+        return result
+
+    def set_match(self, library_name: str, file_path: str, plex_key: str) -> None:
+        """
+        Cache path to Plex item key mapping (no TTL).
+
+        Stores the mapping indefinitely until manually invalidated or
+        cache size limit triggers eviction.
+
+        Args:
+            library_name: Name of the Plex library section
+            file_path: File path from Stash
+            plex_key: Plex item key (e.g., "/library/metadata/12345")
+
+        Example:
+            >>> cache.set_match("Movies", "/media/movie.mp4", "/library/metadata/123")
+        """
+        cache_key = self._make_key(library_name, file_path)
+        # No expire = permanent until invalidated or evicted
+        self._cache.set(cache_key, plex_key)
+        logger.debug(f"Cached match '{file_path}' -> {plex_key}")
+
+    def invalidate(self, library_name: str, file_path: str) -> None:
+        """
+        Invalidate a specific match (e.g., on PlexNotFound).
+
+        Use when a cached match is discovered to be stale (item no longer
+        exists at that key, or match was incorrect).
+
+        Args:
+            library_name: Name of the Plex library section
+            file_path: File path to invalidate
+
+        Example:
+            >>> # Item not found using cached key - invalidate
+            >>> cache.invalidate("Movies", "/media/movie.mp4")
+        """
+        cache_key = self._make_key(library_name, file_path)
+        try:
+            del self._cache[cache_key]
+            logger.debug(f"Invalidated match for '{file_path}'")
+        except KeyError:
+            # Key wasn't cached, nothing to invalidate
+            pass
+
+    def invalidate_library(self, library_name: str) -> None:
+        """
+        Invalidate all matches for a library (e.g., after library scan).
+
+        Use when a library has been rescanned and all cached matches
+        may be stale.
+
+        Args:
+            library_name: Name of the Plex library section
+
+        Example:
+            >>> # After library scan, clear all matches for that library
+            >>> cache.invalidate_library("Movies")
+        """
+        prefix = f"match:{library_name}:"
+        invalidated = 0
+        # Iterate over all keys and delete matching ones
+        for key in list(self._cache):
+            if key.startswith(prefix):
+                try:
+                    del self._cache[key]
+                    invalidated += 1
+                except KeyError:
+                    pass
+        logger.info(f"Invalidated {invalidated} matches for library '{library_name}'")
+
+    def clear(self) -> None:
+        """
+        Clear all match cache data.
+
+        Removes all path-to-key mappings. Use when:
+        - All Plex libraries have been rescanned
+        - Cache data appears corrupted
+        - Manual cache reset requested
+
+        Example:
+            >>> cache.clear()
+        """
+        self._cache.clear()
+        self._hits = 0
+        self._misses = 0
+        logger.info("Match cache cleared")
+
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get cache hit/miss statistics.
+
+        Returns session statistics for monitoring cache effectiveness.
+
+        Returns:
+            Dict with keys:
+            - hits: Number of cache hits this session
+            - misses: Number of cache misses this session
+            - hit_rate: Hit rate as percentage (0-100)
+            - size: Current cache size in bytes
+            - count: Number of cached matches
+
+        Example:
+            >>> stats = cache.get_stats()
+            >>> print(f"Match cache hit rate: {stats['hit_rate']:.1f}%")
+        """
+        total = self._hits + self._misses
+        hit_rate = (self._hits / total * 100) if total > 0 else 0.0
+
+        # Get diskcache internal stats
+        try:
+            size = self._cache.volume()
+        except Exception:
+            size = 0
+
+        try:
+            count = len(self._cache)
+        except Exception:
+            count = 0
+
+        return {
+            'hits': self._hits,
+            'misses': self._misses,
+            'hit_rate': hit_rate,
+            'size': size,
+            'count': count,
+        }
+
+    def close(self) -> None:
+        """
+        Close the cache connection.
+
+        Should be called when done using the cache to release resources.
+
+        Example:
+            >>> cache = MatchCache("/data")
+            >>> try:
+            ...     # use cache
+            ...     pass
+            ... finally:
+            ...     cache.close()
+        """
+        self._cache.close()
+        logger.debug("Match cache closed")
+
+    def __repr__(self) -> str:
+        """Return string representation of cache."""
+        stats = self.get_stats()
+        return (
+            f"MatchCache(data_dir={self._data_dir!r}, "
+            f"matches={stats['count']}, "
             f"hit_rate={stats['hit_rate']:.1f}%)"
         )
