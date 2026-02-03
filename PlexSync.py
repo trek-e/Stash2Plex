@@ -36,6 +36,7 @@ try:
     from worker.processor import SyncWorker
     from hooks.handlers import on_scene_update
     from validation.config import validate_config, PlexSyncConfig
+    from plex.device_identity import configure_plex_device_identity
     log_trace("All imports successful")
 except ImportError as e:
     log_error(f"Import error: {e}")
@@ -216,6 +217,10 @@ def initialize(config_dict: dict = None):
         return
 
     data_dir = get_plugin_data_dir()
+
+    # Configure persistent Plex device identity (must be before PlexClient creation)
+    device_id = configure_plex_device_identity(data_dir)
+    log_trace(f"Using Plex device ID: {device_id[:8]}...")
 
     # Load sync timestamps for late update detection
     sync_timestamps = load_sync_timestamps(data_dir)
