@@ -1,7 +1,7 @@
 """
-Tests for plex/cache.py - Disk-backed caching for Plex library data.
+Tests for plex/cache.py - Disk-backed caching for Plex library data and match results.
 
-Tests cover:
+PlexCache tests cover:
 1. Cache initialization creates directory
 2. Library items get/set with TTL
 3. Search results get/set with TTL
@@ -10,6 +10,13 @@ Tests cover:
 6. Statistics tracking (hits/misses)
 7. Item data extraction preserves essential fields
 8. Cache persistence across instances
+
+MatchCache tests cover:
+1. Basic operations (get/set/invalidate)
+2. Library-level invalidation
+3. Case-insensitive path handling
+4. Statistics tracking
+5. Clear and persistence
 """
 
 import os
@@ -547,4 +554,329 @@ class TestEdgeCases:
 
         assert movies[0]["title"] == "Movie"
         assert tv_shows[0]["title"] == "TV Show"
+        cache.close()
+
+
+# =============================================================================
+# MatchCache Initialization Tests
+# =============================================================================
+
+
+class TestMatchCacheInit:
+    """Tests for MatchCache initialization."""
+
+    def test_init_creates_match_cache_directory(self, tmp_path):
+        """MatchCache creates match_cache/ subdirectory on initialization."""
+        from plex.cache import MatchCache
+
+        cache = MatchCache(str(tmp_path))
+
+        cache_dir = tmp_path / "match_cache"
+        assert cache_dir.exists()
+        assert cache_dir.is_dir()
+        cache.close()
+
+    def test_init_with_custom_size_limit(self, tmp_path):
+        """MatchCache accepts custom size limit."""
+        from plex.cache import MatchCache
+
+        custom_limit = 25 * 1024 * 1024  # 25MB
+        cache = MatchCache(str(tmp_path), size_limit=custom_limit)
+
+        assert cache._size_limit == custom_limit
+        cache.close()
+
+    def test_repr_shows_cache_info(self, tmp_path):
+        """MatchCache repr shows data_dir, matches, and hit_rate."""
+        from plex.cache import MatchCache
+
+        cache = MatchCache(str(tmp_path))
+        cache.set_match("Movies", "/media/movie.mp4", "/library/metadata/123")
+
+        repr_str = repr(cache)
+
+        assert "MatchCache" in repr_str
+        assert str(tmp_path) in repr_str
+        assert "matches=" in repr_str
+        cache.close()
+
+
+# =============================================================================
+# MatchCache Basic Operations Tests
+# =============================================================================
+
+
+class TestMatchCacheOperations:
+    """Tests for MatchCache get/set/invalidate operations."""
+
+    def test_set_and_get_match(self, tmp_path):
+        """set_match stores and get_match retrieves path-to-key mapping."""
+        from plex.cache import MatchCache
+
+        cache = MatchCache(str(tmp_path))
+
+        cache.set_match("Movies", "/media/movie.mp4", "/library/metadata/123")
+        result = cache.get_match("Movies", "/media/movie.mp4")
+
+        assert result == "/library/metadata/123"
+        cache.close()
+
+    def test_get_match_returns_none_on_miss(self, tmp_path):
+        """get_match returns None when path not cached."""
+        from plex.cache import MatchCache
+
+        cache = MatchCache(str(tmp_path))
+
+        result = cache.get_match("Movies", "/media/nonexistent.mp4")
+
+        assert result is None
+        cache.close()
+
+    def test_invalidate_removes_specific_match(self, tmp_path):
+        """invalidate() removes only the specified match."""
+        from plex.cache import MatchCache
+
+        cache = MatchCache(str(tmp_path))
+        cache.set_match("Movies", "/media/movie1.mp4", "/library/metadata/1")
+        cache.set_match("Movies", "/media/movie2.mp4", "/library/metadata/2")
+
+        cache.invalidate("Movies", "/media/movie1.mp4")
+
+        assert cache.get_match("Movies", "/media/movie1.mp4") is None
+        assert cache.get_match("Movies", "/media/movie2.mp4") == "/library/metadata/2"
+        cache.close()
+
+    def test_invalidate_nonexistent_key_no_error(self, tmp_path):
+        """invalidate() on non-existent key does not raise error."""
+        from plex.cache import MatchCache
+
+        cache = MatchCache(str(tmp_path))
+
+        # Should not raise
+        cache.invalidate("Movies", "/media/nonexistent.mp4")
+
+        cache.close()
+
+
+# =============================================================================
+# MatchCache Library Invalidation Tests
+# =============================================================================
+
+
+class TestMatchCacheLibraryInvalidation:
+    """Tests for invalidate_library() operation."""
+
+    def test_invalidate_library_removes_all_matches_for_library(self, tmp_path):
+        """invalidate_library() removes all matches for specified library."""
+        from plex.cache import MatchCache
+
+        cache = MatchCache(str(tmp_path))
+        cache.set_match("Movies", "/media/movie1.mp4", "/library/metadata/1")
+        cache.set_match("Movies", "/media/movie2.mp4", "/library/metadata/2")
+        cache.set_match("TV Shows", "/media/show.mp4", "/library/metadata/3")
+
+        cache.invalidate_library("Movies")
+
+        assert cache.get_match("Movies", "/media/movie1.mp4") is None
+        assert cache.get_match("Movies", "/media/movie2.mp4") is None
+        # TV Shows should be unaffected
+        assert cache.get_match("TV Shows", "/media/show.mp4") == "/library/metadata/3"
+        cache.close()
+
+    def test_invalidate_library_empty_library_no_error(self, tmp_path):
+        """invalidate_library() on library with no matches does not error."""
+        from plex.cache import MatchCache
+
+        cache = MatchCache(str(tmp_path))
+
+        # Should not raise
+        cache.invalidate_library("NonExistent")
+
+        cache.close()
+
+
+# =============================================================================
+# MatchCache Case-Insensitive Path Handling Tests
+# =============================================================================
+
+
+class TestMatchCacheCaseInsensitive:
+    """Tests for case-insensitive path handling."""
+
+    def test_path_matching_is_case_insensitive(self, tmp_path):
+        """Paths are stored and matched case-insensitively."""
+        from plex.cache import MatchCache
+
+        cache = MatchCache(str(tmp_path))
+
+        # Store with one case
+        cache.set_match("Movies", "/Media/Movie.MP4", "/library/metadata/123")
+
+        # Retrieve with different cases
+        assert cache.get_match("Movies", "/media/movie.mp4") == "/library/metadata/123"
+        assert cache.get_match("Movies", "/MEDIA/MOVIE.MP4") == "/library/metadata/123"
+        assert cache.get_match("Movies", "/Media/Movie.MP4") == "/library/metadata/123"
+        cache.close()
+
+    def test_invalidate_is_case_insensitive(self, tmp_path):
+        """invalidate() works regardless of path case."""
+        from plex.cache import MatchCache
+
+        cache = MatchCache(str(tmp_path))
+        cache.set_match("Movies", "/media/movie.mp4", "/library/metadata/123")
+
+        # Invalidate with different case
+        cache.invalidate("Movies", "/MEDIA/MOVIE.MP4")
+
+        assert cache.get_match("Movies", "/media/movie.mp4") is None
+        cache.close()
+
+
+# =============================================================================
+# MatchCache Statistics Tests
+# =============================================================================
+
+
+class TestMatchCacheStatistics:
+    """Tests for MatchCache hit/miss statistics tracking."""
+
+    def test_stats_initial_values(self, tmp_path):
+        """Initial stats show zero hits and misses."""
+        from plex.cache import MatchCache
+
+        cache = MatchCache(str(tmp_path))
+
+        stats = cache.get_stats()
+
+        assert stats["hits"] == 0
+        assert stats["misses"] == 0
+        assert stats["hit_rate"] == 0.0
+        cache.close()
+
+    def test_stats_tracks_hits(self, tmp_path):
+        """Stats increment hits on cache hits."""
+        from plex.cache import MatchCache
+
+        cache = MatchCache(str(tmp_path))
+        cache.set_match("Movies", "/media/movie.mp4", "/library/metadata/123")
+
+        cache.get_match("Movies", "/media/movie.mp4")  # hit
+        cache.get_match("Movies", "/media/movie.mp4")  # hit
+        stats = cache.get_stats()
+
+        assert stats["hits"] == 2
+        assert stats["misses"] == 0
+        cache.close()
+
+    def test_stats_tracks_misses(self, tmp_path):
+        """Stats increment misses on cache misses."""
+        from plex.cache import MatchCache
+
+        cache = MatchCache(str(tmp_path))
+
+        cache.get_match("Movies", "/media/movie1.mp4")  # miss
+        cache.get_match("Movies", "/media/movie2.mp4")  # miss
+        stats = cache.get_stats()
+
+        assert stats["hits"] == 0
+        assert stats["misses"] == 2
+        cache.close()
+
+    def test_stats_calculates_hit_rate(self, tmp_path):
+        """Stats calculates correct hit rate percentage."""
+        from plex.cache import MatchCache
+
+        cache = MatchCache(str(tmp_path))
+        cache.set_match("Movies", "/media/movie.mp4", "/library/metadata/123")
+
+        cache.get_match("Movies", "/media/movie.mp4")  # hit
+        cache.get_match("Movies", "/media/movie.mp4")  # hit
+        cache.get_match("Movies", "/media/other.mp4")  # miss
+        cache.get_match("Movies", "/media/movie.mp4")  # hit
+        stats = cache.get_stats()
+
+        # 3 hits, 1 miss = 75%
+        assert stats["hits"] == 3
+        assert stats["misses"] == 1
+        assert stats["hit_rate"] == 75.0
+        cache.close()
+
+
+# =============================================================================
+# MatchCache Clear Tests
+# =============================================================================
+
+
+class TestMatchCacheClear:
+    """Tests for MatchCache clear() operation."""
+
+    def test_clear_removes_all_matches(self, tmp_path):
+        """clear() removes all cached matches."""
+        from plex.cache import MatchCache
+
+        cache = MatchCache(str(tmp_path))
+        cache.set_match("Movies", "/media/movie.mp4", "/library/metadata/1")
+        cache.set_match("TV Shows", "/media/show.mp4", "/library/metadata/2")
+
+        cache.clear()
+
+        assert cache.get_match("Movies", "/media/movie.mp4") is None
+        assert cache.get_match("TV Shows", "/media/show.mp4") is None
+        cache.close()
+
+    def test_clear_resets_statistics(self, tmp_path):
+        """clear() resets hit/miss counters."""
+        from plex.cache import MatchCache
+
+        cache = MatchCache(str(tmp_path))
+        cache.set_match("Movies", "/media/movie.mp4", "/library/metadata/123")
+        cache.get_match("Movies", "/media/movie.mp4")  # hit
+        cache.get_match("Movies", "/media/other.mp4")  # miss
+
+        cache.clear()
+        stats = cache.get_stats()
+
+        assert stats["hits"] == 0
+        assert stats["misses"] == 0
+        cache.close()
+
+
+# =============================================================================
+# MatchCache Persistence Tests
+# =============================================================================
+
+
+class TestMatchCachePersistence:
+    """Tests for MatchCache persistence across instances."""
+
+    def test_matches_persist_across_instances(self, tmp_path):
+        """Cached matches survive MatchCache re-instantiation."""
+        from plex.cache import MatchCache
+
+        # Create cache and store match
+        cache1 = MatchCache(str(tmp_path))
+        cache1.set_match("Movies", "/media/movie.mp4", "/library/metadata/123")
+        cache1.close()
+
+        # Create new instance with same directory
+        cache2 = MatchCache(str(tmp_path))
+        result = cache2.get_match("Movies", "/media/movie.mp4")
+
+        assert result == "/library/metadata/123"
+        cache2.close()
+
+    def test_no_ttl_expiration(self, tmp_path):
+        """MatchCache entries do not expire (no TTL)."""
+        from plex.cache import MatchCache
+        import time
+
+        cache = MatchCache(str(tmp_path))
+        cache.set_match("Movies", "/media/movie.mp4", "/library/metadata/123")
+
+        # Wait a bit (would expire if TTL was very short)
+        time.sleep(0.5)
+
+        # Should still exist
+        result = cache.get_match("Movies", "/media/movie.mp4")
+        assert result == "/library/metadata/123"
         cache.close()
