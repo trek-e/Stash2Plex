@@ -2,11 +2,26 @@
 
 ## What This Is
 
-Improvements to the PlexSync plugin for Stash, which syncs metadata from Stash to Plex. The current version has timing and reliability issues — syncs fail when Plex is unavailable, late Stash metadata updates don't propagate, and matching sometimes fails even when a match exists.
+Improvements to the PlexSync plugin for Stash, which syncs metadata from Stash to Plex. The plugin provides reliable, queue-based synchronization with comprehensive test coverage, caching for performance, and granular control over which fields sync.
 
 ## Core Value
 
 Reliable sync: when metadata changes in Stash, it eventually reaches Plex — even if Plex was temporarily unavailable or Stash hadn't finished indexing yet.
+
+## Current State (v1.1)
+
+**Shipped:** 2026-02-03
+
+PlexSync v1.1 provides a hardened foundation:
+- 500+ tests with >80% coverage across all modules
+- Complete documentation (user guide, architecture, API reference)
+- Disk-backed caching reducing Plex API calls
+- SyncStats with batch summary logging
+- Partial failure recovery with per-field tracking
+- Metadata sync toggles for selective field syncing
+- 18,904 lines of Python
+
+**Tech stack:** Python 3.9+, SQLite (persist-queue), plexapi, pydantic, diskcache, MkDocs
 
 ## Requirements
 
@@ -17,68 +32,67 @@ Reliable sync: when metadata changes in Stash, it eventually reaches Plex — ev
 - [x] Input sanitization — validate/clean data before sending to Plex API
 - [x] Improved matching logic — confidence scoring, reduced false negatives
 
-### Active (v1.1)
+### Validated (v1.1)
 
-**Testing (thorough coverage):**
-- [ ] pytest infrastructure with fixtures for Plex/Stash mocking
-- [ ] Unit tests for all core modules (queue, worker, matching, validation)
-- [ ] Integration tests with mocked Plex/Stash APIs
-- [ ] Coverage reporting and CI integration
+- [x] pytest infrastructure with fixtures for Plex/Stash mocking
+- [x] Unit tests for all core modules (queue, worker, matching, validation) — 500+ tests
+- [x] Integration tests with mocked Plex/Stash APIs — 62 integration tests
+- [x] Coverage reporting and CI integration — >80% enforced
+- [x] User guide: installation, configuration, troubleshooting
+- [x] Architecture docs: component diagrams, data flow, design decisions
+- [x] API reference: auto-generated from docstrings (MkDocs)
+- [x] Plex library caching to reduce API calls (diskcache, 1-hour TTL)
+- [x] Optimized matching with match result caching
+- [x] Structured logging with batch summary every 10 jobs
+- [x] Sync statistics and metrics (SyncStats, JSON output)
+- [x] Edge case handling (unicode, special characters, long titles, field limits)
+- [x] Partial failure recovery with per-field error tracking
+- [x] Metadata sync toggles (enable/disable each field category)
 
-**Documentation (thorough coverage):**
-- [ ] User guide: installation, configuration, troubleshooting
-- [ ] Architecture docs: component diagrams, data flow, design decisions
-- [ ] API reference: auto-generated from docstrings
+### Active (v1.2)
 
-**Performance:**
-- [ ] Plex library caching to reduce API calls
-- [ ] Optimized matching algorithms
-- [ ] Batch operations where applicable
+- [ ] Queue Management UI — button to delete queue/clear dead items from Stash UI
+- [ ] Process Queue Button — manual trigger for stalled queues
+- [ ] Dynamic Queue Timeout — timeout based on item count × avg processing time
 
-**Observability:**
-- [ ] Structured logging improvements
-- [ ] Sync statistics and metrics
-- [ ] Error reporting enhancements
-
-**Reliability:**
-- [ ] Edge case handling (unicode, special characters, long titles)
-- [ ] Recovery improvements beyond current DLQ system
-
-### Out of Scope (v1.1)
+### Out of Scope
 
 - Plex → Stash sync — Stash remains the primary metadata source
-- New metadata fields — deferred to v1.2+
-- Bi-directional sync — deferred to v1.2+
+- Bi-directional sync — complexity outweighs benefit for current use case
+- Mobile/web UI — Stash plugin UI is sufficient
 
 ## Context
-
-**Current state:** PlexSync v1.0 shipped. Solid queue-based architecture working in production. v1.1 focuses on foundation hardening — comprehensive tests, thorough documentation, then performance/observability/reliability improvements.
 
 **Source:** https://github.com/stashapp/CommunityScripts/tree/main/plugins/PlexSync
 
 ## Constraints
 
 - **Compatibility**: Must work with existing Stash plugin architecture
-- **Dependencies**: Should minimize new dependencies beyond what's already in requirements.txt (stashapi, unidecode, requests)
+- **Dependencies**: Minimize new dependencies (added diskcache for v1.1 caching)
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Fork locally for development | Need to test changes against real Stash/Plex setup | — Pending |
 | persist-queue for SQLite queue | Built-in crash recovery vs custom SQLite queue | v1.0 |
 | Job metadata for sync state | Simpler than separate SQLite table | v1.0 |
 | JSON file for timestamps | sync_timestamps.json with atomic writes | v1.0 |
-| In-memory dedup | Resets on restart but meets <100ms hook requirement | v1.0 |
 | Confidence scoring | HIGH/LOW based on match uniqueness | v1.0 |
 | PlexNotFound as transient | Items may appear after library scan | v1.0 |
+| 80% coverage threshold | Enforced via --cov-fail-under | v1.1 |
+| unittest.mock over pytest-mock | Avoid external dependencies in conftest.py | v1.1 |
+| 1-hour TTL for library cache | Balances freshness vs API call reduction | v1.1 |
+| No TTL for match cache | File paths stable, invalidate on failure | v1.1 |
+| LOCKED: Missing fields clear Plex | None/empty in data clears existing Plex value | v1.1 |
+| All sync toggles default True | Backward compatible with existing configs | v1.1 |
 
 ## Milestones
 
 | Version | Status | Date | Notes |
 |---------|--------|------|-------|
 | v1.0 | Complete | 2026-02-03 | 5 phases, 16 plans, 76 commits |
-| v1.1 | Active | — | Foundation hardening: tests, docs, performance |
+| v1.1 | Complete | 2026-02-03 | 11 phases, 27 plans, 136 commits |
+| v1.2 | Planned | — | Queue UI improvements (phases 11-13) |
 
 ---
-*Last updated: 2026-02-03 — v1.1 milestone started*
+*Last updated: 2026-02-03 after v1.1 milestone*
