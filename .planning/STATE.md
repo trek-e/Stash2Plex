@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 4 of 11 (User Documentation) - In Progress
-Plan: 3 of 4 complete
-Status: Configuration reference complete
-Last activity: 2026-02-03 - Completed 04-03-PLAN.md
+Phase: 4 of 11 (User Documentation) - Complete
+Plan: 4 of 4 complete
+Status: Phase complete - all user documentation created
+Last activity: 2026-02-03 - Completed 04-04-PLAN.md
 
-Progress: [██████░░░░░░░░░░] 36% (4/11 phases complete)
+Progress: [███████░░░░░░░░░] 45% (5/11 phases complete)
 
 ## Decisions Log
 
@@ -54,6 +54,9 @@ Progress: [██████░░░░░░░░░░] 36% (4/11 phases co
 | 2026-02-03 | 04-02 | Docker path mapping emphasis | Critical for matching - paths must be identical between Stash and Plex |
 | 2026-02-03 | 04-03 | Markdown tables for settings | Quick scanning of type, default, range for each setting |
 | 2026-02-03 | 04-03 | 5 named scenario examples | Cover common user setups: basic, preserve edits, relaxed, network, Docker |
+| 2026-02-03 | 04-04 | Line-by-line log annotation | Table explaining each line in success flow log example |
+| 2026-02-03 | 04-04 | Error classification tables | Transient vs permanent errors clearly documented |
+| 2026-02-03 | 04-04 | Issue template markdown format | GitHub-friendly copy-paste format |
 
 ## Roadmap Evolution
 
@@ -144,27 +147,29 @@ Progress: [██████░░░░░░░░░░] 36% (4/11 phases co
 5. **Circuit breaker tests** - 20 tests with freezegun time control for state machine (03-03)
 6. **Error scenario tests** - 15 tests covering Plex down, not found, permanent errors, strict matching (03-04)
 
-### v1.1 Phase 4: User Documentation (In Progress)
+### v1.1 Phase 4: User Documentation (Complete 2026-02-03)
 
 **Stats:**
-- 3 of 4 plans complete
-- 4 commits
+- 4 of 4 plans complete
+- 5 commits
 - 4 files created
 
 **Accomplishments:**
 1. **README.md** - Project overview, quick start guide, documentation links (04-01)
 2. **docs/install.md** - Complete installation guide with PythonDepManager, Docker/bare metal (04-02)
 3. **docs/config.md** - Configuration reference with all 10 settings, 5 examples, validation rules (04-03)
+4. **docs/troubleshoot.md** - Troubleshooting guide with 8 common issues, log interpretation, DLQ explanation (04-04)
 
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 04-03-PLAN.md (docs/config.md)
+Stopped at: Completed 04-04-PLAN.md (docs/troubleshoot.md)
 Resume file: None
 
 ## Next Steps
 
-Phase 4 Plan 3 complete. Configuration reference created.
+Phase 4 (User Documentation) complete. All user-facing documentation created:
+- README.md, docs/install.md, docs/config.md, docs/troubleshoot.md
 
 Ready for:
-- 04-04: Troubleshooting Guide (docs/troubleshoot.md)
+- Phase 5: Developer Guide (architecture docs, contribution guide)
