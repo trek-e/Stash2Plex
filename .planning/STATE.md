@@ -9,19 +9,19 @@ See: .planning/PROJECT.md (updated 2025-01-24)
 
 ## Current Position
 
-Phase: 5 of 5 (Late Update Detection) - IN PROGRESS
-Plan: 2 of 3 in current phase
-Status: Plan 05-02 complete
-Last activity: 2026-02-03 — Completed 05-02-PLAN.md
+Phase: 5 of 5 (Late Update Detection) - COMPLETE
+Plan: 3 of 3 in current phase
+Status: Phase 5 complete
+Last activity: 2026-02-03 — Completed 05-03-PLAN.md
 
-Progress: [██████████████░] 95% (15/~16 plans)
+Progress: [████████████████] 100% (16/16 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 15
+- Total plans completed: 16
 - Average duration: 2.4 min
-- Total execution time: 0.61 hours
+- Total execution time: 0.66 hours
 
 **By Phase:**
 
@@ -31,10 +31,10 @@ Progress: [██████████████░] 95% (15/~16 plans)
 | 2. Validation & Error Classification | 3 | 7 min | 2.3 min |
 | 3. Plex API Client | 3 | 9 min | 3 min |
 | 4. Queue Processor with Retry | 4 | 9 min | 2.25 min |
-| 5. Late Update Detection | 2 | 4.5 min | 2.25 min |
+| 5. Late Update Detection | 3 | 7.5 min | 2.5 min |
 
 **Recent Trend:**
-- Last 5 plans: 04-03 (3min), 04-04 (2min), 05-01 (2.5min), 05-02 (2min)
+- Last 5 plans: 04-04 (2min), 05-01 (2.5min), 05-02 (2min), 05-03 (3min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -45,6 +45,11 @@ Progress: [██████████████░] 95% (15/~16 plans)
 
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
+
+**From 05-03 (Late Update Detection Integration):**
+- Pass sync_timestamps as dict parameter to hook handler (avoid repeated file I/O)
+- Call unmark_scene_pending() in worker exception handlers (allow re-enqueue on retry)
+- Deduplicate candidates by .key instead of ratingKey (more reliable attribute)
 
 **From 05-02 (Deduplication and Confidence Scoring):**
 - In-memory set for dedup (resets on restart - acceptable tradeoff for <100ms hook requirement)
@@ -147,18 +152,23 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-03T05:15:24Z
-Stopped at: Completed 05-02-PLAN.md
+Last session: 2026-02-03T05:21:44Z
+Stopped at: Completed 05-03-PLAN.md (Phase 5 complete)
 Resume file: None
 
 ## Completed Phases
 
-### Phase 5: Late Update Detection (IN PROGRESS - Started 2026-02-03)
-**Plans completed:** 2/3
-**Commits:** 01a2e61 → 848b708 (4 commits total, 2 in 05-01, 2 in 05-02)
-**Completed plans:**
-- 05-01: Sync timestamp infrastructure (sync_timestamps.json) and config flags (strict_matching, preserve_plex_edits)
-- 05-02: In-memory deduplication tracking and confidence-scored matching (MatchConfidence enum, find_plex_items_with_confidence)
+### Phase 5: Late Update Detection (Complete 2026-02-03)
+**Plans completed:** 3/3
+**Commits:** 01a2e61 → 0717fa5 (7 commits total, 2 in 05-01, 2 in 05-02, 3 in 05-03)
+**Key deliverables:**
+- Sync timestamp infrastructure (sync_timestamps.json) with atomic writes
+- Config flags: strict_matching (default true), preserve_plex_edits (default false)
+- In-memory deduplication tracking (mark/unmark/is_scene_pending)
+- Confidence-scored matching: HIGH (single match) vs LOW (multiple matches)
+- Timestamp-based filtering in hook handler (<100ms)
+- Confidence-based matching in worker with detailed logging
+- Full end-to-end wiring through PlexSync.py
 
 ### Phase 4: Queue Processor with Retry (Complete 2026-01-24)
 **Verification:** PASSED (all must-haves)
