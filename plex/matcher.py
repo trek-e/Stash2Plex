@@ -98,8 +98,8 @@ def find_plex_item_by_path(
 
     # Derive title variants from filename
     title_search = path.stem
-    title_search = re.sub(r'\s*[-_]\s*(WEBDL|WEB-DL|HDTV|BluRay|BDRip|DVDRip|720p|1080p|2160p|4K).*$', '', title_search, flags=re.IGNORECASE)
-    title_base = re.sub(r'\s*[-_]\s*\d{4}-\d{2}-\d{2}$', '', title_search)
+    title_search = re.sub(r'\s*[-_]?\s*(WEBDL|WEB-DL|WEBRip|HDTV|BluRay|BDRip|DVDRip|720p|1080p|2160p|4K|HDR|DV).*$', '', title_search, flags=re.IGNORECASE)
+    title_base = re.sub(r'\s*[-_]?\s*\d{4}-\d{2}-\d{2}\s*$', '', title_search)
 
     matches = []
 
@@ -167,12 +167,13 @@ def find_plex_items_with_confidence(
 
     # Derive title variants from filename
     title_search = path.stem
-    # Remove quality suffix
-    title_search = re.sub(r'\s*[-_]\s*(WEBDL|WEB-DL|HDTV|BluRay|BDRip|DVDRip|720p|1080p|2160p|4K).*$', '', title_search, flags=re.IGNORECASE)
-    # Also try without date
-    title_base = re.sub(r'\s*[-_]\s*\d{4}-\d{2}-\d{2}$', '', title_search)
+    # Remove quality suffix (handles "WEBDL", "- WEBDL", "WEBDL-2160p", etc.)
+    title_search = re.sub(r'\s*[-_]?\s*(WEBDL|WEB-DL|WEBRip|HDTV|BluRay|BDRip|DVDRip|720p|1080p|2160p|4K|HDR|DV).*$', '', title_search, flags=re.IGNORECASE)
+    # Remove date suffix like "- 2026-01-30" or "2026-01-30"
+    title_base = re.sub(r'\s*[-_]?\s*\d{4}-\d{2}-\d{2}\s*$', '', title_search)
 
     print(f"[PlexSync Matcher] Searching '{library.title}' for: {filename}", file=sys.stderr)
+    print(f"[PlexSync Matcher] Title variants: '{title_search}' / '{title_base}'", file=sys.stderr)
 
     candidates = []
 

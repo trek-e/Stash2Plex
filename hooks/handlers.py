@@ -141,6 +141,9 @@ def on_scene_update(
         try:
             scene = stash.find_scene(scene_id)
             if scene:
+                # Debug: log all keys in the scene object
+                print(f"[PlexSync] Scene {scene_id} keys: {list(scene.keys())}", file=sys.stderr)
+
                 # Get file path
                 files = scene.get('files', [])
                 if files:
@@ -157,21 +160,25 @@ def on_scene_update(
                 studio = scene.get('studio')
                 if studio:
                     scene_data['studio'] = studio.get('name')
+                    print(f"[PlexSync] Scene {scene_id} studio: {scene_data['studio']}", file=sys.stderr)
 
                 # Get performer names
                 performers = scene.get('performers', [])
                 if performers:
                     scene_data['performers'] = [p.get('name') for p in performers if p.get('name')]
+                    print(f"[PlexSync] Scene {scene_id} performers: {scene_data['performers']}", file=sys.stderr)
 
                 # Get tag names
                 tags = scene.get('tags', [])
                 if tags:
                     scene_data['tags'] = [t.get('name') for t in tags if t.get('name')]
 
-                print(f"[PlexSync] Scene {scene_id} metadata: title={scene_data.get('title')}, studio={scene_data.get('studio')}, performers={len(scene_data.get('performers', []))}", file=sys.stderr)
+                print(f"[PlexSync] Scene {scene_id} metadata: title={scene_data.get('title')}, studio={scene_data.get('studio')}, performers={len(scene_data.get('performers', []))}, details={bool(scene_data.get('details'))}", file=sys.stderr)
 
         except Exception as e:
+            import traceback
             print(f"[PlexSync] WARNING: Could not fetch scene {scene_id}: {e}", file=sys.stderr)
+            traceback.print_exc()
 
     if not file_path:
         print(f"[PlexSync] ERROR: No file path for scene {scene_id}, cannot sync to Plex", file=sys.stderr)
