@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 8 of 13 (Observability Improvements)
-Plan: 1 of 2 complete
-Status: In progress
-Last activity: 2026-02-03 - Completed 08-01-PLAN.md
+Plan: 2 of 2 complete
+Status: Phase complete
+Last activity: 2026-02-03 - Completed 08-02-PLAN.md
 
-Progress: [█████████████░░░] 81% (10/12 plan groups complete)
+Progress: [██████████████░░] 88% (11/12 plan groups complete)
 
 ## Decisions Log
 
@@ -77,6 +77,10 @@ Progress: [█████████████░░░] 81% (10/12 plan gro
 | 2026-02-03 | 07-03 | Timing log levels | DEBUG for <1s, INFO for >=1s operations |
 | 2026-02-03 | 08-01 | Cumulative merge on save | Stats merged on save rather than overwrite for cross-session persistence |
 | 2026-02-03 | 08-01 | Test location matches project structure | tests/worker/ not tests/unit/worker/ to match existing patterns |
+| 2026-02-03 | 08-02 | Stats tracked in worker loop not _process_job | _process_job returns confidence, worker loop handles timing and stats calls |
+| 2026-02-03 | 08-02 | _process_job returns confidence | Returns 'high' or 'low' for single/multiple matches |
+| 2026-02-03 | 08-02 | Batch summary replaces _log_dlq_status | _log_batch_summary includes DLQ via get_error_summary(), kept _log_dlq_status for startup |
+| 2026-02-03 | 08-02 | JSON stats in batch summary | Machine-parseable JSON line for log aggregation tools |
 
 ## Roadmap Evolution
 
@@ -222,30 +226,31 @@ Progress: [█████████████░░░] 81% (10/12 plan gro
 8. **Timing utilities** - @timed decorator and OperationTimer context manager (07-03)
 9. **Cache statistics** - Periodic logging of hit/miss rates (07-03)
 
-### v1.1 Phase 8: Observability Improvements (In Progress)
+### v1.1 Phase 8: Observability Improvements (Complete 2026-02-03)
 
 **Stats:**
-- 1 of 2 plans complete
-- 2 commits
-- 4 files created/modified
+- 2 of 2 plans complete
+- 5 commits
+- 7 files created/modified
 
 **Accomplishments:**
 1. **SyncStats dataclass** - Job counts, timing, error aggregation, match confidence tracking (08-01)
 2. **Stats persistence** - save_to_file/load_from_file with cumulative merge (08-01)
 3. **DLQ error summary** - get_error_summary() for error type aggregation (08-01)
-4. **48 new tests** - 44 for SyncStats, 4 for DLQ error_summary
+4. **Stats-integrated processor** - Worker tracks all job outcomes (08-02)
+5. **Batch summary logging** - Every 10 jobs with human-readable and JSON formats (08-02)
+6. **DLQ breakdown in logs** - Error type aggregation in batch summary (08-02)
+7. **71 new tests** - 44 for SyncStats, 4 for DLQ, 17 for processor stats, 6 integration
 
 ## Session Continuity
 
-Last session: 2026-02-03 17:32 UTC
-Stopped at: Completed 08-01-PLAN.md
+Last session: 2026-02-03 18:00 UTC
+Stopped at: Completed 08-02-PLAN.md
 Resume file: None
 
 ## Next Steps
 
-Phase 8 (Observability Improvements) in progress:
-- Plan 08-01 complete: SyncStats dataclass and DLQ error_summary
-- Plan 08-02 next: Batch summary logging (uses SyncStats and DLQ.get_error_summary)
+Phase 8 (Observability Improvements) complete.
 
 Next phases per roadmap:
 - Phase 9: Reliability Hardening
