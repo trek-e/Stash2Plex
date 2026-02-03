@@ -63,6 +63,51 @@ class PlexSyncConfig(BaseModel):
         description="Preserve manual Plex edits. True = only update empty fields, False = Stash always wins."
     )
 
+    # =========================================================================
+    # Field Sync Toggles (all default True = enabled)
+    # =========================================================================
+
+    sync_master: bool = Field(
+        default=True,
+        description="Master toggle to enable/disable all metadata field syncing"
+    )
+    sync_studio: bool = Field(
+        default=True,
+        description="Sync studio name from Stash to Plex"
+    )
+    sync_summary: bool = Field(
+        default=True,
+        description="Sync summary/details from Stash to Plex"
+    )
+    sync_tagline: bool = Field(
+        default=True,
+        description="Sync tagline from Stash to Plex"
+    )
+    sync_date: bool = Field(
+        default=True,
+        description="Sync release date from Stash to Plex"
+    )
+    sync_performers: bool = Field(
+        default=True,
+        description="Sync performers as Plex actors"
+    )
+    sync_tags: bool = Field(
+        default=True,
+        description="Sync tags as Plex genres"
+    )
+    sync_poster: bool = Field(
+        default=True,
+        description="Sync poster image from Stash to Plex"
+    )
+    sync_background: bool = Field(
+        default=True,
+        description="Sync background/fanart image from Stash to Plex"
+    )
+    sync_collection: bool = Field(
+        default=True,
+        description="Add items to Plex collection based on studio name"
+    )
+
     # Stash connection (for fetching images)
     stash_url: Optional[str] = Field(
         default=None,
@@ -97,7 +142,13 @@ class PlexSyncConfig(BaseModel):
             raise ValueError('plex_token appears invalid (too short)')
         return v
 
-    @field_validator('strict_matching', 'preserve_plex_edits', mode='before')
+    @field_validator(
+        'strict_matching', 'preserve_plex_edits',
+        'sync_master', 'sync_studio', 'sync_summary', 'sync_tagline',
+        'sync_date', 'sync_performers', 'sync_tags', 'sync_poster',
+        'sync_background', 'sync_collection',
+        mode='before'
+    )
     @classmethod
     def validate_booleans(cls, v):
         """Ensure boolean fields are actual booleans, not truthy strings."""
@@ -128,6 +179,17 @@ class PlexSyncConfig(BaseModel):
             f"strict_matching={self.strict_matching}, "
             f"preserve_plex_edits={self.preserve_plex_edits}"
         )
+        # Log field sync toggle summary
+        toggles_off = [k.replace('sync_', '') for k in [
+            'sync_studio', 'sync_summary', 'sync_tagline', 'sync_date',
+            'sync_performers', 'sync_tags', 'sync_poster', 'sync_background', 'sync_collection'
+        ] if not getattr(self, k, True)]
+        if not self.sync_master:
+            log.info("Field sync: MASTER OFF (all fields disabled)")
+        elif toggles_off:
+            log.info(f"Field sync: enabled except {toggles_off}")
+        else:
+            log.info("Field sync: all fields enabled")
 
 
 def validate_config(config_dict: dict) -> tuple[Optional[PlexSyncConfig], Optional[str]]:

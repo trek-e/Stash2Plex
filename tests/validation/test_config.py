@@ -336,6 +336,17 @@ class TestPlexSyncConfig:
         assert config.stash_url is None
         assert config.stash_api_key is None
         assert config.stash_session_cookie is None
+        # Sync toggles all default to True
+        assert config.sync_master is True
+        assert config.sync_studio is True
+        assert config.sync_summary is True
+        assert config.sync_tagline is True
+        assert config.sync_date is True
+        assert config.sync_performers is True
+        assert config.sync_tags is True
+        assert config.sync_poster is True
+        assert config.sync_background is True
+        assert config.sync_collection is True
 
 
 class TestValidateConfig:
@@ -406,11 +417,11 @@ class TestPlexSyncConfigLogConfig:
         config = PlexSyncConfig(**valid_config_dict)
         config.log_config()
 
-        # Check that log.info was called
-        mock_log.info.assert_called_once()
+        # Check that log.info was called (at least for config, plus toggle summary)
+        assert mock_log.info.call_count >= 1
 
-        # Get the log message
-        log_message = mock_log.info.call_args[0][0]
+        # Get the first log message (main config line)
+        log_message = mock_log.info.call_args_list[0][0][0]
 
         # Full token should not be in the message
         assert valid_config_dict["plex_token"] not in log_message
