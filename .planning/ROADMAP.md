@@ -64,6 +64,7 @@ Plans:
 
 ### Phase 3: Integration Tests
 **Goal:** End-to-end tests with mocked external services
+**Plans:** 3 plans
 
 - Full sync workflow with mocked Plex/Stash
 - Error scenarios (Plex down, Stash timeout, etc.)
@@ -71,6 +72,11 @@ Plans:
 - Circuit breaker behavior tests
 
 **Success:** Integration tests cover critical paths
+
+Plans:
+- [ ] 03-01-PLAN.md — Test infrastructure (freezegun, integration fixtures)
+- [ ] 03-02-PLAN.md — Sync workflow and error scenario tests
+- [ ] 03-03-PLAN.md — Queue persistence and circuit breaker tests
 
 ---
 
@@ -197,6 +203,24 @@ Plans:
 
 ---
 
+### Phase 13: Dynamic Queue Timeout
+**Goal:** Make queue processing timeout dynamic based on item count and average processing time
+
+- Track average time to process each queue item
+- Calculate required timeout based on: items_in_queue × avg_time_per_item
+- Request appropriate timeout from Stash plugin system
+- Handle cases where calculated timeout exceeds Stash limits
+- Fallback behavior when timeout cannot be extended
+
+**Success:** Queue processing timeout adapts to workload size, reducing timeouts for large queues
+
+**Depends on:** Phase 12
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 13 to break down)
+
+---
+
 ## Phase Dependencies
 
 ```
@@ -224,6 +248,8 @@ Phase 4 (User Docs)                Phase 5 (Arch Docs)
                     Phase 11 (Queue UI)
                               |
                     Phase 12 (Process Queue)
+                              |
+                    Phase 13 (Dynamic Timeout)
 ```
 
 Note: Phase 2.1 (Bugfix) can run in parallel with Phase 3 - it's independent.
@@ -235,7 +261,7 @@ Note: Phase 2.1 (Bugfix) can run in parallel with Phase 3 - it's independent.
 | 1. Test Infrastructure | Medium | 2 |
 | 2. Core Unit Tests | High | 4 |
 | 2.1. Plex Device Registration | Low | 1 |
-| 3. Integration Tests | High | 3-4 |
+| 3. Integration Tests | High | 3 |
 | 4. User Documentation | Medium | 2-3 |
 | 5. Architecture Docs | Medium | 2-3 |
 | 6. API Documentation | Low | 1-2 |
@@ -245,8 +271,9 @@ Note: Phase 2.1 (Bugfix) can run in parallel with Phase 3 - it's independent.
 | 10. Metadata Sync Toggles | Medium | 2-3 |
 | 11. Queue Management UI | Low | 1-2 |
 | 12. Process Queue Button | Low | 1-2 |
+| 13. Dynamic Queue Timeout | Medium | 1-2 |
 
-**Total:** ~25-37 plans across 13 phases
+**Total:** ~26-39 plans across 14 phases
 
 ---
 *Created: 2026-02-03*
