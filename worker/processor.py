@@ -700,6 +700,13 @@ class SyncWorker:
         result = PartialSyncResult()
         edits = {}
 
+        # =========================================================================
+        # MASTER TOGGLE CHECK - if OFF, skip ALL field syncing
+        # =========================================================================
+        if not getattr(self.config, 'sync_master', True):
+            log_debug("Master sync toggle is OFF - skipping all field syncs")
+            return result
+
         # LOCKED DECISION: Missing optional fields clear existing Plex values
         # - If key exists AND value is None/empty -> CLEAR (set to '')
         # - If key exists AND value is present -> sanitize and set
@@ -717,54 +724,58 @@ class SyncWorker:
                 if not self.config.preserve_plex_edits or not plex_item.title:
                     edits['title.value'] = sanitized
 
-        # Handle studio field
-        if 'studio' in data:
-            studio_value = data.get('studio')
-            if studio_value is None or studio_value == '':
-                # LOCKED: Clear existing Plex value
-                edits['studio.value'] = ''
-                log_debug("Clearing studio (Stash value is empty)")
-            else:
-                sanitized = sanitize_for_plex(studio_value, max_length=MAX_STUDIO_LENGTH)
-                if not self.config.preserve_plex_edits or not plex_item.studio:
-                    edits['studio.value'] = sanitized
+        # Handle studio field - TOGGLE CHECK FIRST
+        if getattr(self.config, 'sync_studio', True):
+            if 'studio' in data:
+                studio_value = data.get('studio')
+                if studio_value is None or studio_value == '':
+                    # LOCKED: Clear existing Plex value
+                    edits['studio.value'] = ''
+                    log_debug("Clearing studio (Stash value is empty)")
+                else:
+                    sanitized = sanitize_for_plex(studio_value, max_length=MAX_STUDIO_LENGTH)
+                    if not self.config.preserve_plex_edits or not plex_item.studio:
+                        edits['studio.value'] = sanitized
 
-        # Handle summary field (Stash 'details' -> Plex 'summary')
-        # Check for both 'details' and 'summary' keys
-        has_summary_key = 'details' in data or 'summary' in data
-        if has_summary_key:
-            summary_value = data.get('details') or data.get('summary')
-            if summary_value is None or summary_value == '':
-                # LOCKED: Clear existing Plex value
-                edits['summary.value'] = ''
-                log_debug("Clearing summary (Stash value is empty)")
-            else:
-                sanitized = sanitize_for_plex(summary_value, max_length=MAX_SUMMARY_LENGTH)
-                if not self.config.preserve_plex_edits or not plex_item.summary:
-                    edits['summary.value'] = sanitized
+        # Handle summary field (Stash 'details' -> Plex 'summary') - TOGGLE CHECK FIRST
+        if getattr(self.config, 'sync_summary', True):
+            # Check for both 'details' and 'summary' keys
+            has_summary_key = 'details' in data or 'summary' in data
+            if has_summary_key:
+                summary_value = data.get('details') or data.get('summary')
+                if summary_value is None or summary_value == '':
+                    # LOCKED: Clear existing Plex value
+                    edits['summary.value'] = ''
+                    log_debug("Clearing summary (Stash value is empty)")
+                else:
+                    sanitized = sanitize_for_plex(summary_value, max_length=MAX_SUMMARY_LENGTH)
+                    if not self.config.preserve_plex_edits or not plex_item.summary:
+                        edits['summary.value'] = sanitized
 
-        # Handle tagline field
-        if 'tagline' in data:
-            tagline_value = data.get('tagline')
-            if tagline_value is None or tagline_value == '':
-                # LOCKED: Clear existing Plex value
-                edits['tagline.value'] = ''
-                log_debug("Clearing tagline (Stash value is empty)")
-            else:
-                sanitized = sanitize_for_plex(tagline_value, max_length=MAX_TAGLINE_LENGTH)
-                if not self.config.preserve_plex_edits or not getattr(plex_item, 'tagline', None):
-                    edits['tagline.value'] = sanitized
+        # Handle tagline field - TOGGLE CHECK FIRST
+        if getattr(self.config, 'sync_tagline', True):
+            if 'tagline' in data:
+                tagline_value = data.get('tagline')
+                if tagline_value is None or tagline_value == '':
+                    # LOCKED: Clear existing Plex value
+                    edits['tagline.value'] = ''
+                    log_debug("Clearing tagline (Stash value is empty)")
+                else:
+                    sanitized = sanitize_for_plex(tagline_value, max_length=MAX_TAGLINE_LENGTH)
+                    if not self.config.preserve_plex_edits or not getattr(plex_item, 'tagline', None):
+                        edits['tagline.value'] = sanitized
 
-        # Handle date field
-        if 'date' in data:
-            date_value = data.get('date')
-            if date_value is None or date_value == '':
-                # LOCKED: Clear existing Plex value
-                edits['originallyAvailableAt.value'] = ''
-                log_debug("Clearing date (Stash value is empty)")
-            else:
-                if not self.config.preserve_plex_edits or not getattr(plex_item, 'originallyAvailableAt', None):
-                    edits['originallyAvailableAt.value'] = date_value
+        # Handle date field - TOGGLE CHECK FIRST
+        if getattr(self.config, 'sync_date', True):
+            if 'date' in data:
+                date_value = data.get('date')
+                if date_value is None or date_value == '':
+                    # LOCKED: Clear existing Plex value
+                    edits['originallyAvailableAt.value'] = ''
+                    log_debug("Clearing date (Stash value is empty)")
+                else:
+                    if not self.config.preserve_plex_edits or not getattr(plex_item, 'originallyAvailableAt', None):
+                        edits['originallyAvailableAt.value'] = date_value
 
         # Apply core metadata edits (CRITICAL - failure propagates)
         if edits:
@@ -783,9 +794,9 @@ class SyncWorker:
         else:
             log_trace(f"No metadata fields to update for: {plex_item.title}")
 
-        # NON-CRITICAL: Sync performers as actors
+        # NON-CRITICAL: Sync performers as actors - TOGGLE CHECK FIRST
         # LOCKED: If 'performers' key exists with empty/None, clear all actors
-        if 'performers' in data:
+        if getattr(self.config, 'sync_performers', True) and 'performers' in data:
             performers = data.get('performers')
             if performers is None or performers == []:
                 # LOCKED: Clear all existing performers
@@ -835,9 +846,10 @@ class SyncWorker:
                     log_warn(f" Failed to sync performers: {e}")
                     result.add_warning('performers', e)
 
-        # NON-CRITICAL: Sync poster image (download from Stash, save to temp file, upload to Plex)
-        poster_url = data.get('poster_url')
-        if poster_url:
+        # NON-CRITICAL: Sync poster image - TOGGLE CHECK FIRST
+        # (download from Stash, save to temp file, upload to Plex)
+        if getattr(self.config, 'sync_poster', True) and data.get('poster_url'):
+            poster_url = data.get('poster_url')
             try:
                 image_data = self._fetch_stash_image(poster_url)
                 if image_data:
@@ -858,9 +870,10 @@ class SyncWorker:
                 log_warn(f" Failed to upload poster: {e}")
                 result.add_warning('poster', e)
 
-        # NON-CRITICAL: Sync background/art image (download from Stash, save to temp file, upload to Plex)
-        background_url = data.get('background_url')
-        if background_url:
+        # NON-CRITICAL: Sync background/art image - TOGGLE CHECK FIRST
+        # (download from Stash, save to temp file, upload to Plex)
+        if getattr(self.config, 'sync_background', True) and data.get('background_url'):
+            background_url = data.get('background_url')
             try:
                 image_data = self._fetch_stash_image(background_url)
                 if image_data:
@@ -881,9 +894,9 @@ class SyncWorker:
                 log_warn(f" Failed to upload background: {e}")
                 result.add_warning('background', e)
 
-        # NON-CRITICAL: Sync tags as genres
+        # NON-CRITICAL: Sync tags as genres - TOGGLE CHECK FIRST
         # LOCKED: If 'tags' key exists with empty/None, clear all tags
-        if 'tags' in data:
+        if getattr(self.config, 'sync_tags', True) and 'tags' in data:
             tags = data.get('tags')
             if tags is None or tags == []:
                 # LOCKED: Clear all existing tags/genres
@@ -932,9 +945,9 @@ class SyncWorker:
                     log_warn(f" Failed to sync tags: {e}")
                     result.add_warning('tags', e)
 
-        # NON-CRITICAL: Add to studio collection
-        studio = data.get('studio')
-        if studio:
+        # NON-CRITICAL: Add to studio collection - TOGGLE CHECK FIRST
+        if getattr(self.config, 'sync_collection', True) and data.get('studio'):
+            studio = data.get('studio')
             try:
                 current_collections = [c.tag for c in getattr(plex_item, 'collections', [])]
                 if studio not in current_collections:
