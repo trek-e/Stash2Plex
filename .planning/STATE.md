@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 3 of 11 (Integration Tests) - In progress
-Plan: 3 of 4 complete
-Status: Error scenario integration tests complete
-Last activity: 2026-02-03 - Completed 03-04-PLAN.md
+Phase: 3 of 11 (Integration Tests) - Complete
+Plan: 4 of 4 complete
+Status: Integration test suite complete (62 tests)
+Last activity: 2026-02-03 - Completed 03-03-PLAN.md
 
-Progress: [█████░░░░░░░░░░░] 31% (3/11 phases complete + 3 plans in Phase 3)
+Progress: [██████░░░░░░░░░░] 36% (4/11 phases complete)
 
 ## Decisions Log
 
@@ -45,6 +45,8 @@ Progress: [█████░░░░░░░░░░░] 31% (3/11 phases co
 | 2026-02-03 | 03-02 | Test class grouping by feature | TestFullSyncWorkflow, TestPreservePlexEditsMode, TestJobWithMissingFields |
 | 2026-02-03 | 03-04 | Tests verify actual behavior | PermanentError wrapped and translated to transient - tests document quirk |
 | 2026-02-03 | 03-04 | Missing path no unmark | Error before try block doesn't call unmark_scene_pending |
+| 2026-02-03 | 03-03 | Freezegun nested contexts | Use decorator + nested with blocks for state transition tests |
+| 2026-02-03 | 03-03 | Real queue for persistence tests | More reliable than mocking SQLiteAckQueue internals |
 
 ## Roadmap Evolution
 
@@ -120,26 +122,28 @@ Progress: [█████░░░░░░░░░░░] 31% (3/11 phases co
 2. **plexapi module configuration** - X_PLEX_IDENTIFIER, X_PLEX_PRODUCT, X_PLEX_DEVICE_NAME set before connections
 3. **Eliminates "new device" notifications** - PlexSync appears as "PlexSync Plugin" consistently
 
-### v1.1 Phase 3: Integration Tests (In Progress)
+### v1.1 Phase 3: Integration Tests (Complete 2026-02-03)
 
 **Stats:**
-- 3 of 4 plans complete
-- 4 commits
-- 5 files created/modified
+- 4 of 4 plans complete
+- 6 commits
+- 7 files created/modified
 
 **Accomplishments:**
 1. **Integration test dependencies** - freezegun and pytest-timeout added
 2. **Integration fixtures** - 7 fixtures composing unit test mocks
 3. **Sync workflow tests** - 13 tests covering metadata sync, preserve mode, partial data (03-02)
-4. **Error scenario tests** - 15 tests covering Plex down, not found, permanent errors, strict matching (03-04)
+4. **Queue persistence tests** - 14 tests for crash-safe retry metadata across worker restart (03-03)
+5. **Circuit breaker tests** - 20 tests with freezegun time control for state machine (03-03)
+6. **Error scenario tests** - 15 tests covering Plex down, not found, permanent errors, strict matching (03-04)
 
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 03-04-PLAN.md (Error scenario integration tests)
+Stopped at: Completed 03-03-PLAN.md (Queue persistence and circuit breaker tests)
 Resume file: None
 
 ## Next Steps
 
-Phase 3 Plan 04 complete. Ready for:
-- 03-03: Queue persistence integration tests (final plan in Phase 3)
+Phase 3 complete with 62 integration tests. Ready for:
+- Phase 4: Documentation (API docs, user guide, etc.)
