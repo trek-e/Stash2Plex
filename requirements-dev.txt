@@ -7,3 +7,7 @@ pytest-mock>=3.14.0
 pytest-cov>=6.0.0
 freezegun>=1.4.0
 pytest-timeout>=2.3.0
+
+# Documentation
+mkdocs-material>=9.7.0
+mkdocstrings[python]>=1.0.0

@@ -1,0 +1,47 @@
+site_name: PlexSync
+site_description: Stash to Plex metadata sync plugin
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.expand
+    - search.suggest
+    - content.code.copy
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            members_order: source
+            filters: ["!^_"]
+
+nav:
+  - Home: index.md
+  - User Guide:
+    - Installation: install.md
+    - Configuration: config.md
+    - Troubleshooting: troubleshoot.md
+  - Architecture: ARCHITECTURE.md
+  - API Reference:
+    - Overview: api/index.md
+    - sync_queue: api/sync_queue.md
+    - validation: api/validation.md
+    - plex: api/plex.md
+    - worker: api/worker.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - toc:
+      permalink: true
