@@ -19,6 +19,26 @@ except ImportError:
     validate_metadata = None
 
 
+# In-memory tracking of pending scene IDs for deduplication
+# Resets on restart - acceptable tradeoff for <100ms hook handler requirement
+_pending_scene_ids: set[int] = set()
+
+
+def mark_scene_pending(scene_id: int) -> None:
+    """Mark scene as having a pending job in queue."""
+    _pending_scene_ids.add(scene_id)
+
+
+def unmark_scene_pending(scene_id: int) -> None:
+    """Remove scene from pending set (called after job completes)."""
+    _pending_scene_ids.discard(scene_id)
+
+
+def is_scene_pending(scene_id: int) -> bool:
+    """Check if scene already has a pending job."""
+    return scene_id in _pending_scene_ids
+
+
 def requires_plex_sync(update_data: dict) -> bool:
     """
     Check if update contains sync-worthy changes.
