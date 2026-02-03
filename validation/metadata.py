@@ -69,7 +69,7 @@ class SyncMetadata(BaseModel):
         original = v
         sanitized = sanitize_for_plex(v, max_length=255)
         if sanitized != original:
-            log.warning(f"Sanitized title: '{original[:50]}...' -> '{sanitized[:50]}...'")
+            log.debug(f"Sanitized title: '{original[:50]}...' -> '{sanitized[:50]}...'")
         if not sanitized:
             raise ValueError("title cannot be empty after sanitization")
         return sanitized
@@ -85,7 +85,7 @@ class SyncMetadata(BaseModel):
         original = v
         sanitized = sanitize_for_plex(v, max_length=10000)
         if sanitized != original:
-            log.warning(f"Sanitized details: '{original[:50]}...' -> '{sanitized[:50]}...'")
+            log.debug(f"Sanitized details: '{original[:50]}...' -> '{sanitized[:50]}...'")
         return sanitized if sanitized else None
 
     @field_validator('studio', mode='before')
@@ -99,7 +99,7 @@ class SyncMetadata(BaseModel):
         original = v
         sanitized = sanitize_for_plex(v, max_length=255)
         if sanitized != original:
-            log.warning(f"Sanitized studio: '{original[:50]}...' -> '{sanitized[:50]}...'")
+            log.debug(f"Sanitized studio: '{original[:50]}...' -> '{sanitized[:50]}...'")
         return sanitized if sanitized else None
 
     @field_validator('performers', 'tags', mode='before')
