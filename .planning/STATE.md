@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 7 of 13 (Performance Optimization) - Complete
-Plan: 3 of 3 complete
-Status: Phase complete
-Last activity: 2026-02-03 - Completed 07-03-PLAN.md
+Phase: 8 of 13 (Observability Improvements)
+Plan: 1 of 2 complete
+Status: In progress
+Last activity: 2026-02-03 - Completed 08-01-PLAN.md
 
-Progress: [████████████░░░░] 75% (9/12 plan groups complete)
+Progress: [█████████████░░░] 81% (10/12 plan groups complete)
 
 ## Decisions Log
 
@@ -75,6 +75,8 @@ Progress: [████████████░░░░] 75% (9/12 plan grou
 | 2026-02-03 | 07-03 | Lazy cache initialization | Caches created on first _get_caches() call, not at worker init |
 | 2026-02-03 | 07-03 | Cache stats log levels | Match cache INFO, library cache DEBUG for visibility balance |
 | 2026-02-03 | 07-03 | Timing log levels | DEBUG for <1s, INFO for >=1s operations |
+| 2026-02-03 | 08-01 | Cumulative merge on save | Stats merged on save rather than overwrite for cross-session persistence |
+| 2026-02-03 | 08-01 | Test location matches project structure | tests/worker/ not tests/unit/worker/ to match existing patterns |
 
 ## Roadmap Evolution
 
@@ -220,23 +222,31 @@ Progress: [████████████░░░░] 75% (9/12 plan grou
 8. **Timing utilities** - @timed decorator and OperationTimer context manager (07-03)
 9. **Cache statistics** - Periodic logging of hit/miss rates (07-03)
 
+### v1.1 Phase 8: Observability Improvements (In Progress)
+
+**Stats:**
+- 1 of 2 plans complete
+- 2 commits
+- 4 files created/modified
+
+**Accomplishments:**
+1. **SyncStats dataclass** - Job counts, timing, error aggregation, match confidence tracking (08-01)
+2. **Stats persistence** - save_to_file/load_from_file with cumulative merge (08-01)
+3. **DLQ error summary** - get_error_summary() for error type aggregation (08-01)
+4. **48 new tests** - 44 for SyncStats, 4 for DLQ error_summary
+
 ## Session Continuity
 
-Last session: 2026-02-03
-Stopped at: Completed 07-03-PLAN.md
+Last session: 2026-02-03 17:32 UTC
+Stopped at: Completed 08-01-PLAN.md
 Resume file: None
 
 ## Next Steps
 
-Phase 7 (Performance Optimization) complete:
-- PlexCache for library/search result caching with 1-hour TTL
-- MatchCache for path-to-key mappings (no TTL)
-- Cache-integrated matcher with optional cache parameters
-- SyncWorker uses caches when data_dir is set
-- Timing utilities for performance measurement
-- 91 tests covering caching and timing
+Phase 8 (Observability Improvements) in progress:
+- Plan 08-01 complete: SyncStats dataclass and DLQ error_summary
+- Plan 08-02 next: Batch summary logging (uses SyncStats and DLQ.get_error_summary)
 
 Next phases per roadmap:
-- Phase 8: Observability Improvements
 - Phase 9: Reliability Hardening
 - Phase 10: Metadata Sync Toggles
