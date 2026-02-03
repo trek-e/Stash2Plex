@@ -32,6 +32,8 @@ Progress: [████░░░░░░░░░░░░] 20% (2/10 phases co
 | 2026-02-03 | 02-03 | create_mock_plex_item helper | Consistent mock Plex item creation across tests |
 | 2026-02-03 | 02-03 | Parametrized HTTP status tests | Clean coverage of all status code translations |
 | 2026-02-03 | 02-04 | Import fallbacks left uncovered | Lines 23-25, 29-30 require import mocking with minimal benefit |
+| 2026-02-03 | 02-02 | Sanitizer truncates before Pydantic | Long details truncated by sanitizer, not rejected by max_length |
+| 2026-02-03 | 02-02 | Control chars removed entirely | Tab/newline/CR are Cc category, removed not replaced with space |
 | 2026-02-03 | 02-04 | MinimalStash class for hasattr tests | Cleaner than complex MagicMock spec manipulation |
 
 ## Roadmap Evolution
@@ -91,7 +93,7 @@ Progress: [████░░░░░░░░░░░░] 20% (2/10 phases co
 
 **Accomplishments:**
 1. **sync_queue tests** - 67 tests, 89% coverage (02-01)
-2. **validation tests** - tests for metadata and config validation (02-02)
+2. **validation tests** - 207 tests, 94.2% coverage (02-02)
 3. **plex tests** - 105 tests, 94% coverage (02-03)
 4. **hooks tests** - 66 tests, 97% coverage (02-04)
 
