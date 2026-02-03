@@ -148,6 +148,7 @@ def initialize(config_dict: dict = None):
     Raises:
         SystemExit: If configuration validation fails
     """
+    print("[PlexSync] initialize() called", file=sys.stderr)
     global queue_manager, dlq, worker, config, sync_timestamps
 
     # Validate configuration
@@ -163,7 +164,9 @@ def initialize(config_dict: dict = None):
         if env_token:
             config_dict['plex_token'] = env_token
 
+    print(f"[PlexSync] Validating config: {list(config_dict.keys())}", file=sys.stderr)
     validated_config, error = validate_config(config_dict)
+    print(f"[PlexSync] Validation result: error={error}", file=sys.stderr)
     if error:
         error_msg = f"PlexSync configuration error: {error}"
         print(f"[PlexSync] ERROR: {error_msg}", file=sys.stderr)
@@ -253,18 +256,28 @@ def handle_hook(hook_context: dict):
 
 def main():
     """Main entry point for Stash plugin."""
+    print("[PlexSync] main() started", file=sys.stderr)
+
     # Read input from stdin (Stash plugin protocol)
     try:
-        input_data = json.loads(sys.stdin.read())
+        raw_input = sys.stdin.read()
+        print(f"[PlexSync] Got raw input ({len(raw_input)} bytes)", file=sys.stderr)
+        input_data = json.loads(raw_input)
+        print(f"[PlexSync] Parsed JSON, keys: {list(input_data.keys())}", file=sys.stderr)
     except json.JSONDecodeError as e:
-        print(json.dumps({"error": f"Invalid JSON input: {e}"}), file=sys.stderr)
+        print(f"[PlexSync] JSON decode error: {e}", file=sys.stderr)
+        print(json.dumps({"error": f"Invalid JSON input: {e}"}))
         sys.exit(1)
 
     # Initialize on first call
     global queue_manager, config
+    print(f"[PlexSync] queue_manager is None: {queue_manager is None}", file=sys.stderr)
     if queue_manager is None:
         # Extract config from Stash input
+        print("[PlexSync] Extracting config...", file=sys.stderr)
         config_dict = extract_config_from_input(input_data)
+        print(f"[PlexSync] Config dict keys: {list(config_dict.keys())}", file=sys.stderr)
+        print("[PlexSync] Calling initialize()...", file=sys.stderr)
         initialize(config_dict)
 
     # Check if plugin is disabled (config may have loaded but plugin disabled)

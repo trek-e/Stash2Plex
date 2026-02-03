@@ -2,9 +2,9 @@
   name: PlexSync
   metadata:
     description: Sync metadata from Stash to Plex with queue-based reliability
-  version: 1.0.6-51f2ef5
-  date: 2026-02-03 04:27:00
+  version: 1.0.7-1ff28d4
+  date: 2026-02-03 04:30:00
   path: https://raw.githubusercontent.com/trek-e/PlexSync/main/PlexSync.zip
-  sha256: b9797cde8568b07ae9b21225f1d20c3a0d342c0af2198bd6771d92da553aa51b
+  sha256: 64e1029b58bb8e3d044a0d989d704409e6b714bc11988fcd3c5908307eccd39c
   requires:
     - PythonDepManager
