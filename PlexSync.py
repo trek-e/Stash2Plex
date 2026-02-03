@@ -9,6 +9,8 @@ starts background worker, and handles Stash hooks.
 import os
 import sys
 import json
+import urllib.request
+import urllib.error
 
 # Add plugin directory to path for imports
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -47,12 +49,74 @@ def get_plugin_data_dir():
     return data_dir
 
 
+def get_stash_connection(input_data: dict) -> tuple:
+    """
+    Extract Stash server connection details from input data.
+
+    Returns:
+        Tuple of (base_url, api_key) or (None, None) if not found
+    """
+    conn = input_data.get('server_connection', {})
+
+    scheme = conn.get('Scheme', 'http')
+    host = conn.get('Host', 'localhost')
+    port = conn.get('Port', 9999)
+    api_key = conn.get('ApiKey', '')
+
+    base_url = f"{scheme}://{host}:{port}"
+    return base_url, api_key
+
+
+def fetch_plugin_settings(base_url: str, api_key: str) -> dict:
+    """
+    Fetch PlexSync plugin settings from Stash GraphQL API.
+
+    Args:
+        base_url: Stash server base URL
+        api_key: Stash API key
+
+    Returns:
+        Dictionary with plugin settings
+    """
+    query = """
+    query Configuration {
+        configuration {
+            plugins
+        }
+    }
+    """
+
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+    }
+    if api_key:
+        headers['ApiKey'] = api_key
+
+    data = json.dumps({'query': query}).encode('utf-8')
+    req = urllib.request.Request(
+        f"{base_url}/graphql",
+        data=data,
+        headers=headers,
+        method='POST'
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            plugins = result.get('data', {}).get('configuration', {}).get('plugins', {})
+            return plugins.get('PlexSync', {})
+    except (urllib.error.URLError, json.JSONDecodeError) as e:
+        print(f"[PlexSync] Warning: Could not fetch settings from Stash: {e}", file=sys.stderr)
+        return {}
+
+
 def extract_config_from_input(input_data: dict) -> dict:
     """
     Extract Plex configuration from Stash input data.
 
-    Tries several locations where Stash might pass plugin config,
-    then falls back to environment variables.
+    Fetches plugin settings from Stash GraphQL API, then falls back
+    to environment variables.
 
     Args:
         input_data: Input data from Stash plugin protocol
@@ -62,30 +126,13 @@ def extract_config_from_input(input_data: dict) -> dict:
     """
     config_dict = {}
 
-    # Try Stash plugin settings locations
-    # Location 1: server_connection (some Stash versions)
-    if 'server_connection' in input_data:
-        conn = input_data['server_connection']
-        if 'plex_url' in conn:
-            config_dict['plex_url'] = conn['plex_url']
-        if 'plex_token' in conn:
-            config_dict['plex_token'] = conn['plex_token']
-
-    # Location 2: args.config (alternate location)
-    args = input_data.get('args', {})
-    if 'config' in args:
-        cfg = args['config']
-        if isinstance(cfg, dict):
-            config_dict.update(cfg)
-
-    # Location 3: pluginSettings (another Stash pattern)
-    if 'pluginSettings' in input_data:
-        settings = input_data['pluginSettings']
-        if isinstance(settings, dict):
-            for key in ['plex_url', 'plex_token', 'enabled', 'max_retries',
-                        'poll_interval', 'strict_mode']:
-                if key in settings:
-                    config_dict[key] = settings[key]
+    # Fetch settings from Stash GraphQL API
+    base_url, api_key = get_stash_connection(input_data)
+    if base_url:
+        stash_settings = fetch_plugin_settings(base_url, api_key)
+        if stash_settings:
+            print(f"[PlexSync] Loaded settings from Stash: {list(stash_settings.keys())}")
+            config_dict.update(stash_settings)
 
     # Fallback to environment variables
     if 'plex_url' not in config_dict:
