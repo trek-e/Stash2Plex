@@ -4,6 +4,7 @@ Queue operations for job lifecycle management.
 Stateless operations that work on queue instance passed in.
 """
 
+import json
 import os
 import sqlite3
 import time
@@ -181,3 +182,55 @@ def get_stats(queue_path: str) -> dict:
 
     finally:
         conn.close()
+
+
+def _get_sync_timestamps_path(data_dir: str) -> str:
+    """Get path to sync timestamps JSON file."""
+    return os.path.join(data_dir, 'sync_timestamps.json')
+
+
+def load_sync_timestamps(data_dir: str) -> dict[int, float]:
+    """
+    Load sync timestamps from JSON file.
+
+    Args:
+        data_dir: Queue data directory (same as queue_path)
+
+    Returns:
+        Dict mapping scene_id -> last_synced_at timestamp
+    """
+    path = _get_sync_timestamps_path(data_dir)
+    if not os.path.exists(path):
+        return {}
+
+    try:
+        with open(path, 'r') as f:
+            data = json.load(f)
+            # JSON keys are strings, convert back to int
+            return {int(k): v for k, v in data.items()}
+    except (json.JSONDecodeError, IOError):
+        return {}
+
+
+def save_sync_timestamp(data_dir: str, scene_id: int, timestamp: float) -> None:
+    """
+    Save sync timestamp for a scene.
+
+    Args:
+        data_dir: Queue data directory
+        scene_id: Scene ID that was synced
+        timestamp: time.time() when sync completed
+    """
+    path = _get_sync_timestamps_path(data_dir)
+
+    # Load existing timestamps
+    timestamps = load_sync_timestamps(data_dir)
+
+    # Update with new timestamp
+    timestamps[scene_id] = timestamp
+
+    # Write back atomically (write to temp, rename)
+    temp_path = path + '.tmp'
+    with open(temp_path, 'w') as f:
+        json.dump(timestamps, f)
+    os.replace(temp_path, path)
