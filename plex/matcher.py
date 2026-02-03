@@ -1,8 +1,8 @@
 """
 Plex item matching logic.
 
-Matches by filename (case-insensitive) since Stash and Plex
-typically have different base paths to the same files.
+Fast path: title search derived from filename, then verify by filename match.
+Slow fallback: scan all items if title search fails.
 """
 
 from enum import Enum
@@ -75,10 +75,10 @@ def find_plex_item_by_path(
     stash_path_prefix: Optional[str] = None,
 ) -> Optional["Video"]:
     """
-    Find Plex item matching a Stash file path by filename.
+    Find Plex item matching a Stash file path.
 
-    Matches by filename only (case-insensitive) since Stash and Plex
-    typically have different base paths to the same files.
+    Fast path: title search then verify filename.
+    Slow fallback: scan all items by filename if title search fails.
 
     Args:
         library: Plex library section to search
@@ -90,29 +90,43 @@ def find_plex_item_by_path(
         Matching Plex item or None if not found / ambiguous
     """
     import sys
+    import re
 
-    filename = Path(stash_path).name
+    path = Path(stash_path)
+    filename = path.name
     filename_lower = filename.lower()
 
-    print(f"[PlexSync Matcher] Searching for filename: {filename}", file=sys.stderr)
+    # Derive title variants from filename
+    title_search = path.stem
+    title_search = re.sub(r'\s*[-_]\s*(WEBDL|WEB-DL|HDTV|BluRay|BDRip|DVDRip|720p|1080p|2160p|4K).*$', '', title_search, flags=re.IGNORECASE)
+    title_base = re.sub(r'\s*[-_]\s*\d{4}-\d{2}-\d{2}$', '', title_search)
 
+    matches = []
+
+    # Fast path: title search
     try:
-        all_items = library.all()
-        print(f"[PlexSync Matcher] Scanning {len(all_items)} items...", file=sys.stderr)
-        matches = []
-
-        for item in all_items:
-            if _item_has_file(item, filename_lower, exact=False, case_insensitive=True):
-                matches.append(item)
-
-        if len(matches) == 1:
-            print(f"[PlexSync Matcher] Found: {matches[0].title}", file=sys.stderr)
-            return matches[0]
-        elif len(matches) > 1:
-            print(f"[PlexSync Matcher] Ambiguous: {len(matches)} matches", file=sys.stderr)
+        for title in [title_search, title_base]:
+            if matches:
+                break
+            results = library.search(title=title)
+            for item in results:
+                if _item_has_file(item, filename_lower, exact=False, case_insensitive=True):
+                    matches.append(item)
     except Exception as e:
-        print(f"[PlexSync Matcher] Search failed: {e}", file=sys.stderr)
+        logger.warning(f"Title search failed: {e}")
 
+    # Slow fallback if needed
+    if not matches:
+        try:
+            all_items = library.all()
+            for item in all_items:
+                if _item_has_file(item, filename_lower, exact=False, case_insensitive=True):
+                    matches.append(item)
+        except Exception as e:
+            logger.warning(f"Scan failed: {e}")
+
+    if len(matches) == 1:
+        return matches[0]
     return None
 
 
@@ -123,10 +137,10 @@ def find_plex_items_with_confidence(
     stash_path_prefix: Optional[str] = None,
 ) -> tuple[MatchConfidence, Optional["Video"], list["Video"]]:
     """
-    Find Plex item with confidence scoring based on filename match.
+    Find Plex item with confidence scoring.
 
-    Matches by filename only (case-insensitive) since Stash and Plex
-    typically have different base paths to the same files.
+    Fast path: title search then verify filename.
+    Slow fallback: scan all items by filename if title search fails.
 
     Args:
         library: Plex library section to search
@@ -144,25 +158,51 @@ def find_plex_items_with_confidence(
         PlexNotFound: When no matching items found (allows retry logic)
     """
     import sys
+    import re
     from plex.exceptions import PlexNotFound
 
-    filename = Path(stash_path).name
+    path = Path(stash_path)
+    filename = path.name
     filename_lower = filename.lower()
+
+    # Derive title variants from filename
+    title_search = path.stem
+    # Remove quality suffix
+    title_search = re.sub(r'\s*[-_]\s*(WEBDL|WEB-DL|HDTV|BluRay|BDRip|DVDRip|720p|1080p|2160p|4K).*$', '', title_search, flags=re.IGNORECASE)
+    # Also try without date
+    title_base = re.sub(r'\s*[-_]\s*\d{4}-\d{2}-\d{2}$', '', title_search)
 
     print(f"[PlexSync Matcher] Searching '{library.title}' for: {filename}", file=sys.stderr)
 
     candidates = []
+
+    # Fast path: title search
     try:
-        all_items = library.all()
-        print(f"[PlexSync Matcher] Scanning {len(all_items)} items...", file=sys.stderr)
-
-        for item in all_items:
-            if _item_has_file(item, filename_lower, exact=False, case_insensitive=True):
-                candidates.append(item)
-                print(f"[PlexSync Matcher] Found: {item.title}", file=sys.stderr)
-
+        for title in [title_search, title_base]:
+            if candidates:
+                break
+            print(f"[PlexSync Matcher] Title search: '{title}'", file=sys.stderr)
+            results = library.search(title=title)
+            print(f"[PlexSync Matcher] Got {len(results)} title matches", file=sys.stderr)
+            for item in results:
+                if _item_has_file(item, filename_lower, exact=False, case_insensitive=True):
+                    candidates.append(item)
+                    print(f"[PlexSync Matcher] Found: {item.title}", file=sys.stderr)
     except Exception as e:
-        print(f"[PlexSync Matcher] Search failed: {e}", file=sys.stderr)
+        print(f"[PlexSync Matcher] Title search failed: {e}", file=sys.stderr)
+
+    # Slow fallback: scan all items if title search found nothing
+    if not candidates:
+        try:
+            print(f"[PlexSync Matcher] Fallback: scanning all items...", file=sys.stderr)
+            all_items = library.all()
+            print(f"[PlexSync Matcher] Scanning {len(all_items)} items...", file=sys.stderr)
+            for item in all_items:
+                if _item_has_file(item, filename_lower, exact=False, case_insensitive=True):
+                    candidates.append(item)
+                    print(f"[PlexSync Matcher] Found: {item.title}", file=sys.stderr)
+        except Exception as e:
+            print(f"[PlexSync Matcher] Scan failed: {e}", file=sys.stderr)
 
     # Scoring logic
     if len(candidates) == 0:
