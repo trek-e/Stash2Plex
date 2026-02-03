@@ -14,8 +14,8 @@ import logging
 from typing import Optional, TYPE_CHECKING
 
 try:
-    from queue.operations import get_pending, ack_job, nack_job, fail_job, enqueue, save_sync_timestamp
-    from queue.dlq import DeadLetterQueue
+    from sync_queue.operations import get_pending, ack_job, nack_job, fail_job, enqueue, save_sync_timestamp
+    from sync_queue.dlq import DeadLetterQueue
     from hooks.handlers import unmark_scene_pending
 except ImportError:
     get_pending = ack_job = nack_job = fail_job = enqueue = save_sync_timestamp = None

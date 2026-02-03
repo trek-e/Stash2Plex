@@ -9,7 +9,7 @@ import time
 from typing import Optional
 
 try:
-    from queue.operations import enqueue, load_sync_timestamps
+    from sync_queue.operations import enqueue, load_sync_timestamps
 except ImportError:
     enqueue = None
     load_sync_timestamps = None

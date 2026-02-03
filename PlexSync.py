@@ -15,9 +15,9 @@ PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 if PLUGIN_DIR not in sys.path:
     sys.path.insert(0, PLUGIN_DIR)
 
-from queue.manager import QueueManager
-from queue.dlq import DeadLetterQueue
-from queue.operations import load_sync_timestamps
+from sync_queue.manager import QueueManager
+from sync_queue.dlq import DeadLetterQueue
+from sync_queue.operations import load_sync_timestamps
 from worker.processor import SyncWorker
 from hooks.handlers import on_scene_update
 from validation.config import validate_config, PlexSyncConfig
