@@ -197,8 +197,9 @@ Plans:
 
 ### Phase 10: Metadata Sync Toggles
 **Goal:** Add toggles for enabling/disabling each metadata category sync
+**Plans:** 2 plans
 
-- Configuration options for each metadata field (title, studio, performers, tags, etc.)
+- Configuration options for each metadata field (studio, performers, tags, etc.)
 - Allow users to selectively enable/disable sync for specific fields
 - Update worker to respect toggle settings
 - Documentation for new settings
@@ -208,7 +209,8 @@ Plans:
 **Depends on:** Phase 9
 
 Plans:
-- [ ] TBD (run /gsd:plan-phase 10 to break down)
+- [ ] 10-01-PLAN.md — Add toggle fields to PlexSyncConfig and PlexSync.yml settings
+- [ ] 10-02-PLAN.md — Implement toggle logic in processor, add tests and documentation
 
 ---
 
@@ -311,7 +313,7 @@ Note: Phase 2.1 (Bugfix) can run in parallel with Phase 3 - it's independent.
 | 7. Performance | Medium | 3 |
 | 8. Observability | Medium | 2 |
 | 9. Reliability | Medium | 2 |
-| 10. Metadata Sync Toggles | Medium | 2-3 |
+| 10. Metadata Sync Toggles | Medium | 2 |
 | 11. Queue Management UI | Low | 1-2 |
 | 12. Process Queue Button | Low | 1-2 |
 | 13. Dynamic Queue Timeout | Medium | 1-2 |
