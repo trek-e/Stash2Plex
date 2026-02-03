@@ -24,6 +24,10 @@ settings:
     displayName: Plex Token
     description: "Your Plex authentication token (X-Plex-Token)"
     type: STRING
+  plex_library:
+    displayName: Plex Library
+    description: "Name of Plex library to sync (e.g., 'Adult'). Leave empty to search all libraries."
+    type: STRING
   enabled:
     displayName: Enabled
     description: "Enable or disable the plugin (default: true)"
