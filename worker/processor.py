@@ -431,6 +431,9 @@ class SyncWorker:
             TransientError: For retry-able errors (network, timeout)
             PermanentError: For permanent failures (missing path, bad data)
         """
+        import time as _time
+        _start_time = _time.perf_counter()
+
         from plex.exceptions import PlexTemporaryError, PlexPermanentError, PlexNotFound, translate_plex_exception
         from plex.matcher import find_plex_items_with_confidence, MatchConfidence
         # Lazy imports to avoid module-level pollution in tests
@@ -517,6 +520,13 @@ class SyncWorker:
 
             # Remove from pending set (always, even on failure - will be re-added on retry)
             unmark_scene_pending(scene_id)
+
+            # Log job processing time
+            _elapsed = _time.perf_counter() - _start_time
+            if _elapsed >= 1.0:
+                log_info(f"_process_job took {_elapsed:.3f}s")
+            else:
+                log_trace(f"_process_job took {_elapsed:.3f}s")
 
         except (PlexTemporaryError, PlexPermanentError, PlexNotFound):
             unmark_scene_pending(scene_id)  # Allow re-enqueue on next hook
