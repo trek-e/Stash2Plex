@@ -9,6 +9,15 @@ import sys
 import time
 from typing import Optional
 
+
+# Stash plugin log levels
+def log_trace(msg): print(f"\x01t\x02[PlexSync Hook] {msg}", file=sys.stderr)
+def log_debug(msg): print(f"\x01d\x02[PlexSync Hook] {msg}", file=sys.stderr)
+def log_info(msg): print(f"\x01i\x02[PlexSync Hook] {msg}", file=sys.stderr)
+def log_warn(msg): print(f"\x01w\x02[PlexSync Hook] {msg}", file=sys.stderr)
+def log_error(msg): print(f"\x01e\x02[PlexSync Hook] {msg}", file=sys.stderr)
+
+
 try:
     from sync_queue.operations import enqueue, load_sync_timestamps
 except ImportError:
@@ -140,7 +149,7 @@ def on_scene_update(
 
     # Filter non-sync events before enqueueing
     if not requires_plex_sync(update_data):
-        print(f"[PlexSync] Scene {scene_id} update filtered (no metadata changes)", file=sys.stderr)
+        log_trace(f"Scene {scene_id} update filtered (no metadata changes)")
         return False
 
     # Filter: Timestamp comparison for late update detection
@@ -155,17 +164,17 @@ def on_scene_update(
 
         last_synced = sync_timestamps.get(scene_id)
         if last_synced and stash_updated_at <= last_synced:
-            print(f"[PlexSync] Scene {scene_id} already synced (Stash: {stash_updated_at} <= Last: {last_synced})", file=sys.stderr)
+            log_trace(f"Scene {scene_id} already synced (Stash: {stash_updated_at} <= Last: {last_synced})")
             return False
 
     # Filter: Queue deduplication using in-memory tracking
     if is_scene_pending(scene_id):
-        print(f"[PlexSync] Scene {scene_id} already in queue, skipping duplicate", file=sys.stderr)
+        log_trace(f"Scene {scene_id} already in queue, skipping duplicate")
         return False
 
     # Enqueue job for background processing
     if enqueue is None:
-        print(f"[PlexSync] ERROR: queue.operations not available", file=sys.stderr)
+        log_error("queue.operations not available")
         return False
 
     # Fetch full scene data from Stash - needed for file path and complete metadata
@@ -185,7 +194,7 @@ def on_scene_update(
                 else:
                     scene = stash.find_scene(scene_id)
             except Exception as gql_err:
-                print(f"[PlexSync] GQL call failed: {gql_err}, falling back to find_scene", file=sys.stderr)
+                log_debug(f"GQL call failed: {gql_err}, falling back to find_scene")
                 scene = stash.find_scene(scene_id)
 
             if scene:
@@ -225,11 +234,11 @@ def on_scene_update(
 
         except Exception as e:
             import traceback
-            print(f"[PlexSync] WARNING: Could not fetch scene {scene_id}: {e}", file=sys.stderr)
+            log_warn(f"Could not fetch scene {scene_id}: {e}")
             traceback.print_exc()
 
     if not file_path:
-        print(f"[PlexSync] ERROR: No file path for scene {scene_id}, cannot sync to Plex", file=sys.stderr)
+        log_error(f"No file path for scene {scene_id}, cannot sync to Plex")
         return False
 
     # Merge scene_data with update_data (update_data takes precedence)
@@ -262,10 +271,10 @@ def on_scene_update(
         if error:
             # Check if it's a missing title error (critical)
             if 'title' in error.lower() and ('required' in error.lower() or 'empty' in error.lower()):
-                print(f"[PlexSync] Scene {scene_id} validation failed: {error}", file=sys.stderr)
+                log_error(f"Scene {scene_id} validation failed: {error}")
                 return False
             # For other validation errors, log warning but continue with sanitized data
-            print(f"[PlexSync] WARNING: Scene {scene_id} validation issue: {error}", file=sys.stderr)
+            log_warn(f"Scene {scene_id} validation issue: {error}")
 
         if validated:
             # Use validated/sanitized data for job
@@ -305,9 +314,9 @@ def on_scene_update(
 
     # Calculate elapsed time and warn if over target
     elapsed_ms = (time.time() - start) * 1000
-    print(f"[PlexSync] Enqueued sync job for scene {scene_id} in {elapsed_ms:.1f}ms", file=sys.stderr)
+    log_debug(f"Enqueued sync job for scene {scene_id} in {elapsed_ms:.1f}ms")
 
     if elapsed_ms > 100:
-        print(f"[PlexSync] WARNING: Hook handler exceeded 100ms target ({elapsed_ms:.1f}ms)", file=sys.stderr)
+        log_warn(f"Hook handler exceeded 100ms target ({elapsed_ms:.1f}ms)")
 
     return True

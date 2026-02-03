@@ -101,7 +101,7 @@ class SyncWorker:
     def start(self):
         """Start the background worker thread"""
         if self.running:
-            print("[PlexSync Worker] Already running", file=sys.stderr)
+            log_trace("Already running")
             return
 
         # Cleanup old DLQ entries
@@ -120,13 +120,12 @@ class SyncWorker:
         """Log DLQ status if jobs present."""
         count = self.dlq.get_count()
         if count > 0:
-            log_warn(f" DLQ contains {count} failed jobs requiring review")
+            log_warn(f"DLQ contains {count} failed jobs requiring review")
             recent = self.dlq.get_recent(limit=5)
             for entry in recent:
-                print(
-                    f"  DLQ #{entry['id']}: scene {entry['scene_id']} - "
-                    f"{entry['error_type']}: {entry['error_message'][:80]}",
-                    file=sys.stderr
+                log_debug(
+                    f"DLQ #{entry['id']}: scene {entry['scene_id']} - "
+                    f"{entry['error_type']}: {entry['error_message'][:80]}"
                 )
 
     def stop(self):
@@ -134,15 +133,15 @@ class SyncWorker:
         if not self.running:
             return
 
-        print("[PlexSync Worker] Stopping...", file=sys.stderr)
+        log_trace("Stopping...")
         self.running = False
 
         if self.thread:
             self.thread.join(timeout=5)
             if self.thread.is_alive():
-                log_warn(" Thread did not stop cleanly", file=sys.stderr)
+                log_warn("Thread did not stop cleanly")
 
-        print("[PlexSync Worker] Stopped", file=sys.stderr)
+        log_trace("Stopped")
 
     def _prepare_for_retry(self, job: dict, error: Exception) -> dict:
         """
@@ -241,7 +240,7 @@ class SyncWorker:
             try:
                 # Check circuit breaker first - pause if Plex is down
                 if not self.circuit_breaker.can_execute():
-                    print(f"[PlexSync Worker] Circuit OPEN, sleeping {self.config.poll_interval}s", file=sys.stderr)
+                    log_debug(f"Circuit OPEN, sleeping {self.config.poll_interval}s")
                     time.sleep(self.config.poll_interval)
                     continue
 
@@ -261,7 +260,7 @@ class SyncWorker:
                 pqid = item.get('pqid')
                 scene_id = item.get('scene_id')
                 retry_count = item.get('retry_count', 0)
-                print(f"[PlexSync Worker] Processing job {pqid} for scene {scene_id} (attempt {retry_count + 1})")
+                log_debug(f"Processing job {pqid} for scene {scene_id} (attempt {retry_count + 1})")
 
                 try:
                     # Process the job
@@ -282,7 +281,7 @@ class SyncWorker:
                     # Record failure with circuit breaker
                     self.circuit_breaker.record_failure()
                     if self.circuit_breaker.state == CircuitState.OPEN:
-                        print("[PlexSync Worker] Circuit breaker OPENED - pausing processing", file=sys.stderr)
+                        log_warn("Circuit breaker OPENED - pausing processing")
 
                     # Prepare job for retry with backoff metadata
                     job = self._prepare_for_retry(item, e)
@@ -290,29 +289,29 @@ class SyncWorker:
                     job_retry_count = job.get('retry_count', 0)
 
                     if job_retry_count >= max_retries:
-                        print(f"[PlexSync Worker] Job {pqid} exceeded max retries ({max_retries}), moving to DLQ")
+                        log_warn(f"Job {pqid} exceeded max retries ({max_retries}), moving to DLQ")
                         fail_job(self.queue, item)
                         self.dlq.add(job, e, job_retry_count)
                     else:
                         delay = job.get('next_retry_at', 0) - time.time()
-                        print(f"[PlexSync Worker] Job {pqid} failed (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s: {e}")
+                        log_debug(f"Job {pqid} failed (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s: {e}")
                         self._requeue_with_metadata(job)
 
                 except PermanentError as e:
                     # Permanent error: move to DLQ immediately (doesn't count against circuit)
-                    print(f"[PlexSync Worker] Job {pqid} permanent failure, moving to DLQ: {e}", file=sys.stderr)
+                    log_error(f"Job {pqid} permanent failure, moving to DLQ: {e}")
                     fail_job(self.queue, item)
                     self.dlq.add(item, e, item.get('retry_count', 0))
 
                 except Exception as e:
                     # Unknown error: treat as transient with circuit breaker
                     self.circuit_breaker.record_failure()
-                    print(f"[PlexSync Worker] Job {pqid} unexpected error (treating as transient): {e}")
+                    log_warn(f"Job {pqid} unexpected error (treating as transient): {e}")
                     nack_job(self.queue, item)
 
             except Exception as e:
                 # Worker loop error: log and continue
-                print(f"[PlexSync Worker] Worker loop error: {e}", file=sys.stderr)
+                log_error(f"Worker loop error: {e}")
                 time.sleep(1)  # Avoid tight loop on persistent errors
 
     def _fetch_stash_image(self, url: str) -> Optional[bytes]:
@@ -409,13 +408,13 @@ class SyncWorker:
                 # Search only the configured library
                 try:
                     sections = [client.server.library.section(self.config.plex_library)]
-                    print(f"[PlexSync Worker] Searching library: {self.config.plex_library}", file=sys.stderr)
+                    log_trace(f"Searching library: {self.config.plex_library}")
                 except Exception as e:
                     raise PermanentError(f"Library '{self.config.plex_library}' not found: {e}")
             else:
                 # Search all libraries (slow)
                 sections = client.server.library.sections()
-                print(f"[PlexSync Worker] Searching all {len(sections)} libraries (set plex_library to speed up)")
+                log_info(f"Searching all {len(sections)} libraries (set plex_library to speed up)")
 
             # Search library sections, collect ALL candidates
             all_candidates = []
@@ -520,13 +519,13 @@ class SyncWorker:
                 edits['originallyAvailableAt.value'] = data['date']
 
         if edits:
-            print(f"[PlexSync Worker] Updating fields: {list(edits.keys())}")
+            log_debug(f"Updating fields: {list(edits.keys())}")
             plex_item.edit(**edits)
             plex_item.reload()
             mode = "preserved" if self.config.preserve_plex_edits else "overwrite"
-            print(f"[PlexSync Worker] Updated metadata ({mode} mode): {plex_item.title}")
+            log_info(f"Updated metadata ({mode} mode): {plex_item.title}")
         else:
-            print(f"[PlexSync Worker] No metadata fields to update for: {plex_item.title}", file=sys.stderr)
+            log_trace(f"No metadata fields to update for: {plex_item.title}")
 
         # Sync performers as actors
         performers = data.get('performers', [])
@@ -545,9 +544,9 @@ class SyncWorker:
 
                     plex_item.edit(**actor_edits)
                     plex_item.reload()
-                    print(f"[PlexSync Worker] Added {len(new_performers)} performers: {new_performers}")
+                    log_info(f"Added {len(new_performers)} performers: {new_performers}")
                 else:
-                    print(f"[PlexSync Worker] Performers already in Plex: {performers}", file=sys.stderr)
+                    log_trace(f"Performers already in Plex: {performers}")
             except Exception as e:
                 log_warn(f" Failed to sync performers: {e}")
 
@@ -564,7 +563,7 @@ class SyncWorker:
                         temp_path = f.name
                     try:
                         plex_item.uploadPoster(filepath=temp_path)
-                        print(f"[PlexSync Worker] Uploaded poster ({len(image_data)} bytes)")
+                        log_debug(f"Uploaded poster ({len(image_data)} bytes)")
                     finally:
                         os.unlink(temp_path)
             except Exception as e:
@@ -583,7 +582,7 @@ class SyncWorker:
                         temp_path = f.name
                     try:
                         plex_item.uploadArt(filepath=temp_path)
-                        print(f"[PlexSync Worker] Uploaded background ({len(image_data)} bytes)")
+                        log_debug(f"Uploaded background ({len(image_data)} bytes)")
                     finally:
                         os.unlink(temp_path)
             except Exception as e:
@@ -605,9 +604,9 @@ class SyncWorker:
 
                     plex_item.edit(**genre_edits)
                     plex_item.reload()
-                    print(f"[PlexSync Worker] Added {len(new_tags)} tags as genres: {new_tags}")
+                    log_info(f"Added {len(new_tags)} tags as genres: {new_tags}")
                 else:
-                    print(f"[PlexSync Worker] Tags already in Plex: {tags}", file=sys.stderr)
+                    log_trace(f"Tags already in Plex: {tags}")
             except Exception as e:
                 log_warn(f" Failed to sync tags: {e}")
 
@@ -625,8 +624,8 @@ class SyncWorker:
 
                     plex_item.edit(**collection_edits)
                     plex_item.reload()
-                    print(f"[PlexSync Worker] Added to collection: {studio}", file=sys.stderr)
+                    log_debug(f"Added to collection: {studio}")
                 else:
-                    print(f"[PlexSync Worker] Already in collection: {studio}", file=sys.stderr)
+                    log_trace(f"Already in collection: {studio}")
             except Exception as e:
                 log_warn(f" Failed to add to collection: {e}")
