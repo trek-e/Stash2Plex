@@ -234,6 +234,63 @@ These settings are not exposed in the Stash UI but are recognized by the code. A
 
 ---
 
+## Field Sync Settings
+
+Control which metadata fields sync from Stash to Plex. All toggles are **enabled by default**.
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `sync_master` | boolean | `true` | Master toggle - when OFF, no fields are synced |
+| `sync_studio` | boolean | `true` | Sync studio name to Plex |
+| `sync_summary` | boolean | `true` | Sync summary/details to Plex |
+| `sync_tagline` | boolean | `true` | Sync tagline to Plex |
+| `sync_date` | boolean | `true` | Sync release date to Plex |
+| `sync_performers` | boolean | `true` | Sync performers as Plex actors |
+| `sync_tags` | boolean | `true` | Sync tags as Plex genres |
+| `sync_poster` | boolean | `true` | Sync poster image to Plex |
+| `sync_background` | boolean | `true` | Sync background/fanart image to Plex |
+| `sync_collection` | boolean | `true` | Add to Plex collection based on studio name |
+
+### Toggle Behavior
+
+- **Toggle OFF:** Field is skipped entirely. Plex keeps its existing value.
+- **Toggle ON + empty value:** Field is cleared in Plex (Stash value is authoritative).
+- **Toggle ON + `preserve_plex_edits`:** Existing Plex values are preserved if present.
+
+### Common Use Cases
+
+**Sync only core metadata (skip images and collections):**
+
+```yaml
+sync_poster: false
+sync_background: false
+sync_collection: false
+```
+
+**Sync only performers (for cast-focused libraries):**
+
+```yaml
+sync_studio: false
+sync_summary: false
+sync_tagline: false
+sync_date: false
+sync_tags: false
+sync_poster: false
+sync_background: false
+sync_collection: false
+# sync_performers defaults to true
+```
+
+**Disable all syncing temporarily:**
+
+```yaml
+sync_master: false
+```
+
+> **Note:** Title and file path are always synced (required for matching) and cannot be toggled off.
+
+---
+
 ## Example Configurations
 
 ### Basic Setup (Most Users)
