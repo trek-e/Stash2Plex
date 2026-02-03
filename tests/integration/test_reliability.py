@@ -463,3 +463,280 @@ class TestFullReliabilityWorkflow:
         assert "\x00" not in result_title
         # Truncated to max length
         assert len(result_title) <= MAX_TITLE_LENGTH
+
+
+class TestPartialFailure:
+    """Integration tests for partial sync failure recovery."""
+
+    @pytest.fixture
+    def partial_worker(self, mock_queue, mock_dlq, mock_config, tmp_path):
+        """Create SyncWorker for partial failure tests."""
+        from worker.processor import SyncWorker
+
+        mock_config.plex_connect_timeout = 10.0
+        mock_config.plex_read_timeout = 30.0
+        mock_config.preserve_plex_edits = False
+        mock_config.strict_matching = False
+        mock_config.dlq_retention_days = 30
+
+        worker = SyncWorker(
+            queue=mock_queue,
+            dlq=mock_dlq,
+            config=mock_config,
+            data_dir=str(tmp_path),
+        )
+        return worker
+
+    def test_performer_failure_doesnt_fail_job(self, partial_worker, capsys):
+        """Performer sync failure doesn't fail the overall job."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Make performer edit fail
+        def edit_side_effect(**kwargs):
+            if 'actor[0].tag.tag' in kwargs:
+                raise ConnectionError("Plex connection failed")
+        mock_plex_item.edit.side_effect = edit_side_effect
+
+        data = {
+            'path': '/test.mp4',
+            'title': 'Test Movie',
+            'performers': ['Actor 1', 'Actor 2'],
+        }
+
+        result = partial_worker._update_metadata(mock_plex_item, data)
+
+        # Job succeeds
+        assert result.success is True
+        # Metadata was updated
+        assert 'metadata' in result.fields_updated
+        # Performer warning recorded
+        assert any(w.field_name == 'performers' for w in result.warnings)
+
+        captured = capsys.readouterr()
+        assert "Partial sync" in captured.err
+
+    def test_poster_upload_failure_doesnt_fail_job(self, partial_worker):
+        """Poster upload failure doesn't fail the overall job."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Make poster upload fail
+        mock_plex_item.uploadPoster.side_effect = Exception("Upload failed")
+        partial_worker._fetch_stash_image = MagicMock(return_value=b'image data')
+
+        data = {
+            'path': '/test.mp4',
+            'title': 'Test Movie',
+            'poster_url': 'http://stash/poster.jpg',
+        }
+
+        result = partial_worker._update_metadata(mock_plex_item, data)
+
+        assert result.success is True
+        assert 'metadata' in result.fields_updated
+        assert any(w.field_name == 'poster' for w in result.warnings)
+
+    def test_multiple_field_failures_aggregated(self, partial_worker, capsys):
+        """Multiple non-critical failures are aggregated into warnings."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Make performer and tag edits fail
+        def edit_side_effect(**kwargs):
+            if 'actor[0].tag.tag' in kwargs:
+                raise ConnectionError("Actor error")
+            if 'genre[0].tag.tag' in kwargs:
+                raise TimeoutError("Tag error")
+        mock_plex_item.edit.side_effect = edit_side_effect
+
+        data = {
+            'path': '/test.mp4',
+            'title': 'Test Movie',
+            'performers': ['Actor 1'],
+            'tags': ['Tag 1'],
+        }
+
+        result = partial_worker._update_metadata(mock_plex_item, data)
+
+        # Job succeeds with warnings
+        assert result.success is True
+        assert len(result.warnings) == 2
+        warning_fields = [w.field_name for w in result.warnings]
+        assert 'performers' in warning_fields
+        assert 'tags' in warning_fields
+
+        captured = capsys.readouterr()
+        assert "2 warnings" in captured.err
+
+    def test_title_failure_fails_job(self, partial_worker):
+        """Title (critical field) failure propagates and fails job."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Make core edit fail
+        mock_plex_item.edit.side_effect = ConnectionError("Plex down")
+
+        data = {
+            'path': '/test.mp4',
+            'title': 'Test Movie',
+        }
+
+        # Critical field failure should propagate
+        with pytest.raises(ConnectionError):
+            partial_worker._update_metadata(mock_plex_item, data)
+
+
+class TestResponseValidation:
+    """Integration tests for API response validation."""
+
+    @pytest.fixture
+    def validation_worker(self, mock_queue, mock_dlq, mock_config, tmp_path):
+        """Create SyncWorker for validation tests."""
+        from worker.processor import SyncWorker
+
+        mock_config.plex_connect_timeout = 10.0
+        mock_config.plex_read_timeout = 30.0
+        mock_config.preserve_plex_edits = False
+        mock_config.strict_matching = False
+        mock_config.dlq_retention_days = 30
+
+        worker = SyncWorker(
+            queue=mock_queue,
+            dlq=mock_dlq,
+            config=mock_config,
+            data_dir=str(tmp_path),
+        )
+        return worker
+
+    def test_validate_edit_result_detects_mismatch(self, validation_worker):
+        """_validate_edit_result detects when Plex value differs from sent."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.title = "Different Title"  # Plex has different value
+
+        edits = {'title.value': 'Sent Title'}
+
+        issues = validation_worker._validate_edit_result(mock_plex_item, edits)
+
+        assert len(issues) == 1
+        assert 'title' in issues[0]
+        assert 'Sent Title' in issues[0]
+        assert 'Different Title' in issues[0]
+
+    def test_validate_edit_result_passes_on_match(self, validation_worker):
+        """_validate_edit_result returns empty list when values match."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.title = "Test Title"
+        mock_plex_item.studio = "Test Studio"
+
+        edits = {
+            'title.value': 'Test Title',
+            'studio.value': 'Test Studio',
+        }
+
+        issues = validation_worker._validate_edit_result(mock_plex_item, edits)
+
+        assert issues == []
+
+    def test_validate_edit_result_detects_empty_after_set(self, validation_worker):
+        """_validate_edit_result detects when value didn't save."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.title = ""  # Value didn't save
+        mock_plex_item.studio = None
+
+        edits = {
+            'title.value': 'Test Title',
+            'studio.value': 'Test Studio',
+        }
+
+        issues = validation_worker._validate_edit_result(mock_plex_item, edits)
+
+        assert len(issues) == 2
+        assert any('title' in issue for issue in issues)
+        assert any('studio' in issue for issue in issues)
+
+    def test_edit_validation_logs_issues(self, validation_worker, capsys):
+        """Edit validation issues are logged at debug level."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = "Different"  # Doesn't match sent value
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        data = {
+            'path': '/test.mp4',
+            'title': 'Test Title',
+        }
+
+        validation_worker._update_metadata(mock_plex_item, data)
+
+        captured = capsys.readouterr()
+        # Validation issues logged at debug level
+        assert "validation issues" in captured.err
+
+    def test_silent_truncation_detected(self, validation_worker):
+        """Server-side truncation is detected by validation."""
+        mock_plex_item = MagicMock()
+        # Simulate Plex truncating a long title
+        mock_plex_item.title = "Short"
+
+        edits = {'title.value': 'Very Long Title That Got Truncated By Plex'}
+
+        issues = validation_worker._validate_edit_result(mock_plex_item, edits)
+
+        assert len(issues) == 1
+        assert 'title' in issues[0]
+
+    def test_validation_skips_empty_values(self, validation_worker):
+        """Validation doesn't flag fields that were intentionally cleared."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.title = ""
+        mock_plex_item.studio = ""
+
+        # Intentionally clearing fields
+        edits = {
+            'title.value': '',
+            'studio.value': '',
+        }
+
+        issues = validation_worker._validate_edit_result(mock_plex_item, edits)
+
+        # No issues for intentional clears
+        assert issues == []
+
+    def test_validation_skips_locked_fields(self, validation_worker):
+        """Validation ignores locked field flags."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.title = "Test"
+
+        edits = {
+            'title.value': 'Test',
+            'actor.locked': 1,  # Lock flag, not a value
+        }
+
+        issues = validation_worker._validate_edit_result(mock_plex_item, edits)
+
+        # Locked field not validated
+        assert issues == []

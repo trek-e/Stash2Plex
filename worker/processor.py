@@ -605,6 +605,62 @@ class SyncWorker:
             unmark_scene_pending(scene_id)
             raise translate_plex_exception(e)
 
+    def _validate_edit_result(self, plex_item, expected_edits: dict) -> list:
+        """
+        Validate that edit actually applied expected values.
+
+        Returns list of fields that may not have updated correctly.
+        This catches silent failures where Plex accepts the request
+        but doesn't apply the value (e.g., field limit exceeded).
+
+        Args:
+            plex_item: Plex item after reload
+            expected_edits: Dict of edits that were sent (field.value -> value)
+
+        Returns:
+            List of issue descriptions for fields that may not have updated
+        """
+        issues = []
+        for field_key, expected_value in expected_edits.items():
+            # Skip locked fields and non-value fields
+            if '.locked' in field_key or not expected_value:
+                continue
+
+            # Parse field name from "field.value" format
+            field_name = field_key.replace('.value', '')
+
+            # Map edit field names to actual plex_item attributes
+            field_mapping = {
+                'title': 'title',
+                'studio': 'studio',
+                'summary': 'summary',
+                'tagline': 'tagline',
+                'originallyAvailableAt': 'originallyAvailableAt',
+            }
+
+            attr_name = field_mapping.get(field_name)
+            if not attr_name:
+                continue
+
+            actual_value = getattr(plex_item, attr_name, None)
+
+            # Convert to string for comparison (handle None)
+            expected_str = str(expected_value) if expected_value else ''
+            actual_str = str(actual_value) if actual_value else ''
+
+            # Check if value matches (with tolerance for truncation/sanitization)
+            # Compare first 50 chars to handle any server-side trimming
+            if expected_str and actual_str:
+                if expected_str[:50] != actual_str[:50]:
+                    issues.append(
+                        f"{field_name}: sent '{expected_str[:20]}...', "
+                        f"got '{actual_str[:20]}...'"
+                    )
+            elif expected_str and not actual_str:
+                issues.append(f"{field_name}: sent value but field is empty")
+
+        return issues
+
     def _update_metadata(self, plex_item, data: dict):
         """
         Update Plex item metadata from sync job data with granular error handling.
@@ -715,6 +771,12 @@ class SyncWorker:
             log_debug(f"Updating fields: {list(edits.keys())}")
             plex_item.edit(**edits)
             plex_item.reload()
+
+            # Validate that edits were actually applied
+            validation_issues = self._validate_edit_result(plex_item, edits)
+            if validation_issues:
+                log_debug(f"Edit validation issues (may be expected): {validation_issues}")
+
             mode = "preserved" if self.config.preserve_plex_edits else "overwrite"
             log_info(f"Updated metadata ({mode} mode): {plex_item.title}")
             result.add_success('metadata')
