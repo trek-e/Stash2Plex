@@ -10,7 +10,7 @@ import time
 from functools import wraps
 from typing import Any, Callable
 
-logger = logging.getLogger('PlexSync.plex.timing')
+logger = logging.getLogger('Stash2Plex.plex.timing')
 
 
 def timed(func: Callable) -> Callable:
@@ -103,6 +103,6 @@ def log_timing(msg: str) -> None:
 
     Example:
         >>> log_timing("Search completed in 0.5s")
-        # Outputs: \x01d\x02[PlexSync Timing] Search completed in 0.5s
+        # Outputs: \x01d\x02[Stash2Plex Timing] Search completed in 0.5s
     """
-    print(f"\x01d\x02[PlexSync Timing] {msg}", file=sys.stderr)
+    print(f"\x01d\x02[Stash2Plex Timing] {msg}", file=sys.stderr)

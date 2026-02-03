@@ -1,11 +1,11 @@
-name: PlexSync
+name: Stash2Plex
 description: Sync metadata from Stash to Plex with queue-based reliability
-version: 1.0.0
-url: https://github.com/trek-e/PlexSync
+version: 1.1.0
+url: https://github.com/trek-e/Stash2Plex
 
 exec:
   - python3
-  - "{pluginDir}/PlexSync.py"
+  - "{pluginDir}/Stash2Plex.py"
 
 interface: raw
 

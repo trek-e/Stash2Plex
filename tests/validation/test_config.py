@@ -1,5 +1,5 @@
 """
-Tests for PlexSyncConfig Pydantic model and validate_config helper.
+Tests for Stash2PlexConfig Pydantic model and validate_config helper.
 
 Tests validation rules for URL format, token length, range constraints,
 boolean coercion, default values, and error handling.
@@ -8,11 +8,11 @@ boolean coercion, default values, and error handling.
 import pytest
 from pydantic import ValidationError
 
-from validation.config import PlexSyncConfig, validate_config
+from validation.config import Stash2PlexConfig, validate_config
 
 
-class TestPlexSyncConfig:
-    """Tests for PlexSyncConfig Pydantic model."""
+class TestStash2PlexConfig:
+    """Tests for Stash2PlexConfig Pydantic model."""
 
     # =========================================================================
     # Required field tests
@@ -20,7 +20,7 @@ class TestPlexSyncConfig:
 
     def test_valid_config_with_required_fields(self, valid_config_dict):
         """Config with required fields is valid."""
-        config = PlexSyncConfig(**valid_config_dict)
+        config = Stash2PlexConfig(**valid_config_dict)
         assert config.plex_url == valid_config_dict["plex_url"]
         assert config.plex_token == valid_config_dict["plex_token"]
 
@@ -57,7 +57,7 @@ class TestPlexSyncConfig:
 
     def test_plex_url_http_accepted(self):
         """HTTP URL is accepted."""
-        config = PlexSyncConfig(
+        config = Stash2PlexConfig(
             plex_url="http://localhost:32400",
             plex_token="valid-token-here"
         )
@@ -65,7 +65,7 @@ class TestPlexSyncConfig:
 
     def test_plex_url_https_accepted(self):
         """HTTPS URL is accepted."""
-        config = PlexSyncConfig(
+        config = Stash2PlexConfig(
             plex_url="https://plex.example.com",
             plex_token="valid-token-here"
         )
@@ -73,7 +73,7 @@ class TestPlexSyncConfig:
 
     def test_plex_url_trailing_slash_removed(self):
         """Trailing slash is normalized from plex_url."""
-        config = PlexSyncConfig(
+        config = Stash2PlexConfig(
             plex_url="http://localhost:32400/",
             plex_token="valid-token-here"
         )
@@ -82,7 +82,7 @@ class TestPlexSyncConfig:
 
     def test_plex_url_multiple_trailing_slashes_removed(self):
         """Multiple trailing slashes are normalized."""
-        config = PlexSyncConfig(
+        config = Stash2PlexConfig(
             plex_url="http://localhost:32400///",
             plex_token="valid-token-here"
         )
@@ -103,7 +103,7 @@ class TestPlexSyncConfig:
 
     def test_plex_token_min_length_accepted(self):
         """10 char token is accepted (minimum length)."""
-        config = PlexSyncConfig(
+        config = Stash2PlexConfig(
             plex_url="http://localhost:32400",
             plex_token="1234567890"  # Exactly 10 chars
         )
@@ -112,7 +112,7 @@ class TestPlexSyncConfig:
     def test_plex_token_long_accepted(self):
         """Long tokens are accepted."""
         long_token = "a" * 100
-        config = PlexSyncConfig(
+        config = Stash2PlexConfig(
             plex_url="http://localhost:32400",
             plex_token=long_token
         )
@@ -233,7 +233,7 @@ class TestPlexSyncConfig:
 
     def test_strict_matching_accepts_bool_true(self):
         """strict_matching accepts True boolean."""
-        config = PlexSyncConfig(
+        config = Stash2PlexConfig(
             plex_url="http://localhost:32400",
             plex_token="valid-token-here",
             strict_matching=True
@@ -242,7 +242,7 @@ class TestPlexSyncConfig:
 
     def test_strict_matching_accepts_bool_false(self):
         """strict_matching accepts False boolean."""
-        config = PlexSyncConfig(
+        config = Stash2PlexConfig(
             plex_url="http://localhost:32400",
             plex_token="valid-token-here",
             strict_matching=False
@@ -263,7 +263,7 @@ class TestPlexSyncConfig:
     ])
     def test_strict_matching_accepts_string(self, string_value, expected):
         """strict_matching accepts string representations of booleans."""
-        config = PlexSyncConfig(
+        config = Stash2PlexConfig(
             plex_url="http://localhost:32400",
             plex_token="valid-token-here",
             strict_matching=string_value
@@ -272,14 +272,14 @@ class TestPlexSyncConfig:
 
     def test_preserve_plex_edits_accepts_bool(self):
         """preserve_plex_edits accepts boolean values."""
-        config_true = PlexSyncConfig(
+        config_true = Stash2PlexConfig(
             plex_url="http://localhost:32400",
             plex_token="valid-token-here",
             preserve_plex_edits=True
         )
         assert config_true.preserve_plex_edits is True
 
-        config_false = PlexSyncConfig(
+        config_false = Stash2PlexConfig(
             plex_url="http://localhost:32400",
             plex_token="valid-token-here",
             preserve_plex_edits=False
@@ -294,7 +294,7 @@ class TestPlexSyncConfig:
     ])
     def test_preserve_plex_edits_accepts_string(self, string_value, expected):
         """preserve_plex_edits accepts string representations."""
-        config = PlexSyncConfig(
+        config = Stash2PlexConfig(
             plex_url="http://localhost:32400",
             plex_token="valid-token-here",
             preserve_plex_edits=string_value
@@ -304,7 +304,7 @@ class TestPlexSyncConfig:
     def test_invalid_boolean_rejected(self):
         """Invalid boolean string raises error."""
         with pytest.raises(ValidationError) as exc_info:
-            PlexSyncConfig(
+            Stash2PlexConfig(
                 plex_url="http://localhost:32400",
                 plex_token="valid-token-here",
                 strict_matching="maybe"
@@ -318,7 +318,7 @@ class TestPlexSyncConfig:
 
     def test_defaults_applied(self):
         """Default values are applied when only required fields provided."""
-        config = PlexSyncConfig(
+        config = Stash2PlexConfig(
             plex_url="http://localhost:32400",
             plex_token="valid-token-here"
         )
@@ -357,7 +357,7 @@ class TestValidateConfig:
         config, error = validate_config(valid_config_dict)
         assert config is not None
         assert error is None
-        assert isinstance(config, PlexSyncConfig)
+        assert isinstance(config, Stash2PlexConfig)
 
     def test_validate_config_failure(self):
         """Invalid dict returns (None, error_string)."""
@@ -408,13 +408,13 @@ class TestValidateConfig:
         assert error is None
 
 
-class TestPlexSyncConfigLogConfig:
+class TestStash2PlexConfigLogConfig:
     """Tests for log_config method."""
 
     def test_log_config_masks_token(self, mocker, valid_config_dict):
         """log_config masks token in log output."""
         mock_log = mocker.patch("validation.config.log")
-        config = PlexSyncConfig(**valid_config_dict)
+        config = Stash2PlexConfig(**valid_config_dict)
         config.log_config()
 
         # Check that log.info was called (at least for config, plus toggle summary)
@@ -435,7 +435,7 @@ class TestSyncToggles:
 
     def test_all_toggles_default_true(self):
         """All sync toggles should default to True (enabled)."""
-        config = PlexSyncConfig(plex_url="http://test:32400", plex_token="valid_token_here")
+        config = Stash2PlexConfig(plex_url="http://test:32400", plex_token="valid_token_here")
         assert config.sync_master is True
         assert config.sync_studio is True
         assert config.sync_summary is True
@@ -449,7 +449,7 @@ class TestSyncToggles:
 
     def test_toggle_accepts_boolean_true(self):
         """Toggle fields accept Python boolean True."""
-        config = PlexSyncConfig(
+        config = Stash2PlexConfig(
             plex_url="http://test:32400",
             plex_token="valid_token_here",
             sync_studio=True,
@@ -458,7 +458,7 @@ class TestSyncToggles:
 
     def test_toggle_accepts_boolean_false(self):
         """Toggle fields accept Python boolean False."""
-        config = PlexSyncConfig(
+        config = Stash2PlexConfig(
             plex_url="http://test:32400",
             plex_token="valid_token_here",
             sync_studio=False,
@@ -467,7 +467,7 @@ class TestSyncToggles:
 
     def test_toggle_accepts_string_true(self):
         """Toggle fields accept string 'true' (Stash settings format)."""
-        config = PlexSyncConfig(
+        config = Stash2PlexConfig(
             plex_url="http://test:32400",
             plex_token="valid_token_here",
             sync_studio="true",
@@ -476,7 +476,7 @@ class TestSyncToggles:
 
     def test_toggle_accepts_string_false(self):
         """Toggle fields accept string 'false' (Stash settings format)."""
-        config = PlexSyncConfig(
+        config = Stash2PlexConfig(
             plex_url="http://test:32400",
             plex_token="valid_token_here",
             sync_studio="false",
@@ -485,12 +485,12 @@ class TestSyncToggles:
 
     def test_toggle_accepts_numeric_string(self):
         """Toggle fields accept '1' and '0' strings."""
-        config_on = PlexSyncConfig(
+        config_on = Stash2PlexConfig(
             plex_url="http://test:32400",
             plex_token="valid_token_here",
             sync_performers="1",
         )
-        config_off = PlexSyncConfig(
+        config_off = Stash2PlexConfig(
             plex_url="http://test:32400",
             plex_token="valid_token_here",
             sync_performers="0",
@@ -500,7 +500,7 @@ class TestSyncToggles:
 
     def test_all_toggles_can_be_disabled(self):
         """All sync toggles can be individually disabled."""
-        config = PlexSyncConfig(
+        config = Stash2PlexConfig(
             plex_url="http://test:32400",
             plex_token="valid_token_here",
             sync_master=False,
@@ -528,7 +528,7 @@ class TestSyncToggles:
     def test_invalid_toggle_value_raises(self):
         """Invalid toggle value should raise validation error."""
         with pytest.raises(ValidationError):
-            PlexSyncConfig(
+            Stash2PlexConfig(
                 plex_url="http://test:32400",
                 plex_token="valid_token_here",
                 sync_studio="invalid",

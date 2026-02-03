@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional
 
 from diskcache import Cache
 
-logger = logging.getLogger('PlexSync.plex.cache')
+logger = logging.getLogger('Stash2Plex.plex.cache')
 
 
 def _extract_item_data(item: Any) -> Optional[Dict[str, Any]]:

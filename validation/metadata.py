@@ -1,5 +1,5 @@
 """
-Pydantic metadata validation model for PlexSync.
+Pydantic metadata validation model for Stash2Plex.
 
 Provides SyncMetadata model with field validation and sanitization
 to ensure clean data before enqueueing for Plex sync.
@@ -12,7 +12,7 @@ import logging
 from validation.sanitizers import sanitize_for_plex
 
 
-log = logging.getLogger('PlexSync.validation')
+log = logging.getLogger('Stash2Plex.validation')
 
 
 class SyncMetadata(BaseModel):

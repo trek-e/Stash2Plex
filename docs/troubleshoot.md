@@ -1,14 +1,14 @@
 # Troubleshooting Guide
 
-This guide helps you diagnose and resolve common PlexSync issues. Understanding how PlexSync works makes troubleshooting easier, so we start with a brief overview of the system.
+This guide helps you diagnose and resolve common Stash2Plex issues. Understanding how Stash2Plex works makes troubleshooting easier, so we start with a brief overview of the system.
 
 ---
 
-## How PlexSync Works
+## How Stash2Plex Works
 
 Understanding the processing flow helps you pinpoint where issues occur:
 
-1. **Hook receives scene update** - When you edit a scene in Stash, PlexSync receives a notification (target: <100ms)
+1. **Hook receives scene update** - When you edit a scene in Stash, Stash2Plex receives a notification (target: <100ms)
 2. **Job added to queue** - The sync job is added to a persistent SQLite queue (survives restarts)
 3. **Worker processes queue** - A background worker polls the queue every 30 seconds
 4. **Worker retries failures** - Transient failures (network issues, Plex temporarily down) are retried with exponential backoff
@@ -20,7 +20,7 @@ Understanding the processing flow helps you pinpoint where issues occur:
 
 ## Reading the Logs
 
-PlexSync logs are your primary diagnostic tool.
+Stash2Plex logs are your primary diagnostic tool.
 
 ### Where to Find Logs
 
@@ -29,7 +29,7 @@ PlexSync logs are your primary diagnostic tool.
 
 ### Filtering Logs
 
-Filter by `[PlexSync]` to see only PlexSync messages. All PlexSync log entries start with this prefix.
+Filter by `[Stash2Plex]` to see only Stash2Plex messages. All Stash2Plex log entries start with this prefix.
 
 ### Log Levels
 
@@ -46,16 +46,16 @@ Filter by `[PlexSync]` to see only PlexSync messages. All PlexSync log entries s
 Here's what a successful sync looks like in the logs:
 
 ```
-[PlexSync] Initialization complete
-[PlexSync Hook] Enqueued sync job for scene 123 in 45.2ms
-[PlexSync Worker] Processing job 456 for scene 123 (attempt 1)
-[PlexSync Matcher] Searching 'Adult' for: Scene Name - 2026-01-30.mp4
-[PlexSync Matcher] Title search: 'Scene Name'
-[PlexSync Matcher] Got 1 title matches
-[PlexSync Matcher] Found: Scene Name
-[PlexSync Worker] Updated metadata (overwrite mode): Scene Name
-[PlexSync Worker] Added 2 performers: ['Performer A', 'Performer B']
-[PlexSync Worker] Job 456 completed
+[Stash2Plex] Initialization complete
+[Stash2Plex Hook] Enqueued sync job for scene 123 in 45.2ms
+[Stash2Plex Worker] Processing job 456 for scene 123 (attempt 1)
+[Stash2Plex Matcher] Searching 'Adult' for: Scene Name - 2026-01-30.mp4
+[Stash2Plex Matcher] Title search: 'Scene Name'
+[Stash2Plex Matcher] Got 1 title matches
+[Stash2Plex Matcher] Found: Scene Name
+[Stash2Plex Worker] Updated metadata (overwrite mode): Scene Name
+[Stash2Plex Worker] Added 2 performers: ['Performer A', 'Performer B']
+[Stash2Plex Worker] Job 456 completed
 ```
 
 **Line-by-line breakdown:**
@@ -81,14 +81,14 @@ Here's what a successful sync looks like in the logs:
 
 **Symptom:**
 ```
-[PlexSync] Authentication failed: Unauthorized
+[Stash2Plex] Authentication failed: Unauthorized
 ```
 
 **Cause:** Your Plex token is expired or incorrect.
 
 **Solution:**
 1. Get a fresh token from Plex (see [Installation Guide](install.md#getting-your-plex-token))
-2. Update `plex_token` in Settings > Plugins > PlexSync
+2. Update `plex_token` in Settings > Plugins > Stash2Plex
 3. Reload plugins
 
 **Related setting:** [`plex_token`](config.md#plex_token)
@@ -99,7 +99,7 @@ Here's what a successful sync looks like in the logs:
 
 **Symptom:**
 ```
-[PlexSync] PlexNotFound: No Plex item found for filename
+[Stash2Plex] PlexNotFound: No Plex item found for filename
 ```
 
 **Causes:**
@@ -115,7 +115,7 @@ Here's what a successful sync looks like in the logs:
 
 3. **Set `plex_library`:** Specify the exact library name to search
 
-**Note:** PlexSync automatically retries "not found" errors up to 12 times over approximately 2 hours, giving Plex time to complete library scans.
+**Note:** Stash2Plex automatically retries "not found" errors up to 12 times over approximately 2 hours, giving Plex time to complete library scans.
 
 **Related setting:** [`plex_library`](config.md#plex_library)
 
@@ -125,11 +125,11 @@ Here's what a successful sync looks like in the logs:
 
 **Symptom:**
 ```
-[PlexSync Matcher] LOW confidence match for 'filename.mp4': 3 candidates found
-[PlexSync] Low confidence match skipped (strict_matching=true)
+[Stash2Plex Matcher] LOW confidence match for 'filename.mp4': 3 candidates found
+[Stash2Plex] Low confidence match skipped (strict_matching=true)
 ```
 
-**Cause:** Multiple Plex items match the filename, and PlexSync cannot determine which is correct.
+**Cause:** Multiple Plex items match the filename, and Stash2Plex cannot determine which is correct.
 
 **Solutions:**
 
@@ -146,7 +146,7 @@ Here's what a successful sync looks like in the logs:
 
 **Symptom:**
 ```
-[PlexSync] Timeout waiting for queue (X items remaining)
+[Stash2Plex] Timeout waiting for queue (X items remaining)
 ```
 
 Or processing appears to stop mid-queue.
@@ -165,7 +165,7 @@ Or processing appears to stop mid-queue.
 
 **Symptom:**
 ```
-[PlexSync] No file path for scene X, cannot sync to Plex
+[Stash2Plex] No file path for scene X, cannot sync to Plex
 ```
 
 **Cause:** The scene in Stash has no associated media file (metadata-only entry).
@@ -180,7 +180,7 @@ Or processing appears to stop mid-queue.
 
 **Symptom:**
 ```
-[PlexSync Hook] Hook handler exceeded 100ms target (156.3ms)
+[Stash2Plex Hook] Hook handler exceeded 100ms target (156.3ms)
 ```
 
 **Cause:** Slow Stash GraphQL response or network latency.
@@ -197,12 +197,12 @@ Or processing appears to stop mid-queue.
 
 **Symptom:**
 ```
-[PlexSync] Circuit breaker OPENED - pausing processing
+[Stash2Plex] Circuit breaker OPENED - pausing processing
 ```
 
 **Cause:** 5+ consecutive Plex failures (server down, network issues).
 
-**Meaning:** PlexSync paused processing to avoid hammering a failing Plex server.
+**Meaning:** Stash2Plex paused processing to avoid hammering a failing Plex server.
 
 **Resolution:** Automatic. The circuit breaker recovers after 60 seconds and retries.
 
@@ -214,7 +214,7 @@ Or processing appears to stop mid-queue.
 
 **Symptom:**
 ```
-[PlexSync] DLQ contains X failed jobs requiring review
+[Stash2Plex] DLQ contains X failed jobs requiring review
 ```
 
 **Meaning:** Some jobs failed permanently and will not retry automatically.
@@ -237,7 +237,7 @@ Path mismatches are a common source of "No Plex match found" errors in Docker de
 
 ### The Problem
 
-PlexSync matches Plex items by file path. If Stash and Plex see files at different paths, matching fails.
+Stash2Plex matches Plex items by file path. If Stash and Plex see files at different paths, matching fails.
 
 **Example problem:**
 - Stash container sees: `/data/videos/scene.mp4`
@@ -270,7 +270,7 @@ services:
 
 ## Manual Queue Processing
 
-For stuck queues or large backlogs, PlexSync includes a standalone queue processor.
+For stuck queues or large backlogs, Stash2Plex includes a standalone queue processor.
 
 ### Check Queue Status
 
@@ -284,13 +284,13 @@ This shows queue size and DLQ status without processing anything.
 
 ```bash
 python process_queue.py \
-  --data-dir /path/to/PlexSync/data \
+  --data-dir /path/to/Stash2Plex/data \
   --plex-url http://plex:32400 \
   --plex-token YOUR_TOKEN \
   --plex-library Adult
 ```
 
-**Location:** `process_queue.py` in the PlexSync plugin folder.
+**Location:** `process_queue.py` in the Stash2Plex plugin folder.
 
 **When to use:**
 - Queue is stuck due to Stash plugin timeout
@@ -356,7 +356,7 @@ When reporting issues on GitHub, include the following information to help diagn
 **Environment:**
 - Stash version:
 - Plex version:
-- PlexSync version:
+- Stash2Plex version:
 - Deployment: Docker / Bare metal
 
 **Issue:**
@@ -366,7 +366,7 @@ When reporting issues on GitHub, include the following information to help diagn
 [What you expected to happen]
 
 **Logs:**
-[Paste relevant [PlexSync] log lines]
+[Paste relevant [Stash2Plex] log lines]
 
 **Steps to Reproduce:**
 1.
@@ -376,7 +376,7 @@ When reporting issues on GitHub, include the following information to help diagn
 
 ### Tips for Effective Bug Reports
 
-- **Filter logs** to `[PlexSync]` entries only
+- **Filter logs** to `[Stash2Plex]` entries only
 - **Include the full error message**, not just a summary
 - **Redact tokens and personal info** before sharing
 - **Include steps to reproduce** if the issue is repeatable

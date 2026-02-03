@@ -11,7 +11,7 @@ Metadata validation and sanitization for Plex sync jobs.
       members_order: source
       show_source: true
 
-## PlexSyncConfig
+## Stash2PlexConfig
 
 ::: validation.config
     options:

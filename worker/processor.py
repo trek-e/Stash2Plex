@@ -22,20 +22,20 @@ from worker.stats import SyncStats
 
 
 # Stash plugin log levels
-def log_trace(msg): print(f"\x01t\x02[PlexSync Worker] {msg}", file=sys.stderr)
-def log_debug(msg): print(f"\x01d\x02[PlexSync Worker] {msg}", file=sys.stderr)
-def log_info(msg): print(f"\x01i\x02[PlexSync Worker] {msg}", file=sys.stderr)
-def log_warn(msg): print(f"\x01w\x02[PlexSync Worker] {msg}", file=sys.stderr)
-def log_error(msg): print(f"\x01e\x02[PlexSync Worker] {msg}", file=sys.stderr)
+def log_trace(msg): print(f"\x01t\x02[Stash2Plex Worker] {msg}", file=sys.stderr)
+def log_debug(msg): print(f"\x01d\x02[Stash2Plex Worker] {msg}", file=sys.stderr)
+def log_info(msg): print(f"\x01i\x02[Stash2Plex Worker] {msg}", file=sys.stderr)
+def log_warn(msg): print(f"\x01w\x02[Stash2Plex Worker] {msg}", file=sys.stderr)
+def log_error(msg): print(f"\x01e\x02[Stash2Plex Worker] {msg}", file=sys.stderr)
 
 # Lazy imports to avoid module-level pollution in tests
 # These functions are imported inside methods that use them
 # to ensure imports are fresh and not polluted by test mocking
 
-logger = logging.getLogger('PlexSync.worker')
+logger = logging.getLogger('Stash2Plex.worker')
 
 if TYPE_CHECKING:
-    from validation.config import PlexSyncConfig
+    from validation.config import Stash2PlexConfig
     from plex.client import PlexClient
     from plex.cache import PlexCache, MatchCache
 
@@ -65,7 +65,7 @@ class SyncWorker:
         self,
         queue,
         dlq: 'DeadLetterQueue',
-        config: 'PlexSyncConfig',
+        config: 'Stash2PlexConfig',
         data_dir: Optional[str] = None,
         max_retries: int = 5,
     ):
@@ -75,7 +75,7 @@ class SyncWorker:
         Args:
             queue: SQLiteAckQueue instance
             dlq: DeadLetterQueue for permanently failed jobs
-            config: PlexSyncConfig with Plex URL, token, and timeouts
+            config: Stash2PlexConfig with Plex URL, token, and timeouts
             data_dir: Plugin data directory for sync timestamp updates
             max_retries: Maximum retry attempts before moving to DLQ (default for standard errors)
         """
@@ -568,7 +568,7 @@ class SyncWorker:
                 paths = [c.media[0].parts[0].file if c.media and c.media[0].parts else c.key for c in unique_candidates]
                 if self.config.strict_matching:
                     logger.warning(
-                        f"[PlexSync] LOW CONFIDENCE SKIPPED: scene {scene_id}\n"
+                        f"[Stash2Plex] LOW CONFIDENCE SKIPPED: scene {scene_id}\n"
                         f"  Stash path: {file_path}\n"
                         f"  Plex candidates ({len(unique_candidates)}): {paths}"
                     )
@@ -576,7 +576,7 @@ class SyncWorker:
                 else:
                     plex_item = unique_candidates[0]
                     logger.warning(
-                        f"[PlexSync] LOW CONFIDENCE SYNCED: scene {scene_id}\n"
+                        f"[Stash2Plex] LOW CONFIDENCE SYNCED: scene {scene_id}\n"
                         f"  Chosen: {paths[0]}\n"
                         f"  Other candidates: {paths[1:]}"
                     )

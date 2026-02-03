@@ -11,11 +11,11 @@ from typing import Optional
 
 
 # Stash plugin log levels
-def log_trace(msg): print(f"\x01t\x02[PlexSync Hook] {msg}", file=sys.stderr)
-def log_debug(msg): print(f"\x01d\x02[PlexSync Hook] {msg}", file=sys.stderr)
-def log_info(msg): print(f"\x01i\x02[PlexSync Hook] {msg}", file=sys.stderr)
-def log_warn(msg): print(f"\x01w\x02[PlexSync Hook] {msg}", file=sys.stderr)
-def log_error(msg): print(f"\x01e\x02[PlexSync Hook] {msg}", file=sys.stderr)
+def log_trace(msg): print(f"\x01t\x02[Stash2Plex Hook] {msg}", file=sys.stderr)
+def log_debug(msg): print(f"\x01d\x02[Stash2Plex Hook] {msg}", file=sys.stderr)
+def log_info(msg): print(f"\x01i\x02[Stash2Plex Hook] {msg}", file=sys.stderr)
+def log_warn(msg): print(f"\x01w\x02[Stash2Plex Hook] {msg}", file=sys.stderr)
+def log_error(msg): print(f"\x01e\x02[Stash2Plex Hook] {msg}", file=sys.stderr)
 
 
 try:

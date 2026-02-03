@@ -24,7 +24,7 @@ from plex.exceptions import translate_plex_exception
 if TYPE_CHECKING:
     from plexapi.server import PlexServer
 
-logger = logging.getLogger('PlexSync.plex.client')
+logger = logging.getLogger('Stash2Plex.plex.client')
 
 
 def _get_retriable_exceptions() -> Tuple[Type[Exception], ...]:

@@ -1,7 +1,7 @@
 """
 Persistent Queue Module
 
-Provides durable job queue infrastructure for PlexSync using SQLite-backed
+Provides durable job queue infrastructure for Stash2Plex using SQLite-backed
 persistence. Jobs survive process restarts, crashes, and Plex outages.
 """
 

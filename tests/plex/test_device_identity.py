@@ -191,20 +191,20 @@ class TestConfigurePlexDeviceIdentity:
         assert plexapi.X_PLEX_IDENTIFIER == device_id
 
     def test_sets_x_plex_product(self, tmp_path, restore_plexapi):
-        """Sets plexapi.X_PLEX_PRODUCT to 'PlexSync'."""
+        """Sets plexapi.X_PLEX_PRODUCT to 'Stash2Plex'."""
         data_dir = str(tmp_path)
 
         configure_plex_device_identity(data_dir)
 
-        assert plexapi.X_PLEX_PRODUCT == 'PlexSync'
+        assert plexapi.X_PLEX_PRODUCT == 'Stash2Plex'
 
     def test_sets_x_plex_device_name(self, tmp_path, restore_plexapi):
-        """Sets plexapi.X_PLEX_DEVICE_NAME to 'PlexSync Plugin'."""
+        """Sets plexapi.X_PLEX_DEVICE_NAME to 'Stash2Plex Plugin'."""
         data_dir = str(tmp_path)
 
         configure_plex_device_identity(data_dir)
 
-        assert plexapi.X_PLEX_DEVICE_NAME == 'PlexSync Plugin'
+        assert plexapi.X_PLEX_DEVICE_NAME == 'Stash2Plex Plugin'
 
     def test_rebuilds_base_headers(self, tmp_path, restore_plexapi):
         """Rebuilds BASE_HEADERS to include the new identifier."""
@@ -223,7 +223,7 @@ class TestConfigurePlexDeviceIdentity:
         configure_plex_device_identity(data_dir)
 
         assert 'X-Plex-Product' in plexapi.BASE_HEADERS
-        assert plexapi.BASE_HEADERS['X-Plex-Product'] == 'PlexSync'
+        assert plexapi.BASE_HEADERS['X-Plex-Product'] == 'Stash2Plex'
 
     def test_base_headers_includes_device_name(self, tmp_path, restore_plexapi):
         """BASE_HEADERS includes X-Plex-Device-Name."""
@@ -232,7 +232,7 @@ class TestConfigurePlexDeviceIdentity:
         configure_plex_device_identity(data_dir)
 
         assert 'X-Plex-Device-Name' in plexapi.BASE_HEADERS
-        assert plexapi.BASE_HEADERS['X-Plex-Device-Name'] == 'PlexSync Plugin'
+        assert plexapi.BASE_HEADERS['X-Plex-Device-Name'] == 'Stash2Plex Plugin'
 
     def test_returns_device_id(self, tmp_path, restore_plexapi):
         """Returns the device ID being used."""
@@ -286,5 +286,5 @@ class TestConfigurePlexDeviceIdentity:
 
         # Final plexapi state should be consistent
         assert plexapi.X_PLEX_IDENTIFIER == id1
-        assert plexapi.X_PLEX_PRODUCT == 'PlexSync'
-        assert plexapi.X_PLEX_DEVICE_NAME == 'PlexSync Plugin'
+        assert plexapi.X_PLEX_PRODUCT == 'Stash2Plex'
+        assert plexapi.X_PLEX_DEVICE_NAME == 'Stash2Plex Plugin'

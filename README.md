@@ -1,4 +1,4 @@
-# PlexSync
+# Stash2Plex
 
 Sync metadata from Stash to Plex with queue-based reliability.
 
@@ -8,7 +8,7 @@ Sync metadata from Stash to Plex with queue-based reliability.
 
 ## Overview
 
-PlexSync is a Stash plugin that automatically syncs scene metadata from Stash to Plex. When you update a scene in Stash (title, studio, performers, tags), PlexSync queues the change and syncs it to the matching item in your Plex library.
+Stash2Plex is a Stash plugin that automatically syncs scene metadata from Stash to Plex. When you update a scene in Stash (title, studio, performers, tags), Stash2Plex queues the change and syncs it to the matching item in your Plex library.
 
 **Key features:**
 
@@ -20,7 +20,7 @@ PlexSync is a Stash plugin that automatically syncs scene metadata from Stash to
 - **Selective sync** - Toggle which metadata fields sync to Plex
 - **Sync statistics** - Track success rates and timing with batch summaries
 
-**Use PlexSync if you:**
+**Use Stash2Plex if you:**
 
 - Organize your media metadata in Stash
 - Want Plex to reflect the same titles, studios, performers, and tags
@@ -46,14 +46,14 @@ Alternatively, see [Plex's official guide](https://support.plex.tv/articles/2040
 
 ### Installation
 
-1. **Download PlexSync** to your Stash plugins directory:
+1. **Download Stash2Plex** to your Stash plugins directory:
 
    ```bash
    cd ~/.stash/plugins
-   git clone https://github.com/trek-e/PlexSync.git
+   git clone https://github.com/trek-e/Stash2Plex.git
    ```
 
-   Or download and extract the ZIP from the [releases page](https://github.com/trek-e/PlexSync/releases).
+   Or download and extract the ZIP from the [releases page](https://github.com/trek-e/Stash2Plex/releases).
 
 2. **Reload plugins** in Stash:
 
@@ -61,7 +61,7 @@ Alternatively, see [Plex's official guide](https://support.plex.tv/articles/2040
 
 3. **Configure required settings** in Stash:
 
-   Settings > Plugins > PlexSync
+   Settings > Plugins > Stash2Plex
 
    | Setting | Value |
    |---------|-------|
@@ -74,11 +74,11 @@ Alternatively, see [Plex's official guide](https://support.plex.tv/articles/2040
    - Edit any scene in Stash (change the title slightly)
    - Check Plex within 30 seconds - the title should update
 
-That's it! PlexSync is now syncing metadata from Stash to Plex.
+That's it! Stash2Plex is now syncing metadata from Stash to Plex.
 
 ## How It Works
 
-1. **Hook triggers** - When you update a scene in Stash, PlexSync receives a hook event
+1. **Hook triggers** - When you update a scene in Stash, Stash2Plex receives a hook event
 2. **Job queued** - The sync job is saved to a SQLite-backed persistent queue
 3. **Worker syncs** - Background worker matches the scene to Plex and applies metadata
 4. **Retry on failure** - If Plex is down, the job retries with exponential backoff

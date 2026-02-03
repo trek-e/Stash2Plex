@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PlexSync - Stash plugin for syncing metadata to Plex
+Stash2Plex - Stash plugin for syncing metadata to Plex
 
 Entry point for the Stash plugin. Initializes queue infrastructure,
 starts background worker, and handles Stash hooks.
@@ -12,11 +12,11 @@ import json
 
 
 # Stash plugin log levels - prefix format: \x01 + level + \x02 + message
-def log_trace(msg): print(f"\x01t\x02[PlexSync] {msg}", file=sys.stderr)
-def log_debug(msg): print(f"\x01d\x02[PlexSync] {msg}", file=sys.stderr)
-def log_info(msg): print(f"\x01i\x02[PlexSync] {msg}", file=sys.stderr)
-def log_warn(msg): print(f"\x01w\x02[PlexSync] {msg}", file=sys.stderr)
-def log_error(msg): print(f"\x01e\x02[PlexSync] {msg}", file=sys.stderr)
+def log_trace(msg): print(f"\x01t\x02[Stash2Plex] {msg}", file=sys.stderr)
+def log_debug(msg): print(f"\x01d\x02[Stash2Plex] {msg}", file=sys.stderr)
+def log_info(msg): print(f"\x01i\x02[Stash2Plex] {msg}", file=sys.stderr)
+def log_warn(msg): print(f"\x01w\x02[Stash2Plex] {msg}", file=sys.stderr)
+def log_error(msg): print(f"\x01e\x02[Stash2Plex] {msg}", file=sys.stderr)
 def log_progress(p): print(f"\x01p\x02{p}")
 
 
@@ -35,7 +35,7 @@ try:
     from sync_queue.operations import load_sync_timestamps
     from worker.processor import SyncWorker
     from hooks.handlers import on_scene_update
-    from validation.config import validate_config, PlexSyncConfig
+    from validation.config import validate_config, Stash2PlexConfig
     from plex.device_identity import configure_plex_device_identity
     log_trace("All imports successful")
 except ImportError as e:
@@ -49,7 +49,7 @@ except ImportError as e:
 queue_manager = None
 dlq = None
 worker = None
-config: PlexSyncConfig = None
+config: Stash2PlexConfig = None
 sync_timestamps: dict = None
 stash_interface = None
 
@@ -92,7 +92,7 @@ def get_stash_interface(input_data: dict):
 
 def fetch_plugin_settings(stash) -> dict:
     """
-    Fetch PlexSync plugin settings from Stash configuration.
+    Fetch Stash2Plex plugin settings from Stash configuration.
 
     Args:
         stash: StashInterface instance
@@ -106,7 +106,7 @@ def fetch_plugin_settings(stash) -> dict:
     try:
         config = stash.get_configuration()
         plugins = config.get('plugins', {})
-        return plugins.get('PlexSync', {})
+        return plugins.get('Stash2Plex', {})
     except Exception as e:
         log_warn(f" Could not fetch settings from Stash: {e}")
         return {}

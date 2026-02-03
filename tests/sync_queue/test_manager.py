@@ -147,7 +147,7 @@ class TestQueueManager:
         manager = QueueManager()
 
         # Verify fallback path was used
-        expected_data_dir = os.path.join(mock_home, ".stash", "plugins", "PlexSync", "data")
+        expected_data_dir = os.path.join(mock_home, ".stash", "plugins", "Stash2Plex", "data")
         assert manager.data_dir == expected_data_dir
         assert manager.queue_path == os.path.join(expected_data_dir, "queue")
 

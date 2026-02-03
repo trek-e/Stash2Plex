@@ -1,5 +1,5 @@
 """
-Configuration validation for PlexSync.
+Configuration validation for Stash2Plex.
 
 Provides pydantic v2 models for validating plugin configuration
 with fail-fast behavior and sensible defaults.
@@ -9,12 +9,12 @@ from pydantic import BaseModel, Field, field_validator, ValidationError
 from typing import Optional
 import logging
 
-log = logging.getLogger('PlexSync.config')
+log = logging.getLogger('Stash2Plex.config')
 
 
-class PlexSyncConfig(BaseModel):
+class Stash2PlexConfig(BaseModel):
     """
-    PlexSync plugin configuration with validation.
+    Stash2Plex plugin configuration with validation.
 
     Required:
         plex_url: Plex server URL (e.g., http://192.168.1.100:32400)
@@ -170,7 +170,7 @@ class PlexSyncConfig(BaseModel):
         else:
             masked = '****'
         log.info(
-            f"PlexSync config: url={self.plex_url}, token={masked}, "
+            f"Stash2Plex config: url={self.plex_url}, token={masked}, "
             f"max_retries={self.max_retries}, enabled={self.enabled}, "
             f"strict_mode={self.strict_mode}, "
             f"connect_timeout={self.plex_connect_timeout}s, "
@@ -192,19 +192,19 @@ class PlexSyncConfig(BaseModel):
             log.info("Field sync: all fields enabled")
 
 
-def validate_config(config_dict: dict) -> tuple[Optional[PlexSyncConfig], Optional[str]]:
+def validate_config(config_dict: dict) -> tuple[Optional[Stash2PlexConfig], Optional[str]]:
     """
-    Validate configuration dictionary and return PlexSyncConfig or error message.
+    Validate configuration dictionary and return Stash2PlexConfig or error message.
 
     Args:
         config_dict: Dictionary containing configuration values
 
     Returns:
-        Tuple of (PlexSyncConfig, None) on success,
+        Tuple of (Stash2PlexConfig, None) on success,
         or (None, error_message) on validation failure
     """
     try:
-        config = PlexSyncConfig(**config_dict)
+        config = Stash2PlexConfig(**config_dict)
         return (config, None)
     except ValidationError as e:
         # Extract user-friendly error messages
@@ -218,4 +218,4 @@ def validate_config(config_dict: dict) -> tuple[Optional[PlexSyncConfig], Option
 
 
 # Re-export ValidationError for external use
-__all__ = ['PlexSyncConfig', 'validate_config', 'ValidationError']
+__all__ = ['Stash2PlexConfig', 'validate_config', 'ValidationError']

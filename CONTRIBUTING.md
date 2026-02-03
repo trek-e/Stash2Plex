@@ -1,6 +1,6 @@
-# Contributing to PlexSync
+# Contributing to Stash2Plex
 
-Thank you for your interest in contributing to PlexSync! This is a Stash plugin that syncs metadata to Plex media libraries.
+Thank you for your interest in contributing to Stash2Plex! This is a Stash plugin that syncs metadata to Plex media libraries.
 
 For an overview of the codebase architecture, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -8,8 +8,8 @@ For an overview of the codebase architecture, see [docs/ARCHITECTURE.md](docs/AR
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/trek-e/PlexSync.git
-   cd PlexSync
+   git clone https://github.com/trek-e/Stash2Plex.git
+   cd Stash2Plex
    ```
 
 2. Install runtime dependencies:

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to PlexSync will be documented in this file.
+All notable changes to Stash2Plex will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Response Validation**: Detect silent Plex API failures by validating responses
 - **Field Limits**: Enforce Plex field length limits with automatic truncation
 - **Emoji Sanitization**: Optional stripping of emojis from metadata (configurable)
-- **Persistent Device Identity**: PlexSync now appears as a consistent device in Plex, eliminating "new device" notifications
+- **Persistent Device Identity**: Stash2Plex now appears as a consistent device in Plex, eliminating "new device" notifications
 - **Comprehensive Test Suite**: 500+ tests with >80% code coverage
 - **Documentation**: Complete user guide, architecture documentation, and API reference (MkDocs)
 
@@ -58,5 +58,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `connect_timeout` - Plex connection timeout
 - `read_timeout` - Plex read timeout
 
-[1.1.0]: https://github.com/trek-e/PlexSync/compare/v1.0...v1.1
-[1.0.0]: https://github.com/trek-e/PlexSync/releases/tag/v1.0
+[1.1.0]: https://github.com/trek-e/Stash2Plex/compare/v1.0...v1.1
+[1.0.0]: https://github.com/trek-e/Stash2Plex/releases/tag/v1.0

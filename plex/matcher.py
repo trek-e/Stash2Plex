@@ -29,12 +29,12 @@ if TYPE_CHECKING:
     from plexapi.video import Video
     from plex.cache import PlexCache, MatchCache
 
-logger = logging.getLogger('PlexSync.plex.matcher')
+logger = logging.getLogger('Stash2Plex.plex.matcher')
 
 # Stash plugin log levels
-def log_debug(msg): print(f"\x01d\x02[PlexSync Matcher] {msg}", file=sys.stderr)
-def log_info(msg): print(f"\x01i\x02[PlexSync Matcher] {msg}", file=sys.stderr)
-def log_warn(msg): print(f"\x01w\x02[PlexSync Matcher] {msg}", file=sys.stderr)
+def log_debug(msg): print(f"\x01d\x02[Stash2Plex Matcher] {msg}", file=sys.stderr)
+def log_info(msg): print(f"\x01i\x02[Stash2Plex Matcher] {msg}", file=sys.stderr)
+def log_warn(msg): print(f"\x01w\x02[Stash2Plex Matcher] {msg}", file=sys.stderr)
 
 
 def _cached_item_has_file(item_data: dict, filename: str, case_insensitive: bool = True) -> bool:

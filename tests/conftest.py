@@ -1,5 +1,5 @@
 """
-Shared pytest fixtures for PlexSync tests.
+Shared pytest fixtures for Stash2Plex tests.
 
 Provides reusable mock fixtures for:
 - Plex API (PlexServer, library sections, media items)
@@ -141,9 +141,9 @@ def mock_plex_item():
 @pytest.fixture
 def mock_config():
     """
-    Mock configuration object with all PlexSync settings.
+    Mock configuration object with all Stash2Plex settings.
 
-    Provides all config attributes needed by PlexSync components:
+    Provides all config attributes needed by Stash2Plex components:
         - plex_url: Plex server URL
         - plex_token: Authentication token
         - plex_library: Library section name
@@ -179,13 +179,13 @@ def mock_config():
 @pytest.fixture
 def valid_config_dict():
     """
-    Dictionary with valid configuration values for PlexSyncConfig instantiation.
+    Dictionary with valid configuration values for Stash2PlexConfig instantiation.
 
-    Can be used to create actual PlexSyncConfig objects or test config validation.
+    Can be used to create actual Stash2PlexConfig objects or test config validation.
 
     Usage:
         def test_config_parsing(valid_config_dict):
-            config = PlexSyncConfig(**valid_config_dict)
+            config = Stash2PlexConfig(**valid_config_dict)
     """
     return {
         "plex_url": "http://localhost:32400",

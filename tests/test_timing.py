@@ -39,7 +39,7 @@ class TestTimedDecorator:
         def fast_function():
             return "done"
 
-        with caplog.at_level(logging.DEBUG, logger="PlexSync.plex.timing"):
+        with caplog.at_level(logging.DEBUG, logger="Stash2Plex.plex.timing"):
             result = fast_function()
 
         assert result == "done"
@@ -55,7 +55,7 @@ class TestTimedDecorator:
             time.sleep(1.0)
             return "done"
 
-        with caplog.at_level(logging.DEBUG, logger="PlexSync.plex.timing"):
+        with caplog.at_level(logging.DEBUG, logger="Stash2Plex.plex.timing"):
             result = slow_function()
 
         assert result == "done"
@@ -69,7 +69,7 @@ class TestTimedDecorator:
         def error_function():
             raise ValueError("test error")
 
-        with caplog.at_level(logging.DEBUG, logger="PlexSync.plex.timing"):
+        with caplog.at_level(logging.DEBUG, logger="Stash2Plex.plex.timing"):
             with pytest.raises(ValueError, match="test error"):
                 error_function()
 
@@ -100,7 +100,7 @@ class TestOperationTimer:
 
     def test_timer_logs_at_debug_for_fast_operations(self, caplog):
         """Fast operations (<1s) log at DEBUG level."""
-        with caplog.at_level(logging.DEBUG, logger="PlexSync.plex.timing"):
+        with caplog.at_level(logging.DEBUG, logger="Stash2Plex.plex.timing"):
             with OperationTimer("quick task"):
                 pass
 
@@ -110,7 +110,7 @@ class TestOperationTimer:
 
     def test_timer_logs_at_info_for_slow_operations(self, caplog):
         """Slow operations (>=1s) log at INFO level."""
-        with caplog.at_level(logging.DEBUG, logger="PlexSync.plex.timing"):
+        with caplog.at_level(logging.DEBUG, logger="Stash2Plex.plex.timing"):
             with OperationTimer("slow task"):
                 time.sleep(1.0)
 
@@ -134,7 +134,7 @@ class TestOperationTimer:
 
     def test_timer_logs_on_exception(self, caplog):
         """Timer logs timing even when block raises."""
-        with caplog.at_level(logging.DEBUG, logger="PlexSync.plex.timing"):
+        with caplog.at_level(logging.DEBUG, logger="Stash2Plex.plex.timing"):
             with pytest.raises(ValueError):
                 with OperationTimer("error task"):
                     raise ValueError("test")
@@ -152,7 +152,7 @@ class TestLogTiming:
         log_timing("Test timing message")
 
         captured = capsys.readouterr()
-        assert "[PlexSync Timing]" in captured.err
+        assert "[Stash2Plex Timing]" in captured.err
         assert "Test timing message" in captured.err
 
     def test_log_timing_uses_debug_prefix(self, capsys):
@@ -169,7 +169,7 @@ class TestTimingIntegration:
 
     def test_nested_timing(self, caplog):
         """Nested timers work correctly."""
-        with caplog.at_level(logging.DEBUG, logger="PlexSync.plex.timing"):
+        with caplog.at_level(logging.DEBUG, logger="Stash2Plex.plex.timing"):
             with OperationTimer("outer"):
                 with OperationTimer("inner"):
                     time.sleep(0.01)
@@ -188,7 +188,7 @@ class TestTimingIntegration:
                 time.sleep(0.01)
             return "done"
 
-        with caplog.at_level(logging.DEBUG, logger="PlexSync.plex.timing"):
+        with caplog.at_level(logging.DEBUG, logger="Stash2Plex.plex.timing"):
             result = outer_function()
 
         assert result == "done"

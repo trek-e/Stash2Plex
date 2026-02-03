@@ -1,10 +1,10 @@
 # Installation Guide
 
-This guide covers installing PlexSync from scratch, including prerequisites, setup steps, and verification.
+This guide covers installing Stash2Plex from scratch, including prerequisites, setup steps, and verification.
 
 ## Prerequisites
 
-Before installing PlexSync, ensure you have:
+Before installing Stash2Plex, ensure you have:
 
 - **Stash** installed and running ([Stash documentation](https://docs.stashapp.cc/))
 - **Plex Media Server** installed and running
@@ -13,53 +13,53 @@ Before installing PlexSync, ensure you have:
 
 ## Step 1: Install PythonDepManager
 
-PlexSync requires Python dependencies that are automatically installed by the **PythonDepManager** Stash plugin. This is a one-time setup.
+Stash2Plex requires Python dependencies that are automatically installed by the **PythonDepManager** Stash plugin. This is a one-time setup.
 
 1. In Stash, go to **Settings > Plugins > Available Plugins**
 2. Search for "PythonDepManager" or "py_common"
 3. Click **Install**
 4. Reload plugins
 
-PythonDepManager will automatically install PlexSync's Python dependencies (plexapi, tenacity, pydantic, persist-queue) when the plugin loads.
+PythonDepManager will automatically install Stash2Plex's Python dependencies (plexapi, tenacity, pydantic, persist-queue) when the plugin loads.
 
-## Step 2: Install PlexSync
+## Step 2: Install Stash2Plex
 
 ### Method A: From Stash Community Plugins (Recommended)
 
-If PlexSync is available in the Stash community plugin repository:
+If Stash2Plex is available in the Stash community plugin repository:
 
 1. Go to **Settings > Plugins > Available Plugins**
-2. Search for "PlexSync"
+2. Search for "Stash2Plex"
 3. Click **Install**
 4. Continue to [Step 3: Reload Plugins](#step-3-reload-plugins)
 
 ### Method B: Manual Installation
 
-1. Clone or download the PlexSync repository:
+1. Clone or download the Stash2Plex repository:
    ```bash
-   git clone https://github.com/your-repo/PlexSync.git
+   git clone https://github.com/your-repo/Stash2Plex.git
    ```
 
-2. Copy the PlexSync folder to your Stash plugins directory:
+2. Copy the Stash2Plex folder to your Stash plugins directory:
 
    **Bare metal installation:**
    ```bash
-   cp -r PlexSync ~/.stash/plugins/PlexSync/
+   cp -r Stash2Plex ~/.stash/plugins/Stash2Plex/
    ```
 
    **Docker installation:**
    ```bash
    # Common Docker paths:
-   cp -r PlexSync /root/.stash/plugins/PlexSync/
+   cp -r Stash2Plex /root/.stash/plugins/Stash2Plex/
    # or
-   cp -r PlexSync /config/plugins/PlexSync/
+   cp -r Stash2Plex /config/plugins/Stash2Plex/
    ```
 
 3. Verify the folder structure matches:
    ```
-   PlexSync/
-     PlexSync.py
-     PlexSync.yml
+   Stash2Plex/
+     Stash2Plex.py
+     Stash2Plex.yml
      requirements.txt
      hooks/
      plex/
@@ -72,17 +72,17 @@ If PlexSync is available in the Stash community plugin repository:
 
 1. Go to **Settings > Plugins**
 2. Click the **Reload Plugins** button
-3. PlexSync should appear in the plugin list
+3. Stash2Plex should appear in the plugin list
 4. Check for any errors in Stash logs (Settings > Logs)
 
-If PlexSync doesn't appear, check that:
+If Stash2Plex doesn't appear, check that:
 - The folder is in the correct plugins directory
 - PythonDepManager is installed
 - All required files are present
 
-## Step 4: Configure PlexSync
+## Step 4: Configure Stash2Plex
 
-1. Go to **Settings > Plugins > PlexSync**
+1. Go to **Settings > Plugins > Stash2Plex**
 2. Set the required fields:
 
 | Setting | Description | Example |
@@ -97,7 +97,7 @@ For all available settings, see the [Configuration Reference](config.md).
 
 ## Getting Your Plex Token
 
-Your Plex token authenticates PlexSync with your Plex server. Here are two methods to obtain it:
+Your Plex token authenticates Stash2Plex with your Plex server. Here are two methods to obtain it:
 
 ### Option 1: From Plex Web App
 
@@ -126,7 +126,7 @@ When running Stash and/or Plex in Docker containers, pay attention to:
 
 ### Path Mapping
 
-PlexSync matches Plex items by file path. **Both Stash and Plex must see files at the same path** for matching to work.
+Stash2Plex matches Plex items by file path. **Both Stash and Plex must see files at the same path** for matching to work.
 
 Example docker-compose volume configuration:
 ```yaml
@@ -155,17 +155,17 @@ For the `plex_url` setting:
 ## Verifying Installation
 
 1. Update any scene in Stash (edit title, add a performer, etc.)
-2. Check Stash logs (**Settings > Logs**) for `[PlexSync]` messages
+2. Check Stash logs (**Settings > Logs**) for `[Stash2Plex]` messages
 3. Look for success messages:
    ```
-   [PlexSync Hook] Enqueued sync job for scene 123
-   [PlexSync Worker] Job completed
+   [Stash2Plex Hook] Enqueued sync job for scene 123
+   [Stash2Plex Worker] Job completed
    ```
 4. Check Plex for updated metadata (may take a few seconds)
 
 ## Data Directory
 
-PlexSync stores runtime data in a `data/` subdirectory:
+Stash2Plex stores runtime data in a `data/` subdirectory:
 
 | File/Folder | Purpose |
 |-------------|---------|
@@ -178,9 +178,9 @@ PlexSync stores runtime data in a `data/` subdirectory:
 
 | Environment | Path |
 |-------------|------|
-| Bare metal | `~/.stash/plugins/PlexSync/data/` |
-| Docker (default) | `/root/.stash/plugins/PlexSync/data/` |
-| Docker (custom) | `/config/plugins/PlexSync/data/` |
+| Bare metal | `~/.stash/plugins/Stash2Plex/data/` |
+| Docker (default) | `/root/.stash/plugins/Stash2Plex/data/` |
+| Docker (custom) | `/config/plugins/Stash2Plex/data/` |
 
 The data directory can be overridden via the `STASH_PLUGIN_DATA` environment variable.
 
@@ -194,11 +194,11 @@ The data directory can be overridden via the `STASH_PLUGIN_DATA` environment var
 
 ### Plugin Not Appearing
 
-**Symptom:** PlexSync doesn't show in the plugins list after reload
+**Symptom:** Stash2Plex doesn't show in the plugins list after reload
 
 **Solutions:**
 - Verify the folder is in the correct plugins directory
-- Check that `PlexSync.yml` exists in the folder
+- Check that `Stash2Plex.yml` exists in the folder
 - Look for errors in Stash logs
 
 ### Permission Errors
@@ -223,5 +223,5 @@ For more troubleshooting help, see the [Troubleshooting Guide](troubleshoot.md).
 
 ## Next Steps
 
-- **[Configuration Reference](config.md)** - Tune PlexSync settings for your setup
+- **[Configuration Reference](config.md)** - Tune Stash2Plex settings for your setup
 - **[Troubleshooting Guide](troubleshoot.md)** - Resolve common issues

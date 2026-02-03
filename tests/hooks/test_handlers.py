@@ -30,10 +30,10 @@ def clear_pending_scenes():
 
 
 # =============================================================================
-# TestRequiresPlexSync - Helper function for filtering sync-worthy updates
+# TestRequiresStash2Plex - Helper function for filtering sync-worthy updates
 # =============================================================================
 
-class TestRequiresPlexSync:
+class TestRequiresStash2Plex:
     """Tests for requires_plex_sync helper function."""
 
     def test_title_triggers_sync(self):

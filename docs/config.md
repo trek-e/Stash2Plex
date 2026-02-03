@@ -1,6 +1,6 @@
 # Configuration Reference
 
-All PlexSync settings are configured in the Stash UI under **Settings > Plugins > PlexSync**.
+All Stash2Plex settings are configured in the Stash UI under **Settings > Plugins > Stash2Plex**.
 
 This document covers every setting, its purpose, default value, and when you might want to change it.
 
@@ -8,7 +8,7 @@ This document covers every setting, its purpose, default value, and when you mig
 
 ## Required Settings
 
-These settings have no usable defaults and must be configured before PlexSync will work.
+These settings have no usable defaults and must be configured before Stash2Plex will work.
 
 ### plex_url
 
@@ -68,8 +68,8 @@ These settings have no usable defaults and must be configured before PlexSync wi
 **Examples:** `Adult`, `Movies`, `Home Videos`
 
 **Behavior:**
-- **When set:** PlexSync only searches the specified library (faster)
-- **When empty:** PlexSync searches ALL libraries (slower, may find wrong matches)
+- **When set:** Stash2Plex only searches the specified library (faster)
+- **When empty:** Stash2Plex searches ALL libraries (slower, may find wrong matches)
 
 **Recommendation:** Always set this to your target library name for faster and more accurate matching.
 
@@ -85,7 +85,7 @@ These settings have no usable defaults and must be configured before PlexSync wi
 | Required | No |
 | Default | `true` |
 
-**Description:** Enable or disable PlexSync.
+**Description:** Enable or disable Stash2Plex.
 
 **Use case:** Temporarily pause syncing without uninstalling the plugin. Useful during bulk imports or Plex maintenance.
 
@@ -146,7 +146,7 @@ These settings have no usable defaults and must be configured before PlexSync wi
 - **Increase** if your network is unreliable or Plex server occasionally goes offline
 - **Decrease** if you want faster feedback on permanent failures
 
-**Note:** PlexSync uses exponential backoff between retries (5s, 10s, 20s, 40s, 80s), so 5 retries covers several minutes of transient failures.
+**Note:** Stash2Plex uses exponential backoff between retries (5s, 10s, 20s, 40s, 80s), so 5 retries covers several minutes of transient failures.
 
 ---
 
@@ -219,7 +219,7 @@ These settings are not exposed in the Stash UI but are recognized by the code. A
 - **When true:** Reject invalid metadata (job fails validation)
 - **When false:** Sanitize invalid metadata (remove control characters, truncate long strings)
 
-**Default behavior:** PlexSync sanitizes metadata automatically, so most users never need this.
+**Default behavior:** Stash2Plex sanitizes metadata automatically, so most users never need this.
 
 ---
 
@@ -353,7 +353,7 @@ plex_library: "Adult"
 
 ## Validation Rules
 
-PlexSync validates your configuration on startup. Invalid settings log errors and may disable the plugin.
+Stash2Plex validates your configuration on startup. Invalid settings log errors and may disable the plugin.
 
 | Setting | Validation |
 |---------|------------|

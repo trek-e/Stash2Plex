@@ -1,5 +1,5 @@
 """
-Plex API client module for PlexSync.
+Plex API client module for Stash2Plex.
 
 This module provides the interface for communicating with Plex servers,
 including exception handling, timeout configuration, and retry logic.

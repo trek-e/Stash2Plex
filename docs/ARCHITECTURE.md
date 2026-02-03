@@ -1,6 +1,6 @@
-# PlexSync Architecture
+# Stash2Plex Architecture
 
-PlexSync is a Stash plugin that automatically syncs scene metadata to Plex Media Server. It uses a producer-consumer pattern with a SQLite-backed persistent queue to ensure reliable delivery even through process crashes, timeouts, and network outages.
+Stash2Plex is a Stash plugin that automatically syncs scene metadata to Plex Media Server. It uses a producer-consumer pattern with a SQLite-backed persistent queue to ensure reliable delivery even through process crashes, timeouts, and network outages.
 
 **External Documentation:**
 - [Stash Plugin System](https://docs.stashapp.cc/plugins/)
@@ -17,7 +17,7 @@ graph TB
         PLEX[("Plex Server")]
     end
 
-    subgraph PlexSync["PlexSync Plugin"]
+    subgraph Stash2Plex["Stash2Plex Plugin"]
         subgraph hooks["hooks/"]
             HANDLER["handlers.py<br/>on_scene_update()"]
         end
@@ -25,7 +25,7 @@ graph TB
         subgraph validation["validation/"]
             META["metadata.py<br/>SyncMetadata"]
             SANITIZE["sanitizers.py"]
-            CONFIG["config.py<br/>PlexSyncConfig"]
+            CONFIG["config.py<br/>Stash2PlexConfig"]
         end
 
         subgraph sync_queue["sync_queue/"]
@@ -147,7 +147,7 @@ graph TB
 - Initialize PlexServer connection with configurable timeouts
 - Find Plex items by filename matching (fast title search, slow fallback)
 - Return match confidence (HIGH/LOW) for caller decision
-- Translate plexapi/requests exceptions to PlexSync error types
+- Translate plexapi/requests exceptions to Stash2Plex error types
 
 **Design Note:** Two-phase matching strategy - fast path searches by title derived from filename, slow fallback scans all items. Most syncs hit fast path; fallback handles edge cases.
 
@@ -160,7 +160,7 @@ graph TB
 **Key Files:**
 - `metadata.py` - SyncMetadata Pydantic model
 - `sanitizers.py` - Text cleaning functions
-- `config.py` - PlexSyncConfig model with validation
+- `config.py` - Stash2PlexConfig model with validation
 
 **Responsibilities:**
 - Enforce required fields (scene_id, title) via Pydantic
@@ -176,7 +176,7 @@ graph TB
 
 ### 1. Event Capture
 
-When a scene is updated in Stash, it fires a `Scene.Update.Post` hook. PlexSync receives the hook payload via stdin JSON and routes it to `on_scene_update()`.
+When a scene is updated in Stash, it fires a `Scene.Update.Post` hook. Stash2Plex receives the hook payload via stdin JSON and routes it to `on_scene_update()`.
 
 ### 2. Event Filtering
 
@@ -274,4 +274,4 @@ On permanent error: job goes directly to dead letter queue without retry.
 
 ---
 
-*Document: Architecture overview for PlexSync plugin developers*
+*Document: Architecture overview for Stash2Plex plugin developers*

@@ -26,7 +26,7 @@ class QueueManager:
 
         Args:
             data_dir: Directory for queue storage. Defaults to
-                     $STASH_PLUGIN_DATA or ~/.stash/plugins/PlexSync/data
+                     $STASH_PLUGIN_DATA or ~/.stash/plugins/Stash2Plex/data
         """
         if persistqueue is None:
             raise ImportError(
@@ -43,7 +43,7 @@ class QueueManager:
             else:
                 # Fallback to default location
                 home = os.path.expanduser('~')
-                data_dir = os.path.join(home, '.stash', 'plugins', 'PlexSync', 'data')
+                data_dir = os.path.join(home, '.stash', 'plugins', 'Stash2Plex', 'data')
 
         self.data_dir = data_dir
         self.queue_path = os.path.join(data_dir, 'queue')

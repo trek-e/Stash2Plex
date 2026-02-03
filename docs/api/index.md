@@ -1,6 +1,6 @@
 # API Reference
 
-Auto-generated reference for PlexSync Python modules.
+Auto-generated reference for Stash2Plex Python modules.
 
 For system design and architecture decisions, see the [Architecture Documentation](../ARCHITECTURE.md).
 

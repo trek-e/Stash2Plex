@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Manual queue processor for PlexSync.
+Manual queue processor for Stash2Plex.
 
 Run this script to process all pending items in the sync queue.
 Useful when the queue has stalled due to Stash plugin timeout limits.
@@ -21,16 +21,16 @@ logging.basicConfig(
     format='%(asctime)s [%(levelname)s] %(message)s',
     datefmt='%H:%M:%S'
 )
-logger = logging.getLogger('PlexSync.manual')
+logger = logging.getLogger('Stash2Plex.manual')
 
 
 def find_data_dir():
-    """Find the PlexSync data directory."""
+    """Find the Stash2Plex data directory."""
     # Common locations
     candidates = [
-        '/root/.stash/plugins/PlexSync/data',
-        '/config/plugins/PlexSync/data',
-        os.path.expanduser('~/.stash/plugins/PlexSync/data'),
+        '/root/.stash/plugins/Stash2Plex/data',
+        '/config/plugins/Stash2Plex/data',
+        os.path.expanduser('~/.stash/plugins/Stash2Plex/data'),
         './data',
     ]
 
@@ -42,7 +42,7 @@ def find_data_dir():
 
 
 def load_config(data_dir):
-    """Load PlexSync configuration."""
+    """Load Stash2Plex configuration."""
     config_path = os.path.join(os.path.dirname(data_dir), 'config.json')
 
     # Also check parent plugin directory
@@ -68,7 +68,7 @@ def process_queue(data_dir, config):
     from sync_queue.manager import QueueManager
     from sync_queue.operations import get_stats, get_pending, ack_job, fail_job
     from worker.processor import SyncWorker
-    from validation.config import PlexSyncConfig
+    from validation.config import Stash2PlexConfig
 
     # Configure device identity FIRST (before any Plex connections)
     device_id = configure_plex_device_identity(data_dir)
@@ -84,7 +84,7 @@ def process_queue(data_dir, config):
 
     # Validate config
     try:
-        validated_config = PlexSyncConfig(**config)
+        validated_config = Stash2PlexConfig(**config)
     except Exception as e:
         logger.error(f"Invalid configuration: {e}")
         logger.error("Set PLEX_URL, PLEX_TOKEN, and PLEX_LIBRARY environment variables or provide config.json")
@@ -138,8 +138,8 @@ def process_queue(data_dir, config):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Process PlexSync queue manually')
-    parser.add_argument('--data-dir', '-d', help='Path to PlexSync data directory')
+    parser = argparse.ArgumentParser(description='Process Stash2Plex queue manually')
+    parser.add_argument('--data-dir', '-d', help='Path to Stash2Plex data directory')
     parser.add_argument('--plex-url', help='Plex server URL (or set PLEX_URL env var)')
     parser.add_argument('--plex-token', help='Plex token (or set PLEX_TOKEN env var)')
     parser.add_argument('--plex-library', default='Movies', help='Plex library name')
@@ -150,7 +150,7 @@ def main():
     # Find data directory
     data_dir = args.data_dir or find_data_dir()
     if not data_dir:
-        logger.error("Could not find PlexSync data directory. Use --data-dir to specify.")
+        logger.error("Could not find Stash2Plex data directory. Use --data-dir to specify.")
         return 1
 
     logger.info(f"Using data directory: {data_dir}")

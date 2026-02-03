@@ -1,10 +1,10 @@
-- id: PlexSync
-  name: PlexSync
+- id: Stash2Plex
+  name: Stash2Plex
   metadata:
     description: Sync metadata from Stash to Plex with queue-based reliability. Features persistent queue, automatic retry, performance caching, and selective field sync toggles.
   version: 1.1.0
   date: 2026-02-03 14:30:00
-  path: https://raw.githubusercontent.com/trek-e/PlexSync/main/PlexSync.zip
-  sha256: 01d3afc3372366a4c4400c606abd9c1d3e504178296d33e95b4037f3a3914ce2
+  path: https://raw.githubusercontent.com/trek-e/Stash2Plex/main/Stash2Plex.zip
+  sha256: 94c12b6bc5232af2fd25e85708142fa01ddd8bad2e799f1e7e5083af26f0a69e
   requires:
     - PythonDepManager

@@ -1,5 +1,5 @@
 """
-Integration test fixtures for PlexSync.
+Integration test fixtures for Stash2Plex.
 
 These fixtures compose the unit test fixtures from tests/conftest.py
 into complete workflow scenarios for testing:

@@ -1,7 +1,7 @@
 """
 Device identity management for persistent Plex device recognition.
 
-This module ensures PlexSync appears as a consistent, named device in Plex
+This module ensures Stash2Plex appears as a consistent, named device in Plex
 rather than generating "new device" notifications on each connection.
 
 The issue: plexapi defaults to using a MAC-address-derived UUID which can
@@ -21,14 +21,14 @@ import logging
 import os
 import uuid
 
-logger = logging.getLogger('PlexSync.device')
+logger = logging.getLogger('Stash2Plex.device')
 
 
 def load_or_create_device_id(data_dir: str) -> str:
     """
     Load persistent device ID or create a new one.
 
-    The device ID ensures Plex recognizes PlexSync as the same device
+    The device ID ensures Plex recognizes Stash2Plex as the same device
     across restarts, avoiding "new device" notifications.
 
     Args:
@@ -92,8 +92,8 @@ def configure_plex_device_identity(data_dir: str) -> str:
 
     # Set module-level variables (affects all future connections)
     plexapi.X_PLEX_IDENTIFIER = device_id
-    plexapi.X_PLEX_PRODUCT = 'PlexSync'
-    plexapi.X_PLEX_DEVICE_NAME = 'PlexSync Plugin'
+    plexapi.X_PLEX_PRODUCT = 'Stash2Plex'
+    plexapi.X_PLEX_DEVICE_NAME = 'Stash2Plex Plugin'
 
     # Rebuild BASE_HEADERS to pick up new values
     plexapi.BASE_HEADERS = plexapi.config.reset_base_headers()
