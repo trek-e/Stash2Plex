@@ -441,3 +441,279 @@ class TestProcessJobReturnValue:
 
             result = processor_worker._process_job(job)
             assert result == 'low'
+
+
+class TestFieldClearing:
+    """Tests for LOCKED decision: missing optional fields clear Plex values."""
+
+    @pytest.fixture
+    def clearing_worker(self, mock_queue, mock_dlq, mock_config, tmp_path):
+        """Create SyncWorker configured for clearing tests."""
+        from worker.processor import SyncWorker
+
+        mock_config.plex_connect_timeout = 10.0
+        mock_config.plex_read_timeout = 30.0
+        mock_config.preserve_plex_edits = False
+        mock_config.strict_matching = False
+        mock_config.dlq_retention_days = 30
+
+        worker = SyncWorker(
+            queue=mock_queue,
+            dlq=mock_dlq,
+            config=mock_config,
+            data_dir=str(tmp_path),
+        )
+        return worker
+
+    def test_none_studio_clears_plex_studio(self, clearing_worker):
+        """When Stash sends studio=None, existing Plex studio is cleared."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = "Existing Studio"
+        mock_plex_item.title = "Test Title"
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Data dict has 'studio' key with None value (LOCKED: should clear)
+        data = {'path': '/test.mp4', 'title': 'Test', 'studio': None}
+
+        clearing_worker._update_metadata(mock_plex_item, data)
+
+        # Verify edit was called with empty studio
+        mock_plex_item.edit.assert_called()
+        edit_kwargs = mock_plex_item.edit.call_args[1]
+        assert 'studio.value' in edit_kwargs
+        assert edit_kwargs['studio.value'] == ''
+
+    def test_empty_string_studio_clears_plex_studio(self, clearing_worker):
+        """When Stash sends studio='', existing Plex studio is cleared."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = "Existing Studio"
+        mock_plex_item.title = "Test Title"
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Data dict has 'studio' key with empty string (LOCKED: should clear)
+        data = {'path': '/test.mp4', 'title': 'Test', 'studio': ''}
+
+        clearing_worker._update_metadata(mock_plex_item, data)
+
+        # Verify edit was called with empty studio
+        mock_plex_item.edit.assert_called()
+        edit_kwargs = mock_plex_item.edit.call_args[1]
+        assert 'studio.value' in edit_kwargs
+        assert edit_kwargs['studio.value'] == ''
+
+    def test_field_not_in_data_preserves_plex_value(self, clearing_worker):
+        """When field key not in data dict, existing Plex value is preserved."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = "Existing Studio"
+        mock_plex_item.title = "Test Title"
+        mock_plex_item.summary = "Existing Summary"
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Data dict does NOT have 'studio' key - should NOT clear
+        data = {'path': '/test.mp4', 'title': 'New Title'}
+
+        clearing_worker._update_metadata(mock_plex_item, data)
+
+        # Verify studio was NOT included in edit call
+        if mock_plex_item.edit.called:
+            edit_kwargs = mock_plex_item.edit.call_args[1]
+            assert 'studio.value' not in edit_kwargs
+
+    def test_none_summary_clears_plex_summary(self, clearing_worker):
+        """When Stash sends details=None, existing Plex summary is cleared."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = "Test Title"
+        mock_plex_item.summary = "Existing Summary"
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Data dict has 'details' key with None value (LOCKED: should clear)
+        data = {'path': '/test.mp4', 'title': 'Test', 'details': None}
+
+        clearing_worker._update_metadata(mock_plex_item, data)
+
+        # Verify edit was called with empty summary
+        mock_plex_item.edit.assert_called()
+        edit_kwargs = mock_plex_item.edit.call_args[1]
+        assert 'summary.value' in edit_kwargs
+        assert edit_kwargs['summary.value'] == ''
+
+    def test_none_tagline_clears_plex_tagline(self, clearing_worker):
+        """When Stash sends tagline=None, existing Plex tagline is cleared."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = "Test Title"
+        mock_plex_item.summary = ""
+        mock_plex_item.tagline = "Existing Tagline"
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        data = {'path': '/test.mp4', 'title': 'Test', 'tagline': None}
+
+        clearing_worker._update_metadata(mock_plex_item, data)
+
+        mock_plex_item.edit.assert_called()
+        edit_kwargs = mock_plex_item.edit.call_args[1]
+        assert 'tagline.value' in edit_kwargs
+        assert edit_kwargs['tagline.value'] == ''
+
+    def test_valid_value_sets_field(self, clearing_worker):
+        """When Stash sends valid value, Plex field is set."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        data = {'path': '/test.mp4', 'studio': 'New Studio', 'title': 'New Title'}
+
+        clearing_worker._update_metadata(mock_plex_item, data)
+
+        mock_plex_item.edit.assert_called()
+        # Get the first edit call (metadata fields), not the last (collection add)
+        # edit() is called multiple times: once for title/studio, once for collection
+        first_edit_kwargs = mock_plex_item.edit.call_args_list[0][1]
+        assert first_edit_kwargs.get('studio.value') == 'New Studio'
+        assert first_edit_kwargs.get('title.value') == 'New Title'
+
+
+class TestListFieldLimits:
+    """Tests for list field limits (performers, tags)."""
+
+    @pytest.fixture
+    def limits_worker(self, mock_queue, mock_dlq, mock_config, tmp_path):
+        """Create SyncWorker configured for limits tests."""
+        from worker.processor import SyncWorker
+
+        mock_config.plex_connect_timeout = 10.0
+        mock_config.plex_read_timeout = 30.0
+        mock_config.preserve_plex_edits = False
+        mock_config.strict_matching = False
+        mock_config.dlq_retention_days = 30
+
+        worker = SyncWorker(
+            queue=mock_queue,
+            dlq=mock_dlq,
+            config=mock_config,
+            data_dir=str(tmp_path),
+        )
+        return worker
+
+    def test_performers_truncated_at_max(self, limits_worker, capsys):
+        """More than MAX_PERFORMERS performers are truncated with warning."""
+        from validation.limits import MAX_PERFORMERS
+
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = "Test"
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Create more performers than MAX_PERFORMERS
+        performers = [f"Performer {i}" for i in range(MAX_PERFORMERS + 10)]
+        data = {'path': '/test.mp4', 'performers': performers}
+
+        limits_worker._update_metadata(mock_plex_item, data)
+
+        # Verify warning was logged
+        captured = capsys.readouterr()
+        assert "Truncating performers list" in captured.err
+        assert str(MAX_PERFORMERS + 10) in captured.err
+        assert str(MAX_PERFORMERS) in captured.err
+
+    def test_tags_truncated_at_max(self, limits_worker, capsys):
+        """More than MAX_TAGS tags are truncated with warning."""
+        from validation.limits import MAX_TAGS
+
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = "Test"
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Create more tags than MAX_TAGS
+        tags = [f"Tag {i}" for i in range(MAX_TAGS + 10)]
+        data = {'path': '/test.mp4', 'tags': tags}
+
+        limits_worker._update_metadata(mock_plex_item, data)
+
+        # Verify warning was logged
+        captured = capsys.readouterr()
+        assert "Truncating tags list" in captured.err
+        assert str(MAX_TAGS + 10) in captured.err
+        assert str(MAX_TAGS) in captured.err
+
+    def test_performers_under_limit_not_truncated(self, limits_worker, capsys):
+        """Performers under MAX_PERFORMERS are not truncated."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = "Test"
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Create fewer performers than MAX_PERFORMERS
+        performers = ["Performer 1", "Performer 2", "Performer 3"]
+        data = {'path': '/test.mp4', 'performers': performers}
+
+        limits_worker._update_metadata(mock_plex_item, data)
+
+        # Verify no truncation warning
+        captured = capsys.readouterr()
+        assert "Truncating performers list" not in captured.err
+
+    def test_empty_performers_clears_actors(self, limits_worker, capsys):
+        """Empty performers list clears all actors (LOCKED decision)."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = "Test"
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = [MagicMock(tag="Existing Actor")]
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Empty performers list with key present (LOCKED: should clear)
+        data = {'path': '/test.mp4', 'performers': []}
+
+        limits_worker._update_metadata(mock_plex_item, data)
+
+        # Verify clearing was logged
+        captured = capsys.readouterr()
+        assert "Clearing performers" in captured.err
+
+    def test_empty_tags_clears_genres(self, limits_worker, capsys):
+        """Empty tags list clears all genres (LOCKED decision)."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = "Test"
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = [MagicMock(tag="Existing Genre")]
+        mock_plex_item.collections = []
+
+        # Empty tags list with key present (LOCKED: should clear)
+        data = {'path': '/test.mp4', 'tags': []}
+
+        limits_worker._update_metadata(mock_plex_item, data)
+
+        # Verify clearing was logged
+        captured = capsys.readouterr()
+        assert "Clearing tags" in captured.err

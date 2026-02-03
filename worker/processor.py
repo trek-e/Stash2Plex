@@ -17,6 +17,9 @@ from typing import Optional, TYPE_CHECKING
 
 from worker.stats import SyncStats
 
+# Lazy imports to avoid circular import with validation module
+# These are imported inside _update_metadata() where they're used
+
 
 # Stash plugin log levels
 def log_trace(msg): print(f"\x01t\x02[PlexSync Worker] {msg}", file=sys.stderr)
@@ -606,6 +609,10 @@ class SyncWorker:
         """
         Update Plex item metadata from sync job data.
 
+        Implements LOCKED user decision: When Stash provides None/empty for an
+        optional field, the existing Plex value is CLEARED (not preserved).
+        When a field key is NOT in the data dict, the existing value is preserved.
+
         Uses plex_item.edit() to update metadata fields, then reloads
         the item to confirm changes.
 
@@ -613,36 +620,86 @@ class SyncWorker:
             plex_item: Plex Video item to update
             data: Dict containing metadata fields (title, studio, details, etc.)
         """
+        # Lazy imports to avoid circular import with validation module
+        from validation.limits import (
+            MAX_TITLE_LENGTH,
+            MAX_STUDIO_LENGTH,
+            MAX_SUMMARY_LENGTH,
+            MAX_TAGLINE_LENGTH,
+            MAX_PERFORMER_NAME_LENGTH,
+            MAX_TAG_NAME_LENGTH,
+            MAX_PERFORMERS,
+            MAX_TAGS,
+        )
+        from validation.sanitizers import sanitize_for_plex
+
         edits = {}
 
-        # Map Stash fields to Plex fields
-        # Stash 'details' -> Plex 'summary'
-        summary = data.get('details') or data.get('summary')
+        # LOCKED DECISION: Missing optional fields clear existing Plex values
+        # - If key exists AND value is None/empty -> CLEAR (set to '')
+        # - If key exists AND value is present -> sanitize and set
+        # - If key does NOT exist in data dict -> do nothing (preserve)
 
-        if self.config.preserve_plex_edits:
-            # Only update fields that are None or empty string in Plex
-            if data.get('title') and not plex_item.title:
-                edits['title.value'] = data['title']
-            if data.get('studio') and not plex_item.studio:
-                edits['studio.value'] = data['studio']
-            if summary and not plex_item.summary:
-                edits['summary.value'] = summary
-            if data.get('tagline') and not getattr(plex_item, 'tagline', None):
-                edits['tagline.value'] = data['tagline']
-            if data.get('date') and not getattr(plex_item, 'originallyAvailableAt', None):
-                edits['originallyAvailableAt.value'] = data['date']
-        else:
-            # Stash always wins - overwrite all fields
-            if data.get('title'):
-                edits['title.value'] = data['title']
-            if data.get('studio'):
-                edits['studio.value'] = data['studio']
-            if summary:
-                edits['summary.value'] = summary
-            if data.get('tagline'):
-                edits['tagline.value'] = data['tagline']
-            if data.get('date'):
-                edits['originallyAvailableAt.value'] = data['date']
+        # Handle title field
+        if 'title' in data:
+            title_value = data.get('title')
+            if title_value is None or title_value == '':
+                # LOCKED: Clear existing Plex value
+                edits['title.value'] = ''
+                log_debug("Clearing title (Stash value is empty)")
+            else:
+                sanitized = sanitize_for_plex(title_value, max_length=MAX_TITLE_LENGTH)
+                if not self.config.preserve_plex_edits or not plex_item.title:
+                    edits['title.value'] = sanitized
+
+        # Handle studio field
+        if 'studio' in data:
+            studio_value = data.get('studio')
+            if studio_value is None or studio_value == '':
+                # LOCKED: Clear existing Plex value
+                edits['studio.value'] = ''
+                log_debug("Clearing studio (Stash value is empty)")
+            else:
+                sanitized = sanitize_for_plex(studio_value, max_length=MAX_STUDIO_LENGTH)
+                if not self.config.preserve_plex_edits or not plex_item.studio:
+                    edits['studio.value'] = sanitized
+
+        # Handle summary field (Stash 'details' -> Plex 'summary')
+        # Check for both 'details' and 'summary' keys
+        has_summary_key = 'details' in data or 'summary' in data
+        if has_summary_key:
+            summary_value = data.get('details') or data.get('summary')
+            if summary_value is None or summary_value == '':
+                # LOCKED: Clear existing Plex value
+                edits['summary.value'] = ''
+                log_debug("Clearing summary (Stash value is empty)")
+            else:
+                sanitized = sanitize_for_plex(summary_value, max_length=MAX_SUMMARY_LENGTH)
+                if not self.config.preserve_plex_edits or not plex_item.summary:
+                    edits['summary.value'] = sanitized
+
+        # Handle tagline field
+        if 'tagline' in data:
+            tagline_value = data.get('tagline')
+            if tagline_value is None or tagline_value == '':
+                # LOCKED: Clear existing Plex value
+                edits['tagline.value'] = ''
+                log_debug("Clearing tagline (Stash value is empty)")
+            else:
+                sanitized = sanitize_for_plex(tagline_value, max_length=MAX_TAGLINE_LENGTH)
+                if not self.config.preserve_plex_edits or not getattr(plex_item, 'tagline', None):
+                    edits['tagline.value'] = sanitized
+
+        # Handle date field
+        if 'date' in data:
+            date_value = data.get('date')
+            if date_value is None or date_value == '':
+                # LOCKED: Clear existing Plex value
+                edits['originallyAvailableAt.value'] = ''
+                log_debug("Clearing date (Stash value is empty)")
+            else:
+                if not self.config.preserve_plex_edits or not getattr(plex_item, 'originallyAvailableAt', None):
+                    edits['originallyAvailableAt.value'] = date_value
 
         if edits:
             log_debug(f"Updating fields: {list(edits.keys())}")
@@ -654,27 +711,52 @@ class SyncWorker:
             log_trace(f"No metadata fields to update for: {plex_item.title}")
 
         # Sync performers as actors
-        performers = data.get('performers', [])
-        if performers:
-            try:
-                # Get current actors
-                current_actors = [actor.tag for actor in getattr(plex_item, 'actors', [])]
-                new_performers = [p for p in performers if p not in current_actors]
-
-                if new_performers:
-                    # Build actor edit params - each actor needs actor[N].tag.tag format
-                    actor_edits = {}
-                    all_actors = current_actors + new_performers
-                    for i, actor_name in enumerate(all_actors):
-                        actor_edits[f'actor[{i}].tag.tag'] = actor_name
-
-                    plex_item.edit(**actor_edits)
+        # LOCKED: If 'performers' key exists with empty/None, clear all actors
+        if 'performers' in data:
+            performers = data.get('performers')
+            if performers is None or performers == []:
+                # LOCKED: Clear all existing performers
+                try:
+                    plex_item.edit(**{'actor.locked': 1})  # Lock to clear
                     plex_item.reload()
-                    log_info(f"Added {len(new_performers)} performers: {new_performers}")
-                else:
-                    log_trace(f"Performers already in Plex: {performers}")
-            except Exception as e:
-                log_warn(f" Failed to sync performers: {e}")
+                    log_debug("Clearing performers (Stash value is empty)")
+                except Exception as e:
+                    log_warn(f" Failed to clear performers: {e}")
+            elif performers:
+                try:
+                    # Sanitize performer names and apply limits
+                    sanitized_performers = [
+                        sanitize_for_plex(p, max_length=MAX_PERFORMER_NAME_LENGTH)
+                        for p in performers
+                    ]
+
+                    # Apply MAX_PERFORMERS limit
+                    if len(sanitized_performers) > MAX_PERFORMERS:
+                        log_warn(f"Truncating performers list from {len(sanitized_performers)} to {MAX_PERFORMERS}")
+                        sanitized_performers = sanitized_performers[:MAX_PERFORMERS]
+
+                    # Get current actors
+                    current_actors = [actor.tag for actor in getattr(plex_item, 'actors', [])]
+                    new_performers = [p for p in sanitized_performers if p not in current_actors]
+
+                    if new_performers:
+                        # Build actor edit params - each actor needs actor[N].tag.tag format
+                        actor_edits = {}
+                        all_actors = current_actors + new_performers
+                        # Apply limit to combined list too
+                        if len(all_actors) > MAX_PERFORMERS:
+                            log_warn(f"Truncating combined actors list from {len(all_actors)} to {MAX_PERFORMERS}")
+                            all_actors = all_actors[:MAX_PERFORMERS]
+                        for i, actor_name in enumerate(all_actors):
+                            actor_edits[f'actor[{i}].tag.tag'] = actor_name
+
+                        plex_item.edit(**actor_edits)
+                        plex_item.reload()
+                        log_info(f"Added {len(new_performers)} performers: {new_performers}")
+                    else:
+                        log_trace(f"Performers already in Plex: {sanitized_performers}")
+                except Exception as e:
+                    log_warn(f" Failed to sync performers: {e}")
 
         # Sync poster image (download from Stash, save to temp file, upload to Plex)
         poster_url = data.get('poster_url')
@@ -715,26 +797,51 @@ class SyncWorker:
                 log_warn(f" Failed to upload background: {e}")
 
         # Sync tags as genres
-        tags = data.get('tags', [])
-        if tags:
-            try:
-                current_genres = [g.tag for g in getattr(plex_item, 'genres', [])]
-                new_tags = [t for t in tags if t not in current_genres]
-
-                if new_tags:
-                    # Build genre edit params
-                    genre_edits = {}
-                    all_genres = current_genres + new_tags
-                    for i, genre_name in enumerate(all_genres):
-                        genre_edits[f'genre[{i}].tag.tag'] = genre_name
-
-                    plex_item.edit(**genre_edits)
+        # LOCKED: If 'tags' key exists with empty/None, clear all tags
+        if 'tags' in data:
+            tags = data.get('tags')
+            if tags is None or tags == []:
+                # LOCKED: Clear all existing tags/genres
+                try:
+                    plex_item.edit(**{'genre.locked': 1})  # Lock to clear
                     plex_item.reload()
-                    log_info(f"Added {len(new_tags)} tags as genres: {new_tags}")
-                else:
-                    log_trace(f"Tags already in Plex: {tags}")
-            except Exception as e:
-                log_warn(f" Failed to sync tags: {e}")
+                    log_debug("Clearing tags (Stash value is empty)")
+                except Exception as e:
+                    log_warn(f" Failed to clear tags: {e}")
+            elif tags:
+                try:
+                    # Sanitize tag names and apply limits
+                    sanitized_tags = [
+                        sanitize_for_plex(t, max_length=MAX_TAG_NAME_LENGTH)
+                        for t in tags
+                    ]
+
+                    # Apply MAX_TAGS limit
+                    if len(sanitized_tags) > MAX_TAGS:
+                        log_warn(f"Truncating tags list from {len(sanitized_tags)} to {MAX_TAGS}")
+                        sanitized_tags = sanitized_tags[:MAX_TAGS]
+
+                    current_genres = [g.tag for g in getattr(plex_item, 'genres', [])]
+                    new_tags = [t for t in sanitized_tags if t not in current_genres]
+
+                    if new_tags:
+                        # Build genre edit params
+                        genre_edits = {}
+                        all_genres = current_genres + new_tags
+                        # Apply limit to combined list too
+                        if len(all_genres) > MAX_TAGS:
+                            log_warn(f"Truncating combined tags list from {len(all_genres)} to {MAX_TAGS}")
+                            all_genres = all_genres[:MAX_TAGS]
+                        for i, genre_name in enumerate(all_genres):
+                            genre_edits[f'genre[{i}].tag.tag'] = genre_name
+
+                        plex_item.edit(**genre_edits)
+                        plex_item.reload()
+                        log_info(f"Added {len(new_tags)} tags as genres: {new_tags}")
+                    else:
+                        log_trace(f"Tags already in Plex: {sanitized_tags}")
+                except Exception as e:
+                    log_warn(f" Failed to sync tags: {e}")
 
         # Add to studio collection
         studio = data.get('studio')
