@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 1 of 10 (Testing Infrastructure) - Complete
-Plan: 2 of 2 complete
-Status: v1.1 Phase 1 verified
-Last activity: 2026-02-03 - Phase 1 executed and verified
+Phase: 2 of 11 (Core Unit Tests) - In Progress
+Plan: 1 of 4 complete
+Status: 02-01 sync_queue tests complete
+Last activity: 2026-02-03 - Completed 02-01-PLAN.md
 
-Progress: [██░░░░░░░░░░░░░░] 10% (1/10 phases complete)
+Progress: [███░░░░░░░░░░░░░] 15% (1.25/10 phases complete)
 
 ## Decisions Log
 
@@ -26,10 +26,16 @@ Progress: [██░░░░░░░░░░░░░░] 10% (1/10 phases co
 | 2026-02-03 | 01-02 | unittest.mock over pytest-mock | Avoid external dependencies in conftest.py |
 | 2026-02-03 | 01-02 | 11 fixtures total | Exceeded minimum 8 with Stash fixtures for integration testing |
 | 2026-02-03 | 01-02 | Function scope fixtures | All mocks mutable, fresh instance per test |
+| 2026-02-03 | 02-01 | tmp_path for SQLite tests | Fresh database per test prevents cross-test pollution |
+| 2026-02-03 | 02-01 | Real SQLiteAckQueue | More confident tests vs mocking complex queue behavior |
+| 2026-02-03 | 02-01 | models.py in operations tests | create_sync_job closely related to enqueue operations |
 
 ## Roadmap Evolution
 
 - Phase 10 added: Metadata Sync Toggles (enable/disable each metadata category)
+- Phase 11 added: Queue Management UI (button to delete queue/clear dead items)
+- Phase 12 added: Process Queue Button (manual processing for stalled queues)
+- Phase 2.1 inserted: Fix Plex Device Registration (bugfix - "new device" notifications)
 
 ## Milestone Summary
 
@@ -72,14 +78,25 @@ Progress: [██░░░░░░░░░░░░░░] 10% (1/10 phases co
 2. **Mock fixtures** - 11 fixtures for Plex, config, queue, test data
 3. **Test structure** - Directory structure mirroring source layout
 
+### v1.1 Phase 2: Core Unit Tests (In Progress)
+
+**Stats:**
+- 1 of 4 plans complete
+- 3 commits for 02-01
+- 3 test files created
+
+**Accomplishments:**
+1. **sync_queue tests** - 67 tests, 89% coverage (02-01)
+
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 01-02-PLAN.md (Phase 1 complete)
+Stopped at: Completed 02-01-PLAN.md
 Resume file: None
 
 ## Next Steps
 
-Phase 1 (Testing Infrastructure) complete. Ready for:
-- Next phase planning if more v1.1 phases exist
-- Or milestone wrap-up
+Phase 2 Plan 1 (sync_queue tests) complete. Ready for:
+- 02-02: validation module tests
+- 02-03: plex module tests
+- 02-04: hooks module tests
