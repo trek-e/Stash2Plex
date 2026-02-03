@@ -319,6 +319,8 @@ def handle_task(task_args: dict, stash=None):
         task_args: Task arguments (mode: 'all' or 'recent')
         stash: StashInterface for API calls
     """
+    from sync_queue.operations import enqueue
+
     mode = task_args.get('mode', 'recent')
     log_info(f"Task starting with mode: {mode}")
 
@@ -327,17 +329,31 @@ def handle_task(task_args: dict, stash=None):
         return
 
     try:
+        # Batch query fragment - get all needed data in one call
+        batch_fragment = """
+            id
+            title
+            details
+            date
+            rating100
+            files { path }
+            studio { name }
+            performers { name }
+            tags { name }
+            paths { screenshot preview }
+        """
+
         # Query scenes based on mode
         if mode == 'all':
             log_info("Fetching all scenes...")
-            scenes = stash.find_scenes(fragment="id")
+            scenes = stash.find_scenes(fragment=batch_fragment)
         else:  # recent - last 24 hours
             import datetime
             yesterday = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
             log_info(f"Fetching scenes updated since {yesterday}...")
             scenes = stash.find_scenes(
                 f={"updated_at": {"value": yesterday, "modifier": "GREATER_THAN"}},
-                fragment="id"
+                fragment=batch_fragment
             )
 
         if not scenes:
@@ -346,26 +362,63 @@ def handle_task(task_args: dict, stash=None):
 
         log_info(f"Found {len(scenes)} scenes to sync")
 
-        # Queue each scene for sync
-        data_dir = get_plugin_data_dir()
+        # Queue each scene directly (data already fetched in batch)
+        queue = queue_manager.get_queue()
         queued = 0
+        skipped = 0
+
         for scene in scenes:
             scene_id = scene.get('id')
-            if scene_id:
-                try:
-                    on_scene_update(
-                        int(scene_id),
-                        {'id': scene_id},
-                        queue_manager.get_queue(),
-                        data_dir=data_dir,
-                        sync_timestamps=None,  # Force sync, ignore timestamps
-                        stash=stash
-                    )
-                    queued += 1
-                except Exception as e:
-                    log_warn(f"Failed to queue scene {scene_id}: {e}")
+            if not scene_id:
+                continue
 
-        log_info(f"Queued {queued} scenes for sync")
+            # Extract file path
+            files = scene.get('files', [])
+            if not files:
+                skipped += 1
+                continue
+            file_path = files[0].get('path')
+            if not file_path:
+                skipped += 1
+                continue
+
+            # Build job data from batch-fetched scene
+            job_data = {
+                'path': file_path,
+                'title': scene.get('title'),
+                'details': scene.get('details'),
+                'date': scene.get('date'),
+                'rating100': scene.get('rating100'),
+            }
+
+            # Extract nested fields
+            studio = scene.get('studio')
+            if studio:
+                job_data['studio'] = studio.get('name')
+
+            performers = scene.get('performers', [])
+            if performers:
+                job_data['performers'] = [p.get('name') for p in performers if p.get('name')]
+
+            tags = scene.get('tags', [])
+            if tags:
+                job_data['tags'] = [t.get('name') for t in tags if t.get('name')]
+
+            paths = scene.get('paths', {})
+            if paths:
+                if paths.get('screenshot'):
+                    job_data['poster_url'] = paths['screenshot']
+                if paths.get('preview'):
+                    job_data['background_url'] = paths['preview']
+
+            # Enqueue directly (skip on_scene_update to avoid per-scene GraphQL)
+            try:
+                enqueue(queue, int(scene_id), "metadata", job_data)
+                queued += 1
+            except Exception as e:
+                log_warn(f"Failed to queue scene {scene_id}: {e}")
+
+        log_info(f"Queued {queued} scenes for sync" + (f" (skipped {skipped} without files)" if skipped else ""))
 
     except Exception as e:
         log_error(f"Task error: {e}")
