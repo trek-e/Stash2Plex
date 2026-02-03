@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 2 of 11 (Core Unit Tests) - In Progress
-Plan: 3 of 4 complete
-Status: 02-03 plex tests complete
-Last activity: 2026-02-03 - Completed 02-03-PLAN.md
+Phase: 2 of 11 (Core Unit Tests) - Complete
+Plan: 4 of 4 complete
+Status: Phase 2 complete - all core unit tests done
+Last activity: 2026-02-03 - Completed 02-04-PLAN.md
 
-Progress: [███░░░░░░░░░░░░░] 18% (1.75/10 phases complete)
+Progress: [████░░░░░░░░░░░░] 20% (2/10 phases complete)
 
 ## Decisions Log
 
@@ -31,6 +31,8 @@ Progress: [███░░░░░░░░░░░░░] 18% (1.75/10 phases
 | 2026-02-03 | 02-01 | models.py in operations tests | create_sync_job closely related to enqueue operations |
 | 2026-02-03 | 02-03 | create_mock_plex_item helper | Consistent mock Plex item creation across tests |
 | 2026-02-03 | 02-03 | Parametrized HTTP status tests | Clean coverage of all status code translations |
+| 2026-02-03 | 02-04 | Import fallbacks left uncovered | Lines 23-25, 29-30 require import mocking with minimal benefit |
+| 2026-02-03 | 02-04 | MinimalStash class for hasattr tests | Cleaner than complex MagicMock spec manipulation |
 
 ## Roadmap Evolution
 
@@ -80,25 +82,27 @@ Progress: [███░░░░░░░░░░░░░] 18% (1.75/10 phases
 2. **Mock fixtures** - 11 fixtures for Plex, config, queue, test data
 3. **Test structure** - Directory structure mirroring source layout
 
-### v1.1 Phase 2: Core Unit Tests (In Progress)
+### v1.1 Phase 2: Core Unit Tests (Complete 2026-02-03)
 
 **Stats:**
-- 3 of 4 plans complete
-- 9 commits total (02-01: 3, 02-02: 3, 02-03: 3)
-- 9 test files created
+- 4 of 4 plans complete
+- 12 commits total (02-01: 3, 02-02: 3, 02-03: 3, 02-04: 3)
+- 10 test files created
 
 **Accomplishments:**
 1. **sync_queue tests** - 67 tests, 89% coverage (02-01)
 2. **validation tests** - tests for metadata and config validation (02-02)
 3. **plex tests** - 105 tests, 94% coverage (02-03)
+4. **hooks tests** - 66 tests, 97% coverage (02-04)
 
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 02-03-PLAN.md
+Stopped at: Completed 02-04-PLAN.md (Phase 2 complete)
 Resume file: None
 
 ## Next Steps
 
-Phase 2 Plan 3 (plex tests) complete. Ready for:
-- 02-04: hooks module tests (final plan in Phase 2)
+Phase 2 (Core Unit Tests) complete. Ready for:
+- Phase 2.1: Fix Plex Device Registration (bugfix)
+- Phase 3: Integration Tests
