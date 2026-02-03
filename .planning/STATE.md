@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 2 of 11 (Core Unit Tests) - Complete
-Plan: 4 of 4 complete
-Status: Phase 2 complete - all core unit tests done
-Last activity: 2026-02-03 - Completed 02-04-PLAN.md
+Phase: 2.1 of 11 (Plex Device Reuse) - Complete
+Plan: 1 of 1 complete
+Status: Phase 2.1 complete - persistent device identity implemented
+Last activity: 2026-02-03 - Completed 02.1-01-PLAN.md
 
-Progress: [████░░░░░░░░░░░░] 20% (2/10 phases complete)
+Progress: [█████░░░░░░░░░░░] 25% (3/11 phases complete, including 2.1 bugfix)
 
 ## Decisions Log
 
@@ -35,6 +35,10 @@ Progress: [████░░░░░░░░░░░░] 20% (2/10 phases co
 | 2026-02-03 | 02-02 | Sanitizer truncates before Pydantic | Long details truncated by sanitizer, not rejected by max_length |
 | 2026-02-03 | 02-02 | Control chars removed entirely | Tab/newline/CR are Cc category, removed not replaced with space |
 | 2026-02-03 | 02-04 | MinimalStash class for hasattr tests | Cleaner than complex MagicMock spec manipulation |
+| 2026-02-03 | 02.1-01 | UUID stored in data_dir/device_id.json | Uses plugin's existing data directory for persistence |
+| 2026-02-03 | 02.1-01 | plexapi imports inside function | Avoids import order issues since plexapi must be configured before PlexServer |
+| 2026-02-03 | 02.1-01 | reset_base_headers() after setting vars | Ensures BASE_HEADERS dict is rebuilt with new identifier values |
+| 2026-02-03 | 02.1-01 | Real plexapi in tests with restore fixture | More reliable than complex mocking of late-bound imports |
 
 ## Roadmap Evolution
 
@@ -97,14 +101,26 @@ Progress: [████░░░░░░░░░░░░] 20% (2/10 phases co
 3. **plex tests** - 105 tests, 94% coverage (02-03)
 4. **hooks tests** - 66 tests, 97% coverage (02-04)
 
+### v1.1 Phase 2.1: Plex Device Reuse (Complete 2026-02-03)
+
+**Stats:**
+- 1 plan executed
+- 3 commits
+- 3 files (1 module, 1 test file, 1 modified)
+
+**Accomplishments:**
+1. **Persistent device identity** - UUID persisted in device_id.json
+2. **plexapi module configuration** - X_PLEX_IDENTIFIER, X_PLEX_PRODUCT, X_PLEX_DEVICE_NAME set before connections
+3. **Eliminates "new device" notifications** - PlexSync appears as "PlexSync Plugin" consistently
+
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 02-04-PLAN.md (Phase 2 complete)
+Stopped at: Completed 02.1-01-PLAN.md (Phase 2.1 complete)
 Resume file: None
 
 ## Next Steps
 
-Phase 2 (Core Unit Tests) complete. Ready for:
-- Phase 2.1: Fix Plex Device Registration (bugfix)
+Phase 2.1 (Plex Device Reuse) complete. Ready for:
 - Phase 3: Integration Tests
+- Manual verification: Run plugin, trigger sync, verify Plex shows "PlexSync Plugin" device
