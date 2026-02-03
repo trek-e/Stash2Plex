@@ -102,32 +102,37 @@ Plans:
 
 ---
 
-### Phase 5: Architecture Documentation
+### Phase 5: Architecture Documentation ✓
 **Goal:** Developer/maintainer documentation
-**Plans:** 2 plans
+**Plans:** 2 plans (complete)
+**Completed:** 2026-02-03
 
 - Component diagram (queue, worker, hooks, plex client)
 - Data flow documentation (event → queue → sync → Plex)
 - Design decisions and rationale
 - Contributing guide
 
-**Success:** New contributor can understand architecture quickly
+**Success:** New contributor can understand architecture quickly ✓
 
 Plans:
-- [ ] 05-01-PLAN.md — docs/ARCHITECTURE.md with system diagram, module overview, data flow, design decisions
-- [ ] 05-02-PLAN.md — CONTRIBUTING.md with dev setup, PR guidelines, testing expectations
+- [x] 05-01-PLAN.md — docs/ARCHITECTURE.md with system diagram, module overview, data flow, design decisions
+- [x] 05-02-PLAN.md — CONTRIBUTING.md with dev setup, PR guidelines, testing expectations
 
 ---
 
 ### Phase 6: API Documentation
 **Goal:** Auto-generated API reference
+**Plans:** 1 plan
 
-- Docstring audit and improvements
-- Sphinx or mkdocs setup
-- Generated API reference
+- MkDocs + mkdocstrings setup
+- API reference pages for all modules
+- Docstring audit and examples
 - Integration with architecture docs
 
 **Success:** All public APIs documented with examples
+
+Plans:
+- [ ] 06-01-PLAN.md — MkDocs configuration, API reference pages, docstring examples
 
 ---
 
@@ -279,7 +284,7 @@ Note: Phase 2.1 (Bugfix) can run in parallel with Phase 3 - it's independent.
 | 3. Integration Tests | High | 4 |
 | 4. User Documentation | Medium | 4 |
 | 5. Architecture Docs | Medium | 2 |
-| 6. API Documentation | Low | 1-2 |
+| 6. API Documentation | Low | 1 |
 | 7. Performance | Medium | 2-3 |
 | 8. Observability | Medium | 2-3 |
 | 9. Reliability | Medium | 2-3 |
