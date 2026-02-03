@@ -220,3 +220,179 @@ class TestJobWithMissingFields:
 
         # Should not raise - item found, just no edits
         worker._process_job(job)
+
+
+@pytest.mark.integration
+class TestObservabilityIntegration:
+    """Integration tests for observability features."""
+
+    def test_stats_tracked_on_successful_sync(self, integration_worker, sample_sync_job):
+        """Verify stats are updated after successful job processing."""
+        worker, mock_plex_item = integration_worker
+
+        # Initial stats should be zero
+        assert worker._stats.jobs_processed == 0
+        assert worker._stats.jobs_succeeded == 0
+
+        # Process a job
+        worker._process_job(sample_sync_job)
+
+        # Stats should NOT be updated by _process_job - that's done by worker loop
+        # But _process_job returns confidence for tracking
+        # To test integration, we need to simulate what worker loop does
+
+        # Manually track as worker loop would
+        import time
+        start = time.perf_counter()
+        confidence = worker._process_job(sample_sync_job)
+        elapsed = time.perf_counter() - start
+        worker._stats.record_success(elapsed, confidence=confidence or 'high')
+
+        assert worker._stats.jobs_processed == 1
+        assert worker._stats.jobs_succeeded == 1
+        assert worker._stats.total_processing_time > 0
+
+    def test_stats_tracked_on_failed_sync(self, integration_worker_no_match, sample_sync_job):
+        """Verify stats are updated after failed job processing."""
+        worker = integration_worker_no_match
+        from plex.exceptions import PlexNotFound
+
+        # Process job - will fail with PlexNotFound
+        import time
+        start = time.perf_counter()
+        try:
+            worker._process_job(sample_sync_job)
+        except PlexNotFound as e:
+            elapsed = time.perf_counter() - start
+            worker._stats.record_failure(type(e).__name__, elapsed, to_dlq=True)
+
+        # Stats should show failure
+        assert worker._stats.jobs_failed >= 1
+        assert 'PlexNotFound' in worker._stats.errors_by_type
+
+    def test_stats_persisted_to_file(self, mock_queue, mock_dlq, integration_config, mock_plex_item, tmp_path):
+        """Verify stats are saved to JSON file."""
+        from worker.processor import SyncWorker
+        import json
+        import os
+
+        # Create worker with data_dir
+        worker = SyncWorker(
+            queue=mock_queue,
+            dlq=mock_dlq,
+            config=integration_config,
+            data_dir=str(tmp_path),
+        )
+
+        # Setup mock client
+        mock_section = MagicMock()
+        mock_section.search.return_value = [mock_plex_item]
+        mock_section.all.return_value = [mock_plex_item]
+        mock_section.title = "Test Library"
+
+        mock_client = MagicMock()
+        mock_client.server.library.sections.return_value = [mock_section]
+        mock_client.server.library.section.return_value = mock_section
+        worker._plex_client = mock_client
+
+        # Simulate processing jobs
+        worker._stats.record_success(0.1, confidence='high')
+        worker._stats.record_success(0.2, confidence='low')
+        worker._stats.record_failure('TestError', 0.15, to_dlq=True)
+
+        # Save stats as would happen in batch logging
+        stats_path = os.path.join(str(tmp_path), 'stats.json')
+        worker._stats.save_to_file(stats_path)
+
+        # Verify file exists and contains expected data
+        assert os.path.exists(stats_path)
+        with open(stats_path, 'r') as f:
+            saved = json.load(f)
+
+        assert saved['jobs_processed'] == 3
+        assert saved['jobs_succeeded'] == 2
+        assert saved['jobs_failed'] == 1
+        assert saved['jobs_to_dlq'] == 1
+        assert saved['high_confidence_matches'] == 1
+        assert saved['low_confidence_matches'] == 1
+
+    def test_dlq_error_summary_in_batch_log(self, integration_worker, capsys, tmp_path):
+        """Verify DLQ summary appears in batch logs."""
+        worker, mock_plex_item = integration_worker
+
+        # Mock DLQ to return error summary
+        worker.dlq.get_error_summary.return_value = {
+            'PlexNotFound': 3,
+            'PermanentError': 2,
+            'TransientError': 1,
+        }
+
+        # Record some stats
+        worker._stats.record_success(0.1, confidence='high')
+        worker._stats.record_failure('TestError', 0.2, to_dlq=True)
+
+        # Call batch summary logging
+        worker._log_batch_summary()
+
+        # Check output
+        captured = capsys.readouterr()
+
+        # Should have batch summary
+        assert "Sync summary:" in captured.err
+        assert "1/2 succeeded" in captured.err
+
+        # Should have DLQ breakdown
+        assert "DLQ contains 6 items:" in captured.err
+        assert "PlexNotFound" in captured.err
+        assert "PermanentError" in captured.err
+        assert "TransientError" in captured.err
+
+    def test_high_confidence_tracked(self, integration_worker, sample_sync_job):
+        """Verify high confidence match is tracked in stats."""
+        worker, mock_plex_item = integration_worker
+
+        # Process job - should return high confidence (single match)
+        confidence = worker._process_job(sample_sync_job)
+
+        # Track as worker loop would
+        worker._stats.record_success(0.1, confidence=confidence)
+
+        assert confidence == 'high'
+        assert worker._stats.high_confidence_matches == 1
+        assert worker._stats.low_confidence_matches == 0
+
+    def test_stats_preserved_across_worker_restart(self, mock_queue, mock_dlq, integration_config, tmp_path):
+        """Verify stats survive worker restart (loaded from file)."""
+        from worker.processor import SyncWorker
+        import json
+
+        # Create initial worker and save some stats
+        worker1 = SyncWorker(
+            queue=mock_queue,
+            dlq=mock_dlq,
+            config=integration_config,
+            data_dir=str(tmp_path),
+        )
+        worker1._stats.record_success(0.5, confidence='high')
+        worker1._stats.record_success(0.3, confidence='low')
+        worker1._stats.record_failure('TestError', 0.2, to_dlq=True)
+
+        # Save stats
+        import os
+        stats_path = os.path.join(str(tmp_path), 'stats.json')
+        worker1._stats.save_to_file(stats_path)
+
+        # Simulate restart by creating new worker
+        worker2 = SyncWorker(
+            queue=mock_queue,
+            dlq=mock_dlq,
+            config=integration_config,
+            data_dir=str(tmp_path),
+        )
+
+        # Stats should be loaded from file
+        assert worker2._stats.jobs_processed == 3
+        assert worker2._stats.jobs_succeeded == 2
+        assert worker2._stats.jobs_failed == 1
+        assert worker2._stats.high_confidence_matches == 1
+        assert worker2._stats.low_confidence_matches == 1
