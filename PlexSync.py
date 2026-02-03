@@ -9,8 +9,6 @@ starts background worker, and handles Stash hooks.
 import os
 import sys
 import json
-import urllib.request
-import urllib.error
 
 # Add plugin directory to path for imports
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -49,76 +47,43 @@ def get_plugin_data_dir():
     return data_dir
 
 
-def get_stash_connection(input_data: dict) -> tuple:
+def get_stash_interface(input_data: dict):
     """
-    Extract Stash server connection details from input data.
+    Create StashInterface from input data.
 
     Returns:
-        Tuple of (base_url, session_cookie, api_key) or (None, None, None) if not found
+        StashInterface instance or None if connection fails
     """
-    conn = input_data.get('server_connection', {})
+    try:
+        from stashapi.stashapp import StashInterface
+        conn = input_data.get('server_connection', {})
+        if conn:
+            return StashInterface(conn)
+    except ImportError:
+        print("[PlexSync] Warning: stashapi not installed, cannot fetch settings", file=sys.stderr)
+    except Exception as e:
+        print(f"[PlexSync] Warning: Could not connect to Stash: {e}", file=sys.stderr)
+    return None
 
-    scheme = conn.get('Scheme', 'http')
-    host = conn.get('Host', 'localhost')
-    port = conn.get('Port', 9999)
-    session_cookie = conn.get('SessionCookie', {})
-    api_key = conn.get('ApiKey', '')
 
-    base_url = f"{scheme}://{host}:{port}"
-    return base_url, session_cookie, api_key
-
-
-def fetch_plugin_settings(base_url: str, session_cookie: dict, api_key: str) -> dict:
+def fetch_plugin_settings(stash) -> dict:
     """
-    Fetch PlexSync plugin settings from Stash GraphQL API.
+    Fetch PlexSync plugin settings from Stash configuration.
 
     Args:
-        base_url: Stash server base URL
-        session_cookie: Session cookie dict from Stash
-        api_key: Stash API key
+        stash: StashInterface instance
 
     Returns:
         Dictionary with plugin settings
     """
-    query = """
-    query Configuration {
-        configuration {
-            plugins
-        }
-    }
-    """
-
-    headers = {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-    }
-
-    # Try multiple auth methods
-    if api_key:
-        headers['ApiKey'] = api_key
-    if session_cookie:
-        # Build cookie header from session cookie dict
-        if isinstance(session_cookie, dict):
-            cookie_parts = [f"{k}={v}" for k, v in session_cookie.items()]
-            if cookie_parts:
-                headers['Cookie'] = '; '.join(cookie_parts)
-        elif isinstance(session_cookie, str):
-            headers['Cookie'] = session_cookie
-
-    data = json.dumps({'query': query}).encode('utf-8')
-    req = urllib.request.Request(
-        f"{base_url}/graphql",
-        data=data,
-        headers=headers,
-        method='POST'
-    )
+    if not stash:
+        return {}
 
     try:
-        with urllib.request.urlopen(req, timeout=10) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            plugins = result.get('data', {}).get('configuration', {}).get('plugins', {})
-            return plugins.get('PlexSync', {})
-    except (urllib.error.URLError, json.JSONDecodeError) as e:
+        config = stash.get_configuration()
+        plugins = config.get('plugins', {})
+        return plugins.get('PlexSync', {})
+    except Exception as e:
         print(f"[PlexSync] Warning: Could not fetch settings from Stash: {e}", file=sys.stderr)
         return {}
 
@@ -127,8 +92,8 @@ def extract_config_from_input(input_data: dict) -> dict:
     """
     Extract Plex configuration from Stash input data.
 
-    Fetches plugin settings from Stash GraphQL API, then falls back
-    to environment variables.
+    Fetches plugin settings from Stash GraphQL API using stashapi,
+    then falls back to environment variables.
 
     Args:
         input_data: Input data from Stash plugin protocol
@@ -138,15 +103,10 @@ def extract_config_from_input(input_data: dict) -> dict:
     """
     config_dict = {}
 
-    # Debug: log what we received from Stash
-    conn = input_data.get('server_connection', {})
-    print(f"[PlexSync] DEBUG: server_connection keys: {list(conn.keys())}", file=sys.stderr)
-
-    # Fetch settings from Stash GraphQL API
-    base_url, session_cookie, api_key = get_stash_connection(input_data)
-    print(f"[PlexSync] DEBUG: base_url={base_url}, has_cookie={bool(session_cookie)}, has_api_key={bool(api_key)}", file=sys.stderr)
-    if base_url:
-        stash_settings = fetch_plugin_settings(base_url, session_cookie, api_key)
+    # Fetch settings from Stash using stashapi
+    stash = get_stash_interface(input_data)
+    if stash:
+        stash_settings = fetch_plugin_settings(stash)
         if stash_settings:
             print(f"[PlexSync] Loaded settings from Stash: {list(stash_settings.keys())}")
             config_dict.update(stash_settings)
