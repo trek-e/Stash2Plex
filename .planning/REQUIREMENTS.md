@@ -27,8 +27,8 @@
 ### Matching & Late Updates
 
 - [x] **MATCH-01**: Improved matching logic reduces false negatives when finding Plex items
-- [ ] **MATCH-02**: Late metadata updates in Stash trigger re-sync to Plex
-- [ ] **MATCH-03**: Matches scored with confidence; low-confidence matches logged for review
+- [x] **MATCH-02**: Late metadata updates in Stash trigger re-sync to Plex
+- [x] **MATCH-03**: Matches scored with confidence; low-confidence matches logged for review
 
 ## v2 Requirements
 
@@ -68,8 +68,8 @@
 | RTRY-04 | Phase 3 | Complete |
 | RTRY-01 | Phase 4 | Complete |
 | RTRY-03 | Phase 4 | Complete |
-| MATCH-02 | Phase 5 | Pending |
-| MATCH-03 | Phase 5 | Pending |
+| MATCH-02 | Phase 5 | Complete |
+| MATCH-03 | Phase 5 | Complete |
 
 **Coverage:**
 - v1 requirements: 13 total
@@ -78,4 +78,4 @@
 
 ---
 *Requirements defined: 2025-01-24*
-*Last updated: 2026-01-24 after Phase 4 completion*
+*Last updated: 2026-02-03 after Phase 5 completion*
