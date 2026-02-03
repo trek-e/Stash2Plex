@@ -9,12 +9,16 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: Milestone complete
-Plan: N/A
-Status: v1.0 archived
-Last activity: 2026-02-03 — Completed milestone v1.0
+Phase: 1 - Testing Infrastructure
+Plan: Planned (2 plans ready)
+Status: v1.1 in progress
+Last activity: 2026-02-03 — Phase 1 planned
 
-Progress: [████████████████] 100% (v1.0 complete)
+Progress: [░░░░░░░░░░░░░░░░] 0% (v1.1 Phase 1 ready to execute)
+
+## Roadmap Evolution
+
+- Phase 10 added: Metadata Sync Toggles (enable/disable each metadata category)
 
 ## Milestone Summary
 

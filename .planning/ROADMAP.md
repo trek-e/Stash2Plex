@@ -119,6 +119,23 @@ Plans:
 
 ---
 
+### Phase 10: Metadata Sync Toggles
+**Goal:** Add toggles for enabling/disabling each metadata category sync
+
+- Configuration options for each metadata field (title, studio, performers, tags, etc.)
+- Allow users to selectively enable/disable sync for specific fields
+- Update worker to respect toggle settings
+- Documentation for new settings
+
+**Success:** Users can configure which metadata fields sync to Plex
+
+**Depends on:** Phase 9
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 10 to break down)
+
+---
+
 ## Phase Dependencies
 
 ```
@@ -138,6 +155,10 @@ Phase 4 (User Docs)                Phase 5 (Arch Docs)
               |               |               |
       Phase 7          Phase 8          Phase 9
     (Performance)   (Observability)  (Reliability)
+              |               |               |
+              +---------------+---------------+
+                              |
+                    Phase 10 (Toggles)
 ```
 
 ## Estimated Effort
@@ -153,8 +174,9 @@ Phase 4 (User Docs)                Phase 5 (Arch Docs)
 | 7. Performance | Medium | 2-3 |
 | 8. Observability | Medium | 2-3 |
 | 9. Reliability | Medium | 2-3 |
+| 10. Metadata Sync Toggles | Medium | 2-3 |
 
-**Total:** ~20-29 plans across 9 phases
+**Total:** ~22-32 plans across 10 phases
 
 ---
 *Created: 2026-02-03*
