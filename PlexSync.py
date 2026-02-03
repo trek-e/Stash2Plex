@@ -373,15 +373,17 @@ def is_scan_job_running(stash) -> bool:
     if not stash:
         return False
     try:
+        # Stash Job type has: id, status, subTasks, description, progress, startTime, endTime, addTime
         result = stash.call_GQL("""
-            query { jobQueue { type status } }
+            query { jobQueue { status description } }
         """)
         jobs = result.get('jobQueue', []) if result else []
-        scan_types = ['SCAN', 'AUTO_TAG', 'GENERATE', 'IDENTIFY']
+        # Check description for scan-related keywords
+        scan_keywords = ['scan', 'auto tag', 'generate', 'identify']
         for job in jobs:
-            job_type = (job.get('type') or '').upper()
             status = (job.get('status') or '').upper()
-            if status in ('RUNNING', 'READY') and any(t in job_type for t in scan_types):
+            description = (job.get('description') or '').lower()
+            if status in ('RUNNING', 'READY') and any(kw in description for kw in scan_keywords):
                 return True
     except Exception:
         pass

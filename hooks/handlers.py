@@ -98,27 +98,20 @@ def is_scan_running(stash) -> bool:
         return False
 
     try:
-        # Query active jobs
+        # Stash Job type has: id, status, subTasks, description, progress, startTime, endTime, addTime
         result = stash.call_GQL("""
-            query {
-                jobQueue {
-                    id
-                    type
-                    status
-                    description
-                }
-            }
+            query { jobQueue { status description } }
         """)
 
         jobs = result.get('jobQueue', []) if result else []
 
-        # Check for scan/generate jobs
-        scan_types = ['SCAN', 'AUTO_TAG', 'GENERATE', 'IDENTIFY']
+        # Check description for scan-related keywords
+        scan_keywords = ['scan', 'auto tag', 'generate', 'identify']
         for job in jobs:
-            job_type = job.get('type', '').upper()
-            status = job.get('status', '').upper()
-            if status in ('RUNNING', 'READY') and any(t in job_type for t in scan_types):
-                log_trace(f"Scan job active: {job.get('description', job_type)}")
+            status = (job.get('status') or '').upper()
+            description = (job.get('description') or '').lower()
+            if status in ('RUNNING', 'READY') and any(kw in description for kw in scan_keywords):
+                log_trace(f"Scan job active: {description}")
                 return True
 
     except Exception as e:
