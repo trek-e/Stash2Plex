@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 1 of 1 (Testing Infrastructure)
-Plan: 1 of 2 complete
-Status: In progress
-Last activity: 2026-02-03 - Completed 01-01-PLAN.md (pytest configuration)
+Plan: 2 of 2 complete
+Status: Phase complete
+Last activity: 2026-02-03 - Completed 01-02-PLAN.md (pytest fixtures)
 
-Progress: [========--------] 50% (1/2 plans in Phase 1)
+Progress: [================] 100% (2/2 plans in Phase 1)
 
 ## Decisions Log
 
@@ -23,6 +23,9 @@ Progress: [========--------] 50% (1/2 plans in Phase 1)
 | 2026-02-03 | 01-01 | 80% coverage threshold | Enforced via --cov-fail-under to ensure test quality |
 | 2026-02-03 | 01-01 | Separate dev dependencies | requirements-dev.txt keeps test tools separate from runtime |
 | 2026-02-03 | 01-01 | All modules covered | plex, sync_queue, worker, validation, hooks included in coverage |
+| 2026-02-03 | 01-02 | unittest.mock over pytest-mock | Avoid external dependencies in conftest.py |
+| 2026-02-03 | 01-02 | 11 fixtures total | Exceeded minimum 8 with Stash fixtures for integration testing |
+| 2026-02-03 | 01-02 | Function scope fixtures | All mocks mutable, fresh instance per test |
 
 ## Roadmap Evolution
 
@@ -57,12 +60,26 @@ Progress: [========--------] 50% (1/2 plans in Phase 1)
 
 **Archived to:** .planning/milestones/v1.0-ROADMAP.md, v1.0-REQUIREMENTS.md
 
+### v1.1 Phase 1: Testing Infrastructure (Complete 2026-02-03)
+
+**Stats:**
+- 2 plans executed
+- 4 commits
+- 6 files created
+
+**Accomplishments:**
+1. **pytest configuration** - pytest.ini, coverage settings, dev dependencies
+2. **Mock fixtures** - 11 fixtures for Plex, config, queue, test data
+3. **Test structure** - Directory structure mirroring source layout
+
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 01-01-PLAN.md
+Stopped at: Completed 01-02-PLAN.md (Phase 1 complete)
 Resume file: None
 
 ## Next Steps
 
-Continue with 01-02-PLAN.md (conftest fixtures for pytest)
+Phase 1 (Testing Infrastructure) complete. Ready for:
+- Next phase planning if more v1.1 phases exist
+- Or milestone wrap-up
