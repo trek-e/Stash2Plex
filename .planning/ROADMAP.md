@@ -45,19 +45,19 @@ Plans:
 ---
 
 ### Phase 2.1: Fix Plex Device Registration (Bugfix)
-**Goal:** Refactor Plex connection to reuse device identity and avoid "new device" notifications
+**Goal:** Persistent device identity to avoid "new device" notifications on each sync
+**Plans:** 1 plan
 
-- Investigate current PlexClient connection methodology
-- Implement persistent device identifier storage
-- Reuse X-Plex-Client-Identifier across connections
-- Test that repeated syncs don't trigger new device alerts
+- Create plex/device_identity.py with UUID persistence
+- Integrate into PlexSync.py initialization (before PlexClient creation)
+- Add unit tests for device identity module
 
 **Success:** Plex no longer shows "new device" notifications on each sync
 
 **Priority:** HIGH (bugfix)
 
 Plans:
-- [ ] TBD (run /gsd:plan-phase 2.1 to break down)
+- [ ] 02.1-01-PLAN.md — Implement persistent device identity
 
 ---
 
@@ -225,12 +225,15 @@ Phase 4 (User Docs)                Phase 5 (Arch Docs)
                     Phase 12 (Process Queue)
 ```
 
+Note: Phase 2.1 (Bugfix) can run in parallel with Phase 3 - it's independent.
+
 ## Estimated Effort
 
 | Phase | Complexity | Plans |
 |-------|------------|-------|
 | 1. Test Infrastructure | Medium | 2 |
 | 2. Core Unit Tests | High | 4 |
+| 2.1. Plex Device Registration | Low | 1 |
 | 3. Integration Tests | High | 3-4 |
 | 4. User Documentation | Medium | 2-3 |
 | 5. Architecture Docs | Medium | 2-3 |
@@ -242,7 +245,7 @@ Phase 4 (User Docs)                Phase 5 (Arch Docs)
 | 11. Queue Management UI | Low | 1-2 |
 | 12. Process Queue Button | Low | 1-2 |
 
-**Total:** ~24-36 plans across 12 phases
+**Total:** ~25-37 plans across 13 phases
 
 ---
 *Created: 2026-02-03*
