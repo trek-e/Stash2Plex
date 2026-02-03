@@ -428,3 +428,108 @@ class TestPlexSyncConfigLogConfig:
 
         # Should contain masked token (first 4 + **** + last 4)
         assert "****" in log_message
+
+
+class TestSyncToggles:
+    """Tests for field sync toggle configuration."""
+
+    def test_all_toggles_default_true(self):
+        """All sync toggles should default to True (enabled)."""
+        config = PlexSyncConfig(plex_url="http://test:32400", plex_token="valid_token_here")
+        assert config.sync_master is True
+        assert config.sync_studio is True
+        assert config.sync_summary is True
+        assert config.sync_tagline is True
+        assert config.sync_date is True
+        assert config.sync_performers is True
+        assert config.sync_tags is True
+        assert config.sync_poster is True
+        assert config.sync_background is True
+        assert config.sync_collection is True
+
+    def test_toggle_accepts_boolean_true(self):
+        """Toggle fields accept Python boolean True."""
+        config = PlexSyncConfig(
+            plex_url="http://test:32400",
+            plex_token="valid_token_here",
+            sync_studio=True,
+        )
+        assert config.sync_studio is True
+
+    def test_toggle_accepts_boolean_false(self):
+        """Toggle fields accept Python boolean False."""
+        config = PlexSyncConfig(
+            plex_url="http://test:32400",
+            plex_token="valid_token_here",
+            sync_studio=False,
+        )
+        assert config.sync_studio is False
+
+    def test_toggle_accepts_string_true(self):
+        """Toggle fields accept string 'true' (Stash settings format)."""
+        config = PlexSyncConfig(
+            plex_url="http://test:32400",
+            plex_token="valid_token_here",
+            sync_studio="true",
+        )
+        assert config.sync_studio is True
+
+    def test_toggle_accepts_string_false(self):
+        """Toggle fields accept string 'false' (Stash settings format)."""
+        config = PlexSyncConfig(
+            plex_url="http://test:32400",
+            plex_token="valid_token_here",
+            sync_studio="false",
+        )
+        assert config.sync_studio is False
+
+    def test_toggle_accepts_numeric_string(self):
+        """Toggle fields accept '1' and '0' strings."""
+        config_on = PlexSyncConfig(
+            plex_url="http://test:32400",
+            plex_token="valid_token_here",
+            sync_performers="1",
+        )
+        config_off = PlexSyncConfig(
+            plex_url="http://test:32400",
+            plex_token="valid_token_here",
+            sync_performers="0",
+        )
+        assert config_on.sync_performers is True
+        assert config_off.sync_performers is False
+
+    def test_all_toggles_can_be_disabled(self):
+        """All sync toggles can be individually disabled."""
+        config = PlexSyncConfig(
+            plex_url="http://test:32400",
+            plex_token="valid_token_here",
+            sync_master=False,
+            sync_studio=False,
+            sync_summary=False,
+            sync_tagline=False,
+            sync_date=False,
+            sync_performers=False,
+            sync_tags=False,
+            sync_poster=False,
+            sync_background=False,
+            sync_collection=False,
+        )
+        assert config.sync_master is False
+        assert config.sync_studio is False
+        assert config.sync_summary is False
+        assert config.sync_tagline is False
+        assert config.sync_date is False
+        assert config.sync_performers is False
+        assert config.sync_tags is False
+        assert config.sync_poster is False
+        assert config.sync_background is False
+        assert config.sync_collection is False
+
+    def test_invalid_toggle_value_raises(self):
+        """Invalid toggle value should raise validation error."""
+        with pytest.raises(ValidationError):
+            PlexSyncConfig(
+                plex_url="http://test:32400",
+                plex_token="valid_token_here",
+                sync_studio="invalid",
+            )
