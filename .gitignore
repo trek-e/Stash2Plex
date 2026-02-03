@@ -5,3 +5,8 @@ data/
 *.db
 *.db-shm
 *.db-wal
+
+# Testing/coverage
+coverage_html/
+.coverage
+htmlcov/
