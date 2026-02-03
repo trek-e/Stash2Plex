@@ -26,36 +26,29 @@ settings:
     type: STRING
   enabled:
     displayName: Enabled
-    description: "Enable or disable the plugin"
+    description: "Enable or disable the plugin (default: true)"
     type: BOOLEAN
-    default: true
   max_retries:
     displayName: Max Retries
-    description: "Maximum retry attempts for failed syncs (1-20)"
+    description: "Maximum retry attempts for failed syncs (default: 5)"
     type: NUMBER
-    default: 5
   poll_interval:
     displayName: Poll Interval
-    description: "Seconds between queue polls (0.1-60)"
+    description: "Seconds between queue polls (default: 30)"
     type: NUMBER
-    default: 30
   strict_matching:
     displayName: Strict Matching
-    description: "Skip sync when multiple Plex matches found (safer)"
+    description: "Skip sync when multiple Plex matches found (default: true)"
     type: BOOLEAN
-    default: true
   preserve_plex_edits:
     displayName: Preserve Plex Edits
-    description: "Skip fields that already have values in Plex"
+    description: "Skip fields that already have values in Plex (default: false)"
     type: BOOLEAN
-    default: false
   connect_timeout:
     displayName: Connect Timeout
-    description: "Plex connection timeout in seconds (1-30)"
+    description: "Plex connection timeout in seconds (default: 5)"
     type: NUMBER
-    default: 5
   read_timeout:
     displayName: Read Timeout
-    description: "Plex read timeout in seconds (5-120)"
+    description: "Plex read timeout in seconds (default: 30)"
     type: NUMBER
-    default: 30
