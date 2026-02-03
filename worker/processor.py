@@ -8,6 +8,7 @@ Implements reliable job processing with acknowledgment workflow:
 - Circuit breaker pauses processing during Plex outages
 """
 
+import sys
 import time
 import threading
 import logging
@@ -92,7 +93,7 @@ class SyncWorker:
     def start(self):
         """Start the background worker thread"""
         if self.running:
-            print("[PlexSync Worker] Already running")
+            print("[PlexSync Worker] Already running", file=sys.stderr)
             return
 
         # Cleanup old DLQ entries
@@ -105,18 +106,19 @@ class SyncWorker:
         self.running = True
         self.thread = threading.Thread(target=self._worker_loop, daemon=True)
         self.thread.start()
-        print("[PlexSync Worker] Started")
+        print("[PlexSync Worker] Started", file=sys.stderr)
 
     def _log_dlq_status(self):
         """Log DLQ status if jobs present."""
         count = self.dlq.get_count()
         if count > 0:
-            print(f"[PlexSync Worker] WARNING: DLQ contains {count} failed jobs requiring review")
+            print(f"[PlexSync Worker] WARNING: DLQ contains {count} failed jobs requiring review", file=sys.stderr)
             recent = self.dlq.get_recent(limit=5)
             for entry in recent:
                 print(
                     f"  DLQ #{entry['id']}: scene {entry['scene_id']} - "
-                    f"{entry['error_type']}: {entry['error_message'][:80]}"
+                    f"{entry['error_type']}: {entry['error_message'][:80]}",
+                    file=sys.stderr
                 )
 
     def stop(self):
@@ -124,15 +126,15 @@ class SyncWorker:
         if not self.running:
             return
 
-        print("[PlexSync Worker] Stopping...")
+        print("[PlexSync Worker] Stopping...", file=sys.stderr)
         self.running = False
 
         if self.thread:
             self.thread.join(timeout=5)
             if self.thread.is_alive():
-                print("[PlexSync Worker] WARNING: Thread did not stop cleanly")
+                print("[PlexSync Worker] WARNING: Thread did not stop cleanly", file=sys.stderr)
 
-        print("[PlexSync Worker] Stopped")
+        print("[PlexSync Worker] Stopped", file=sys.stderr)
 
     def _prepare_for_retry(self, job: dict, error: Exception) -> dict:
         """
@@ -231,7 +233,7 @@ class SyncWorker:
             try:
                 # Check circuit breaker first - pause if Plex is down
                 if not self.circuit_breaker.can_execute():
-                    print(f"[PlexSync Worker] Circuit OPEN, sleeping {self.config.poll_interval}s")
+                    print(f"[PlexSync Worker] Circuit OPEN, sleeping {self.config.poll_interval}s", file=sys.stderr)
                     time.sleep(self.config.poll_interval)
                     continue
 
@@ -251,7 +253,7 @@ class SyncWorker:
                 pqid = item.get('pqid')
                 scene_id = item.get('scene_id')
                 retry_count = item.get('retry_count', 0)
-                print(f"[PlexSync Worker] Processing job {pqid} for scene {scene_id} (attempt {retry_count + 1})")
+                print(f"[PlexSync Worker] Processing job {pqid} for scene {scene_id} (attempt {retry_count + 1})", file=sys.stderr)
 
                 try:
                     # Process the job
@@ -260,7 +262,7 @@ class SyncWorker:
                     # Success: acknowledge job and record with circuit breaker
                     ack_job(self.queue, item)
                     self.circuit_breaker.record_success()
-                    print(f"[PlexSync Worker] Job {pqid} completed")
+                    print(f"[PlexSync Worker] Job {pqid} completed", file=sys.stderr)
 
                     # Periodic DLQ status logging
                     self._jobs_since_dlq_log += 1
@@ -272,7 +274,7 @@ class SyncWorker:
                     # Record failure with circuit breaker
                     self.circuit_breaker.record_failure()
                     if self.circuit_breaker.state == CircuitState.OPEN:
-                        print("[PlexSync Worker] Circuit breaker OPENED - pausing processing")
+                        print("[PlexSync Worker] Circuit breaker OPENED - pausing processing", file=sys.stderr)
 
                     # Prepare job for retry with backoff metadata
                     job = self._prepare_for_retry(item, e)
@@ -280,29 +282,29 @@ class SyncWorker:
                     job_retry_count = job.get('retry_count', 0)
 
                     if job_retry_count >= max_retries:
-                        print(f"[PlexSync Worker] Job {pqid} exceeded max retries ({max_retries}), moving to DLQ")
+                        print(f"[PlexSync Worker] Job {pqid} exceeded max retries ({max_retries}), moving to DLQ", file=sys.stderr)
                         fail_job(self.queue, item)
                         self.dlq.add(job, e, job_retry_count)
                     else:
                         delay = job.get('next_retry_at', 0) - time.time()
-                        print(f"[PlexSync Worker] Job {pqid} failed (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s: {e}")
+                        print(f"[PlexSync Worker] Job {pqid} failed (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s: {e}", file=sys.stderr)
                         self._requeue_with_metadata(job)
 
                 except PermanentError as e:
                     # Permanent error: move to DLQ immediately (doesn't count against circuit)
-                    print(f"[PlexSync Worker] Job {pqid} permanent failure, moving to DLQ: {e}")
+                    print(f"[PlexSync Worker] Job {pqid} permanent failure, moving to DLQ: {e}", file=sys.stderr)
                     fail_job(self.queue, item)
                     self.dlq.add(item, e, item.get('retry_count', 0))
 
                 except Exception as e:
                     # Unknown error: treat as transient with circuit breaker
                     self.circuit_breaker.record_failure()
-                    print(f"[PlexSync Worker] Job {pqid} unexpected error (treating as transient): {e}")
+                    print(f"[PlexSync Worker] Job {pqid} unexpected error (treating as transient): {e}", file=sys.stderr)
                     nack_job(self.queue, item)
 
             except Exception as e:
                 # Worker loop error: log and continue
-                print(f"[PlexSync Worker] Worker loop error: {e}")
+                print(f"[PlexSync Worker] Worker loop error: {e}", file=sys.stderr)
                 time.sleep(1)  # Avoid tight loop on persistent errors
 
     def _get_plex_client(self) -> 'PlexClient':
@@ -458,4 +460,4 @@ class SyncWorker:
             plex_item.edit(**edits)
             plex_item.reload()
             mode = "preserved" if self.config.preserve_plex_edits else "overwrite"
-            print(f"[PlexSync Worker] Updated metadata ({mode} mode): {plex_item.title}")
+            print(f"[PlexSync Worker] Updated metadata ({mode} mode): {plex_item.title}", file=sys.stderr)

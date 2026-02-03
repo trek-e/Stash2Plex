@@ -5,6 +5,7 @@ Implements <100ms event handlers that enqueue jobs for background processing.
 Includes metadata validation before enqueueing.
 """
 
+import sys
 import time
 from typing import Optional
 
@@ -81,7 +82,8 @@ def on_scene_update(
     update_data: dict,
     queue,
     data_dir: Optional[str] = None,
-    sync_timestamps: Optional[dict[int, float]] = None
+    sync_timestamps: Optional[dict[int, float]] = None,
+    stash=None
 ) -> bool:
     """
     Handle scene update event with fast enqueue.
@@ -95,6 +97,7 @@ def on_scene_update(
         queue: Queue instance for job storage
         data_dir: Plugin data directory for sync timestamps
         sync_timestamps: Dict mapping scene_id to last sync timestamp
+        stash: StashInterface for fetching scene file path
 
     Returns:
         True if job was enqueued, False if filtered out or validation failed
@@ -103,7 +106,7 @@ def on_scene_update(
 
     # Filter non-sync events before enqueueing
     if not requires_plex_sync(update_data):
-        print(f"[PlexSync] Scene {scene_id} update filtered (no metadata changes)")
+        print(f"[PlexSync] Scene {scene_id} update filtered (no metadata changes)", file=sys.stderr)
         return False
 
     # Filter: Timestamp comparison for late update detection
@@ -118,18 +121,39 @@ def on_scene_update(
 
         last_synced = sync_timestamps.get(scene_id)
         if last_synced and stash_updated_at <= last_synced:
-            print(f"[PlexSync] Scene {scene_id} already synced (Stash: {stash_updated_at} <= Last: {last_synced})")
+            print(f"[PlexSync] Scene {scene_id} already synced (Stash: {stash_updated_at} <= Last: {last_synced})", file=sys.stderr)
             return False
 
     # Filter: Queue deduplication using in-memory tracking
     if is_scene_pending(scene_id):
-        print(f"[PlexSync] Scene {scene_id} already in queue, skipping duplicate")
+        print(f"[PlexSync] Scene {scene_id} already in queue, skipping duplicate", file=sys.stderr)
         return False
 
     # Enqueue job for background processing
     if enqueue is None:
-        print(f"[PlexSync] ERROR: queue.operations not available")
+        print(f"[PlexSync] ERROR: queue.operations not available", file=sys.stderr)
         return False
+
+    # Fetch file path from Stash - required for Plex matching
+    file_path = None
+    if stash:
+        try:
+            scene = stash.find_scene(scene_id)
+            if scene and scene.get('files'):
+                files = scene.get('files', [])
+                if files:
+                    file_path = files[0].get('path')
+                    print(f"[PlexSync] Scene {scene_id} file path: {file_path}", file=sys.stderr)
+        except Exception as e:
+            print(f"[PlexSync] WARNING: Could not fetch file path for scene {scene_id}: {e}", file=sys.stderr)
+
+    if not file_path:
+        print(f"[PlexSync] ERROR: No file path for scene {scene_id}, cannot sync to Plex", file=sys.stderr)
+        return False
+
+    # Add path to update_data for the worker
+    update_data = dict(update_data)  # Copy to avoid mutating original
+    update_data['path'] = file_path
 
     # Build validation data from update_data
     # Title is required - if missing from update, we need to get it
@@ -154,10 +178,10 @@ def on_scene_update(
         if error:
             # Check if it's a missing title error (critical)
             if 'title' in error.lower() and ('required' in error.lower() or 'empty' in error.lower()):
-                print(f"[PlexSync] Scene {scene_id} validation failed: {error}")
+                print(f"[PlexSync] Scene {scene_id} validation failed: {error}", file=sys.stderr)
                 return False
             # For other validation errors, log warning but continue with sanitized data
-            print(f"[PlexSync] WARNING: Scene {scene_id} validation issue: {error}")
+            print(f"[PlexSync] WARNING: Scene {scene_id} validation issue: {error}", file=sys.stderr)
 
         if validated:
             # Use validated/sanitized data for job
@@ -197,9 +221,9 @@ def on_scene_update(
 
     # Calculate elapsed time and warn if over target
     elapsed_ms = (time.time() - start) * 1000
-    print(f"[PlexSync] Enqueued sync job for scene {scene_id} in {elapsed_ms:.1f}ms")
+    print(f"[PlexSync] Enqueued sync job for scene {scene_id} in {elapsed_ms:.1f}ms", file=sys.stderr)
 
     if elapsed_ms > 100:
-        print(f"[PlexSync] WARNING: Hook handler exceeded 100ms target ({elapsed_ms:.1f}ms)")
+        print(f"[PlexSync] WARNING: Hook handler exceeded 100ms target ({elapsed_ms:.1f}ms)", file=sys.stderr)
 
     return True

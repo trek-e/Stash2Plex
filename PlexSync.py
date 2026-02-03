@@ -40,6 +40,7 @@ dlq = None
 worker = None
 config: PlexSyncConfig = None
 sync_timestamps: dict = None
+stash_interface = None
 
 
 def get_plugin_data_dir():
@@ -113,10 +114,12 @@ def extract_config_from_input(input_data: dict) -> dict:
     Returns:
         Dictionary with config values (may be empty if nothing found)
     """
+    global stash_interface
     config_dict = {}
 
     # Fetch settings from Stash using stashapi
     stash = get_stash_interface(input_data)
+    stash_interface = stash  # Store globally for hook handlers
     if stash:
         stash_settings = fetch_plugin_settings(stash)
         if stash_settings:
@@ -238,7 +241,7 @@ def shutdown():
     print("[PlexSync] Shutdown complete")
 
 
-def handle_hook(hook_context: dict):
+def handle_hook(hook_context: dict, stash=None):
     """
     Handle incoming Stash hook.
 
@@ -250,27 +253,39 @@ def handle_hook(hook_context: dict):
 
     Args:
         hook_context: Hook context from Stash
+        stash: StashInterface for API calls
     """
     global sync_timestamps
 
+    print(f"[PlexSync] handle_hook called with keys: {list(hook_context.keys())}", file=sys.stderr)
     hook_type = hook_context.get("type", "")
     input_data = hook_context.get("input", {})
+    print(f"[PlexSync] hook_type={hook_type}, input_data keys={list(input_data.keys()) if input_data else 'None'}", file=sys.stderr)
 
     if hook_type == "Scene.Update.Post":
         scene_id = input_data.get("id")
+        print(f"[PlexSync] Scene.Update.Post: scene_id={scene_id}", file=sys.stderr)
         if scene_id:
             data_dir = get_plugin_data_dir()
-            on_scene_update(
-                scene_id,
-                input_data,
-                queue_manager.get_queue(),
-                data_dir=data_dir,
-                sync_timestamps=sync_timestamps
-            )
+            print(f"[PlexSync] Calling on_scene_update for scene {scene_id}...", file=sys.stderr)
+            try:
+                on_scene_update(
+                    scene_id,
+                    input_data,
+                    queue_manager.get_queue(),
+                    data_dir=data_dir,
+                    sync_timestamps=sync_timestamps,
+                    stash=stash
+                )
+                print(f"[PlexSync] on_scene_update completed for scene {scene_id}", file=sys.stderr)
+            except Exception as e:
+                print(f"[PlexSync] on_scene_update exception: {e}", file=sys.stderr)
+                import traceback
+                traceback.print_exc()
         else:
-            print("[PlexSync] WARNING: Scene.Update.Post hook missing scene ID")
+            print("[PlexSync] WARNING: Scene.Update.Post hook missing scene ID", file=sys.stderr)
     else:
-        print(f"[PlexSync] Unhandled hook type: {hook_type}")
+        print(f"[PlexSync] Unhandled hook type: {hook_type}", file=sys.stderr)
 
 
 def main():
@@ -313,7 +328,7 @@ def main():
     if "args" in input_data and "hookContext" in input_data["args"]:
         print("[PlexSync] Calling handle_hook...", file=sys.stderr)
         try:
-            handle_hook(input_data["args"]["hookContext"])
+            handle_hook(input_data["args"]["hookContext"], stash=stash_interface)
             print("[PlexSync] handle_hook completed", file=sys.stderr)
         except Exception as e:
             print(f"[PlexSync] handle_hook exception: {e}", file=sys.stderr)
@@ -321,6 +336,30 @@ def main():
             traceback.print_exc()
     else:
         print("[PlexSync] No hookContext in input, skipping", file=sys.stderr)
+
+    # Give worker time to process pending jobs before exiting
+    # Worker thread is daemon, so it dies when main process exits
+    if worker and queue_manager:
+        import time
+        queue = queue_manager.get_queue()
+        # Wait up to 30 seconds for queue to drain
+        max_wait = 30
+        wait_interval = 0.5
+        waited = 0
+        while waited < max_wait:
+            try:
+                # Check if queue has pending items
+                if queue.size == 0:
+                    print(f"[PlexSync] Queue empty, exiting after {waited:.1f}s", file=sys.stderr)
+                    break
+                print(f"[PlexSync] Queue has {queue.size} items, waiting...", file=sys.stderr)
+                time.sleep(wait_interval)
+                waited += wait_interval
+            except Exception as e:
+                print(f"[PlexSync] Error checking queue: {e}", file=sys.stderr)
+                break
+        if waited >= max_wait:
+            print(f"[PlexSync] Timeout waiting for queue to drain", file=sys.stderr)
 
     # Return empty response (success)
     print("[PlexSync] Returning ok response", file=sys.stderr)
