@@ -134,26 +134,55 @@ def on_scene_update(
         print(f"[PlexSync] ERROR: queue.operations not available", file=sys.stderr)
         return False
 
-    # Fetch file path from Stash - required for Plex matching
+    # Fetch full scene data from Stash - needed for file path and complete metadata
     file_path = None
+    scene_data = {}
     if stash:
         try:
             scene = stash.find_scene(scene_id)
-            if scene and scene.get('files'):
+            if scene:
+                # Get file path
                 files = scene.get('files', [])
                 if files:
                     file_path = files[0].get('path')
                     print(f"[PlexSync] Scene {scene_id} file path: {file_path}", file=sys.stderr)
+
+                # Extract full metadata from scene
+                scene_data['title'] = scene.get('title')
+                scene_data['details'] = scene.get('details')  # summary/description
+                scene_data['date'] = scene.get('date')
+                scene_data['rating100'] = scene.get('rating100')
+
+                # Get studio name
+                studio = scene.get('studio')
+                if studio:
+                    scene_data['studio'] = studio.get('name')
+
+                # Get performer names
+                performers = scene.get('performers', [])
+                if performers:
+                    scene_data['performers'] = [p.get('name') for p in performers if p.get('name')]
+
+                # Get tag names
+                tags = scene.get('tags', [])
+                if tags:
+                    scene_data['tags'] = [t.get('name') for t in tags if t.get('name')]
+
+                print(f"[PlexSync] Scene {scene_id} metadata: title={scene_data.get('title')}, studio={scene_data.get('studio')}, performers={len(scene_data.get('performers', []))}", file=sys.stderr)
+
         except Exception as e:
-            print(f"[PlexSync] WARNING: Could not fetch file path for scene {scene_id}: {e}", file=sys.stderr)
+            print(f"[PlexSync] WARNING: Could not fetch scene {scene_id}: {e}", file=sys.stderr)
 
     if not file_path:
         print(f"[PlexSync] ERROR: No file path for scene {scene_id}, cannot sync to Plex", file=sys.stderr)
         return False
 
-    # Add path to update_data for the worker
-    update_data = dict(update_data)  # Copy to avoid mutating original
-    update_data['path'] = file_path
+    # Merge scene_data with update_data (update_data takes precedence)
+    # This ensures we have complete metadata even if hook only sent partial update
+    merged_data = dict(scene_data)
+    merged_data.update(update_data)
+    merged_data['path'] = file_path
+    update_data = merged_data
 
     # Build validation data from update_data
     # Title is required - if missing from update, we need to get it

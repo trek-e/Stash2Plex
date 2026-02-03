@@ -439,38 +439,44 @@ class SyncWorker:
 
         Args:
             plex_item: Plex Video item to update
-            data: Dict containing metadata fields (title, studio, etc.)
+            data: Dict containing metadata fields (title, studio, details, etc.)
         """
         edits = {}
 
+        # Map Stash fields to Plex fields
+        # Stash 'details' -> Plex 'summary'
+        summary = data.get('details') or data.get('summary')
+
         if self.config.preserve_plex_edits:
             # Only update fields that are None or empty string in Plex
-            # Simplified logic: any existing value = preserve it
-            if 'title' in data:
-                if not plex_item.title:  # None or empty string
-                    edits['title.value'] = data['title']
-            if 'studio' in data:
-                if not plex_item.studio:
-                    edits['studio.value'] = data['studio']
-            if 'summary' in data:
-                if not plex_item.summary:
-                    edits['summary.value'] = data['summary']
-            if 'tagline' in data:
-                if not getattr(plex_item, 'tagline', None):
-                    edits['tagline.value'] = data['tagline']
+            if data.get('title') and not plex_item.title:
+                edits['title.value'] = data['title']
+            if data.get('studio') and not plex_item.studio:
+                edits['studio.value'] = data['studio']
+            if summary and not plex_item.summary:
+                edits['summary.value'] = summary
+            if data.get('tagline') and not getattr(plex_item, 'tagline', None):
+                edits['tagline.value'] = data['tagline']
+            if data.get('date') and not getattr(plex_item, 'originallyAvailableAt', None):
+                edits['originallyAvailableAt.value'] = data['date']
         else:
             # Stash always wins - overwrite all fields
-            if 'title' in data:
+            if data.get('title'):
                 edits['title.value'] = data['title']
-            if 'studio' in data:
+            if data.get('studio'):
                 edits['studio.value'] = data['studio']
-            if 'summary' in data:
-                edits['summary.value'] = data['summary']
-            if 'tagline' in data:
+            if summary:
+                edits['summary.value'] = summary
+            if data.get('tagline'):
                 edits['tagline.value'] = data['tagline']
+            if data.get('date'):
+                edits['originallyAvailableAt.value'] = data['date']
 
         if edits:
+            print(f"[PlexSync Worker] Updating fields: {list(edits.keys())}", file=sys.stderr)
             plex_item.edit(**edits)
             plex_item.reload()
             mode = "preserved" if self.config.preserve_plex_edits else "overwrite"
             print(f"[PlexSync Worker] Updated metadata ({mode} mode): {plex_item.title}", file=sys.stderr)
+        else:
+            print(f"[PlexSync Worker] No fields to update for: {plex_item.title}", file=sys.stderr)
