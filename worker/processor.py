@@ -607,11 +607,15 @@ class SyncWorker:
 
     def _update_metadata(self, plex_item, data: dict):
         """
-        Update Plex item metadata from sync job data.
+        Update Plex item metadata from sync job data with granular error handling.
 
         Implements LOCKED user decision: When Stash provides None/empty for an
         optional field, the existing Plex value is CLEARED (not preserved).
         When a field key is NOT in the data dict, the existing value is preserved.
+
+        Non-critical field failures (performers, tags, poster, background, collection)
+        are logged as warnings but don't fail the overall sync. Critical field failures
+        (core metadata edit) propagate and fail the job.
 
         Uses plex_item.edit() to update metadata fields, then reloads
         the item to confirm changes.
@@ -619,6 +623,9 @@ class SyncWorker:
         Args:
             plex_item: Plex Video item to update
             data: Dict containing metadata fields (title, studio, details, etc.)
+
+        Returns:
+            PartialSyncResult tracking which fields succeeded and which had warnings
         """
         # Lazy imports to avoid circular import with validation module
         from validation.limits import (
@@ -632,7 +639,9 @@ class SyncWorker:
             MAX_TAGS,
         )
         from validation.sanitizers import sanitize_for_plex
+        from validation.errors import PartialSyncResult
 
+        result = PartialSyncResult()
         edits = {}
 
         # LOCKED DECISION: Missing optional fields clear existing Plex values
@@ -640,7 +649,7 @@ class SyncWorker:
         # - If key exists AND value is present -> sanitize and set
         # - If key does NOT exist in data dict -> do nothing (preserve)
 
-        # Handle title field
+        # Handle title field (CRITICAL - failure propagates)
         if 'title' in data:
             title_value = data.get('title')
             if title_value is None or title_value == '':
@@ -701,16 +710,18 @@ class SyncWorker:
                 if not self.config.preserve_plex_edits or not getattr(plex_item, 'originallyAvailableAt', None):
                     edits['originallyAvailableAt.value'] = date_value
 
+        # Apply core metadata edits (CRITICAL - failure propagates)
         if edits:
             log_debug(f"Updating fields: {list(edits.keys())}")
             plex_item.edit(**edits)
             plex_item.reload()
             mode = "preserved" if self.config.preserve_plex_edits else "overwrite"
             log_info(f"Updated metadata ({mode} mode): {plex_item.title}")
+            result.add_success('metadata')
         else:
             log_trace(f"No metadata fields to update for: {plex_item.title}")
 
-        # Sync performers as actors
+        # NON-CRITICAL: Sync performers as actors
         # LOCKED: If 'performers' key exists with empty/None, clear all actors
         if 'performers' in data:
             performers = data.get('performers')
@@ -720,8 +731,10 @@ class SyncWorker:
                     plex_item.edit(**{'actor.locked': 1})  # Lock to clear
                     plex_item.reload()
                     log_debug("Clearing performers (Stash value is empty)")
+                    result.add_success('performers')
                 except Exception as e:
                     log_warn(f" Failed to clear performers: {e}")
+                    result.add_warning('performers', e)
             elif performers:
                 try:
                     # Sanitize performer names and apply limits
@@ -755,10 +768,12 @@ class SyncWorker:
                         log_info(f"Added {len(new_performers)} performers: {new_performers}")
                     else:
                         log_trace(f"Performers already in Plex: {sanitized_performers}")
+                    result.add_success('performers')
                 except Exception as e:
                     log_warn(f" Failed to sync performers: {e}")
+                    result.add_warning('performers', e)
 
-        # Sync poster image (download from Stash, save to temp file, upload to Plex)
+        # NON-CRITICAL: Sync poster image (download from Stash, save to temp file, upload to Plex)
         poster_url = data.get('poster_url')
         if poster_url:
             try:
@@ -772,12 +787,16 @@ class SyncWorker:
                     try:
                         plex_item.uploadPoster(filepath=temp_path)
                         log_debug(f"Uploaded poster ({len(image_data)} bytes)")
+                        result.add_success('poster')
                     finally:
                         os.unlink(temp_path)
+                else:
+                    result.add_warning('poster', ValueError("No image data returned from Stash"))
             except Exception as e:
                 log_warn(f" Failed to upload poster: {e}")
+                result.add_warning('poster', e)
 
-        # Sync background/art image (download from Stash, save to temp file, upload to Plex)
+        # NON-CRITICAL: Sync background/art image (download from Stash, save to temp file, upload to Plex)
         background_url = data.get('background_url')
         if background_url:
             try:
@@ -791,12 +810,16 @@ class SyncWorker:
                     try:
                         plex_item.uploadArt(filepath=temp_path)
                         log_debug(f"Uploaded background ({len(image_data)} bytes)")
+                        result.add_success('background')
                     finally:
                         os.unlink(temp_path)
+                else:
+                    result.add_warning('background', ValueError("No image data returned from Stash"))
             except Exception as e:
                 log_warn(f" Failed to upload background: {e}")
+                result.add_warning('background', e)
 
-        # Sync tags as genres
+        # NON-CRITICAL: Sync tags as genres
         # LOCKED: If 'tags' key exists with empty/None, clear all tags
         if 'tags' in data:
             tags = data.get('tags')
@@ -806,8 +829,10 @@ class SyncWorker:
                     plex_item.edit(**{'genre.locked': 1})  # Lock to clear
                     plex_item.reload()
                     log_debug("Clearing tags (Stash value is empty)")
+                    result.add_success('tags')
                 except Exception as e:
                     log_warn(f" Failed to clear tags: {e}")
+                    result.add_warning('tags', e)
             elif tags:
                 try:
                     # Sanitize tag names and apply limits
@@ -840,10 +865,12 @@ class SyncWorker:
                         log_info(f"Added {len(new_tags)} tags as genres: {new_tags}")
                     else:
                         log_trace(f"Tags already in Plex: {sanitized_tags}")
+                    result.add_success('tags')
                 except Exception as e:
                     log_warn(f" Failed to sync tags: {e}")
+                    result.add_warning('tags', e)
 
-        # Add to studio collection
+        # NON-CRITICAL: Add to studio collection
         studio = data.get('studio')
         if studio:
             try:
@@ -860,5 +887,13 @@ class SyncWorker:
                     log_debug(f"Added to collection: {studio}")
                 else:
                     log_trace(f"Already in collection: {studio}")
+                result.add_success('collection')
             except Exception as e:
                 log_warn(f" Failed to add to collection: {e}")
+                result.add_warning('collection', e)
+
+        # Log aggregated warnings at end
+        if result.has_warnings:
+            log_warn(f"Partial sync for {plex_item.title}: {result.warning_summary}")
+
+        return result

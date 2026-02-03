@@ -717,3 +717,290 @@ class TestListFieldLimits:
         # Verify clearing was logged
         captured = capsys.readouterr()
         assert "Clearing tags" in captured.err
+
+
+class TestPartialSyncFailure:
+    """Tests for partial sync failure handling - non-critical field failures don't fail job."""
+
+    @pytest.fixture
+    def partial_worker(self, mock_queue, mock_dlq, mock_config, tmp_path):
+        """Create SyncWorker for partial failure tests."""
+        from worker.processor import SyncWorker
+
+        mock_config.plex_connect_timeout = 10.0
+        mock_config.plex_read_timeout = 30.0
+        mock_config.preserve_plex_edits = False
+        mock_config.strict_matching = False
+        mock_config.dlq_retention_days = 30
+
+        worker = SyncWorker(
+            queue=mock_queue,
+            dlq=mock_dlq,
+            config=mock_config,
+            data_dir=str(tmp_path),
+        )
+        return worker
+
+    def test_performer_sync_fails_job_still_succeeds(self, partial_worker, capsys):
+        """When performer sync fails, title sync succeeds, job succeeds."""
+        from validation.errors import PartialSyncResult
+
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Make performer edit fail
+        def edit_side_effect(**kwargs):
+            if 'actor[0].tag.tag' in kwargs:
+                raise ConnectionError("Plex connection failed")
+            # Other edits succeed
+        mock_plex_item.edit.side_effect = edit_side_effect
+
+        data = {
+            'path': '/test.mp4',
+            'title': 'Test Title',
+            'performers': ['Actor 1', 'Actor 2'],
+        }
+
+        result = partial_worker._update_metadata(mock_plex_item, data)
+
+        # Job should succeed overall
+        assert result.success is True
+        # Metadata was updated
+        assert 'metadata' in result.fields_updated
+        # Performer failure tracked as warning
+        assert result.has_warnings
+        assert any(w.field_name == 'performers' for w in result.warnings)
+
+        # Warning was logged
+        captured = capsys.readouterr()
+        assert "Partial sync" in captured.err
+
+    def test_tag_sync_fails_other_fields_succeed(self, partial_worker, capsys):
+        """When tag sync fails, other fields succeed, job succeeds."""
+        from validation.errors import PartialSyncResult
+
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Make tag edit fail
+        def edit_side_effect(**kwargs):
+            if 'genre[0].tag.tag' in kwargs:
+                raise TimeoutError("Plex timeout")
+            # Other edits succeed
+        mock_plex_item.edit.side_effect = edit_side_effect
+
+        data = {
+            'path': '/test.mp4',
+            'title': 'Test Title',
+            'studio': 'Test Studio',
+            'tags': ['Tag 1', 'Tag 2'],
+        }
+
+        result = partial_worker._update_metadata(mock_plex_item, data)
+
+        # Job should succeed overall
+        assert result.success is True
+        # Metadata was updated
+        assert 'metadata' in result.fields_updated
+        # Tag failure tracked as warning
+        assert result.has_warnings
+        assert any(w.field_name == 'tags' for w in result.warnings)
+
+    def test_poster_upload_fails_metadata_succeeds(self, partial_worker):
+        """When poster upload fails, metadata sync succeeds, job succeeds."""
+        from validation.errors import PartialSyncResult
+
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Make poster upload fail
+        mock_plex_item.uploadPoster.side_effect = Exception("Upload failed")
+
+        # Mock _fetch_stash_image to return valid image data
+        partial_worker._fetch_stash_image = MagicMock(return_value=b'fake image data')
+
+        data = {
+            'path': '/test.mp4',
+            'title': 'Test Title',
+            'poster_url': 'http://stash/poster.jpg',
+        }
+
+        result = partial_worker._update_metadata(mock_plex_item, data)
+
+        # Job should succeed overall
+        assert result.success is True
+        # Metadata was updated
+        assert 'metadata' in result.fields_updated
+        # Poster failure tracked as warning
+        assert result.has_warnings
+        assert any(w.field_name == 'poster' for w in result.warnings)
+
+    def test_multiple_non_critical_failures_aggregated(self, partial_worker, capsys):
+        """Multiple non-critical failures are aggregated in warnings."""
+        from validation.errors import PartialSyncResult
+
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Make both performer and tag edits fail
+        def edit_side_effect(**kwargs):
+            if 'actor[0].tag.tag' in kwargs:
+                raise ConnectionError("Actor sync failed")
+            if 'genre[0].tag.tag' in kwargs:
+                raise TimeoutError("Tag sync failed")
+            # Other edits succeed
+        mock_plex_item.edit.side_effect = edit_side_effect
+
+        # Make poster upload fail too
+        mock_plex_item.uploadPoster.side_effect = Exception("Poster upload failed")
+        partial_worker._fetch_stash_image = MagicMock(return_value=b'fake image data')
+
+        data = {
+            'path': '/test.mp4',
+            'title': 'Test Title',
+            'performers': ['Actor 1'],
+            'tags': ['Tag 1'],
+            'poster_url': 'http://stash/poster.jpg',
+        }
+
+        result = partial_worker._update_metadata(mock_plex_item, data)
+
+        # Job should still succeed overall
+        assert result.success is True
+        # Multiple warnings
+        assert len(result.warnings) == 3
+        warning_fields = [w.field_name for w in result.warnings]
+        assert 'performers' in warning_fields
+        assert 'tags' in warning_fields
+        assert 'poster' in warning_fields
+
+        # Warning summary includes all failures
+        captured = capsys.readouterr()
+        assert "3 warnings" in captured.err
+
+    def test_update_metadata_returns_partial_sync_result(self, partial_worker):
+        """_update_metadata returns PartialSyncResult instance."""
+        from validation.errors import PartialSyncResult
+
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        data = {'path': '/test.mp4', 'title': 'Test Title'}
+
+        result = partial_worker._update_metadata(mock_plex_item, data)
+
+        assert isinstance(result, PartialSyncResult)
+        assert result.success is True
+        assert 'metadata' in result.fields_updated
+
+    def test_successful_sync_records_all_fields(self, partial_worker):
+        """Successful sync of all fields records them in fields_updated."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Mock _fetch_stash_image to return valid image data
+        partial_worker._fetch_stash_image = MagicMock(return_value=b'fake image data')
+
+        data = {
+            'path': '/test.mp4',
+            'title': 'Test Title',
+            'studio': 'Test Studio',
+            'performers': ['Actor 1'],
+            'tags': ['Tag 1'],
+            'poster_url': 'http://stash/poster.jpg',
+        }
+
+        result = partial_worker._update_metadata(mock_plex_item, data)
+
+        # All fields should be recorded as successful
+        assert 'metadata' in result.fields_updated
+        assert 'performers' in result.fields_updated
+        assert 'tags' in result.fields_updated
+        assert 'poster' in result.fields_updated
+        assert 'collection' in result.fields_updated
+        assert result.has_warnings is False
+
+    def test_collection_failure_doesnt_fail_job(self, partial_worker):
+        """When collection add fails, job still succeeds."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Make collection edit fail
+        def edit_side_effect(**kwargs):
+            if 'collection[0].tag.tag' in kwargs:
+                raise ValueError("Collection error")
+            # Other edits succeed
+        mock_plex_item.edit.side_effect = edit_side_effect
+
+        data = {
+            'path': '/test.mp4',
+            'title': 'Test Title',
+            'studio': 'Test Studio',  # This triggers collection add
+        }
+
+        result = partial_worker._update_metadata(mock_plex_item, data)
+
+        assert result.success is True
+        assert 'metadata' in result.fields_updated
+        assert any(w.field_name == 'collection' for w in result.warnings)
+
+    def test_background_upload_failure_doesnt_fail_job(self, partial_worker):
+        """When background upload fails, job still succeeds."""
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Make background upload fail
+        mock_plex_item.uploadArt.side_effect = Exception("Art upload failed")
+        partial_worker._fetch_stash_image = MagicMock(return_value=b'fake image data')
+
+        data = {
+            'path': '/test.mp4',
+            'title': 'Test Title',
+            'background_url': 'http://stash/background.jpg',
+        }
+
+        result = partial_worker._update_metadata(mock_plex_item, data)
+
+        assert result.success is True
+        assert 'metadata' in result.fields_updated
+        assert any(w.field_name == 'background' for w in result.warnings)
