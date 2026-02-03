@@ -368,10 +368,28 @@ def handle_task(task_args: dict, stash=None):
         traceback.print_exc()
 
 
+def is_scan_job_running(stash) -> bool:
+    """Check if a scan/generate job is running in Stash."""
+    if not stash:
+        return False
+    try:
+        result = stash.call_GQL("""
+            query { jobQueue { type status } }
+        """)
+        jobs = result.get('jobQueue', []) if result else []
+        scan_types = ['SCAN', 'AUTO_TAG', 'GENERATE', 'IDENTIFY']
+        for job in jobs:
+            job_type = (job.get('type') or '').upper()
+            status = (job.get('status') or '').upper()
+            if status in ('RUNNING', 'READY') and any(t in job_type for t in scan_types):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def main():
     """Main entry point for Stash plugin."""
-    log_trace("main() started")
-
     # Read input from stdin (Stash plugin protocol)
     try:
         raw_input = sys.stdin.read()
@@ -380,6 +398,18 @@ def main():
         log_error(f"JSON decode error: {e}")
         print(json.dumps({"error": f"Invalid JSON input: {e}"}))
         sys.exit(1)
+
+    # Check args first - for hooks, check if scan is running before heavy init
+    args = input_data.get("args", {})
+    is_hook = "hookContext" in args
+
+    # For hooks: create minimal stash connection to check for scans
+    if is_hook:
+        temp_stash = get_stash_interface(input_data)
+        if is_scan_job_running(temp_stash):
+            # Scan running - exit immediately without initialization
+            print(json.dumps({"output": "ok"}))
+            return
 
     # Initialize on first call
     global queue_manager, config
@@ -393,9 +423,7 @@ def main():
         return
 
     # Handle hook or task
-    args = input_data.get("args", {})
-
-    if "hookContext" in args:
+    if is_hook:
         try:
             handle_hook(args["hookContext"], stash=stash_interface)
         except Exception as e:
