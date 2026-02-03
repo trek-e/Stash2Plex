@@ -14,6 +14,14 @@ import threading
 import logging
 from typing import Optional, TYPE_CHECKING
 
+
+# Stash plugin log levels
+def log_trace(msg): print(f"\x01t\x02[PlexSync Worker] {msg}", file=sys.stderr, file=sys.stderr)
+def log_debug(msg): print(f"\x01d\x02[PlexSync Worker] {msg}", file=sys.stderr, file=sys.stderr)
+def log_info(msg): print(f"\x01i\x02[PlexSync Worker] {msg}", file=sys.stderr, file=sys.stderr)
+def log_warn(msg): print(f"\x01w\x02[PlexSync Worker] {msg}", file=sys.stderr, file=sys.stderr)
+def log_error(msg): print(f"\x01e\x02[PlexSync Worker] {msg}", file=sys.stderr, file=sys.stderr)
+
 try:
     from sync_queue.operations import get_pending, ack_job, nack_job, fail_job, enqueue, save_sync_timestamp
     from sync_queue.dlq import DeadLetterQueue
@@ -106,13 +114,13 @@ class SyncWorker:
         self.running = True
         self.thread = threading.Thread(target=self._worker_loop, daemon=True)
         self.thread.start()
-        print("[PlexSync Worker] Started", file=sys.stderr)
+        log_info("Started")
 
     def _log_dlq_status(self):
         """Log DLQ status if jobs present."""
         count = self.dlq.get_count()
         if count > 0:
-            print(f"[PlexSync Worker] WARNING: DLQ contains {count} failed jobs requiring review", file=sys.stderr)
+            log_warn(f" DLQ contains {count} failed jobs requiring review")
             recent = self.dlq.get_recent(limit=5)
             for entry in recent:
                 print(
@@ -132,7 +140,7 @@ class SyncWorker:
         if self.thread:
             self.thread.join(timeout=5)
             if self.thread.is_alive():
-                print("[PlexSync Worker] WARNING: Thread did not stop cleanly", file=sys.stderr)
+                log_warn(" Thread did not stop cleanly", file=sys.stderr)
 
         print("[PlexSync Worker] Stopped", file=sys.stderr)
 
@@ -253,7 +261,7 @@ class SyncWorker:
                 pqid = item.get('pqid')
                 scene_id = item.get('scene_id')
                 retry_count = item.get('retry_count', 0)
-                print(f"[PlexSync Worker] Processing job {pqid} for scene {scene_id} (attempt {retry_count + 1})", file=sys.stderr)
+                print(f"[PlexSync Worker] Processing job {pqid} for scene {scene_id} (attempt {retry_count + 1})")
 
                 try:
                     # Process the job
@@ -262,7 +270,7 @@ class SyncWorker:
                     # Success: acknowledge job and record with circuit breaker
                     ack_job(self.queue, item)
                     self.circuit_breaker.record_success()
-                    print(f"[PlexSync Worker] Job {pqid} completed", file=sys.stderr)
+                    log_info(f"Job {pqid} completed")
 
                     # Periodic DLQ status logging
                     self._jobs_since_dlq_log += 1
@@ -282,12 +290,12 @@ class SyncWorker:
                     job_retry_count = job.get('retry_count', 0)
 
                     if job_retry_count >= max_retries:
-                        print(f"[PlexSync Worker] Job {pqid} exceeded max retries ({max_retries}), moving to DLQ", file=sys.stderr)
+                        print(f"[PlexSync Worker] Job {pqid} exceeded max retries ({max_retries}), moving to DLQ")
                         fail_job(self.queue, item)
                         self.dlq.add(job, e, job_retry_count)
                     else:
                         delay = job.get('next_retry_at', 0) - time.time()
-                        print(f"[PlexSync Worker] Job {pqid} failed (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s: {e}", file=sys.stderr)
+                        print(f"[PlexSync Worker] Job {pqid} failed (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s: {e}")
                         self._requeue_with_metadata(job)
 
                 except PermanentError as e:
@@ -299,7 +307,7 @@ class SyncWorker:
                 except Exception as e:
                     # Unknown error: treat as transient with circuit breaker
                     self.circuit_breaker.record_failure()
-                    print(f"[PlexSync Worker] Job {pqid} unexpected error (treating as transient): {e}", file=sys.stderr)
+                    print(f"[PlexSync Worker] Job {pqid} unexpected error (treating as transient): {e}")
                     nack_job(self.queue, item)
 
             except Exception as e:
@@ -340,10 +348,10 @@ class SyncWorker:
             with urllib.request.urlopen(req, timeout=30) as response:
                 return response.read()
         except urllib.error.URLError as e:
-            print(f"[PlexSync Worker] WARNING: Failed to fetch image from Stash: {e}", file=sys.stderr)
+            log_warn(f" Failed to fetch image from Stash: {e}")
             return None
         except Exception as e:
-            print(f"[PlexSync Worker] WARNING: Image fetch error: {e}", file=sys.stderr)
+            log_warn(f" Image fetch error: {e}")
             return None
 
     def _get_plex_client(self) -> 'PlexClient':
@@ -407,7 +415,7 @@ class SyncWorker:
             else:
                 # Search all libraries (slow)
                 sections = client.server.library.sections()
-                print(f"[PlexSync Worker] Searching all {len(sections)} libraries (set plex_library to speed up)", file=sys.stderr)
+                print(f"[PlexSync Worker] Searching all {len(sections)} libraries (set plex_library to speed up)")
 
             # Search library sections, collect ALL candidates
             all_candidates = []
@@ -512,11 +520,11 @@ class SyncWorker:
                 edits['originallyAvailableAt.value'] = data['date']
 
         if edits:
-            print(f"[PlexSync Worker] Updating fields: {list(edits.keys())}", file=sys.stderr)
+            print(f"[PlexSync Worker] Updating fields: {list(edits.keys())}")
             plex_item.edit(**edits)
             plex_item.reload()
             mode = "preserved" if self.config.preserve_plex_edits else "overwrite"
-            print(f"[PlexSync Worker] Updated metadata ({mode} mode): {plex_item.title}", file=sys.stderr)
+            print(f"[PlexSync Worker] Updated metadata ({mode} mode): {plex_item.title}")
         else:
             print(f"[PlexSync Worker] No metadata fields to update for: {plex_item.title}", file=sys.stderr)
 
@@ -537,11 +545,11 @@ class SyncWorker:
 
                     plex_item.edit(**actor_edits)
                     plex_item.reload()
-                    print(f"[PlexSync Worker] Added {len(new_performers)} performers: {new_performers}", file=sys.stderr)
+                    print(f"[PlexSync Worker] Added {len(new_performers)} performers: {new_performers}")
                 else:
                     print(f"[PlexSync Worker] Performers already in Plex: {performers}", file=sys.stderr)
             except Exception as e:
-                print(f"[PlexSync Worker] WARNING: Failed to sync performers: {e}", file=sys.stderr)
+                log_warn(f" Failed to sync performers: {e}")
 
         # Sync poster image (download from Stash, save to temp file, upload to Plex)
         poster_url = data.get('poster_url')
@@ -556,11 +564,11 @@ class SyncWorker:
                         temp_path = f.name
                     try:
                         plex_item.uploadPoster(filepath=temp_path)
-                        print(f"[PlexSync Worker] Uploaded poster ({len(image_data)} bytes)", file=sys.stderr)
+                        print(f"[PlexSync Worker] Uploaded poster ({len(image_data)} bytes)")
                     finally:
                         os.unlink(temp_path)
             except Exception as e:
-                print(f"[PlexSync Worker] WARNING: Failed to upload poster: {e}", file=sys.stderr)
+                log_warn(f" Failed to upload poster: {e}")
 
         # Sync background/art image (download from Stash, save to temp file, upload to Plex)
         background_url = data.get('background_url')
@@ -575,11 +583,11 @@ class SyncWorker:
                         temp_path = f.name
                     try:
                         plex_item.uploadArt(filepath=temp_path)
-                        print(f"[PlexSync Worker] Uploaded background ({len(image_data)} bytes)", file=sys.stderr)
+                        print(f"[PlexSync Worker] Uploaded background ({len(image_data)} bytes)")
                     finally:
                         os.unlink(temp_path)
             except Exception as e:
-                print(f"[PlexSync Worker] WARNING: Failed to upload background: {e}", file=sys.stderr)
+                log_warn(f" Failed to upload background: {e}")
 
         # Sync tags as genres
         tags = data.get('tags', [])
@@ -597,11 +605,11 @@ class SyncWorker:
 
                     plex_item.edit(**genre_edits)
                     plex_item.reload()
-                    print(f"[PlexSync Worker] Added {len(new_tags)} tags as genres: {new_tags}", file=sys.stderr)
+                    print(f"[PlexSync Worker] Added {len(new_tags)} tags as genres: {new_tags}")
                 else:
                     print(f"[PlexSync Worker] Tags already in Plex: {tags}", file=sys.stderr)
             except Exception as e:
-                print(f"[PlexSync Worker] WARNING: Failed to sync tags: {e}", file=sys.stderr)
+                log_warn(f" Failed to sync tags: {e}")
 
         # Add to studio collection
         studio = data.get('studio')
@@ -621,4 +629,4 @@ class SyncWorker:
                 else:
                     print(f"[PlexSync Worker] Already in collection: {studio}", file=sys.stderr)
             except Exception as e:
-                print(f"[PlexSync Worker] WARNING: Failed to add to collection: {e}", file=sys.stderr)
+                log_warn(f" Failed to add to collection: {e}")
