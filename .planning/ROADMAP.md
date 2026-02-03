@@ -138,14 +138,21 @@ Plans:
 ---
 
 ### Phase 7: Performance Optimization
-**Goal:** Reduce API calls, improve matching speed
+**Goal:** Reduce Plex API calls and improve matching speed through caching
+**Plans:** 3 plans
 
-- Plex library caching (avoid repeated scans)
-- Match result caching
-- Batch API calls where possible
-- Profile and optimize hot paths
+- Disk-backed caching with diskcache library
+- Library data caching (1-hour TTL)
+- Match result caching (no TTL, manual invalidation)
+- Timing utilities for performance measurement
+- Cache integration in worker processor
 
 **Success:** Measurable reduction in Plex API calls per sync
+
+Plans:
+- [ ] 07-01-PLAN.md — Cache infrastructure and library data caching
+- [ ] 07-02-PLAN.md — Match result caching and matcher integration
+- [ ] 07-03-PLAN.md — Timing utilities and processor integration
 
 ---
 
@@ -286,7 +293,7 @@ Note: Phase 2.1 (Bugfix) can run in parallel with Phase 3 - it's independent.
 | 4. User Documentation | Medium | 4 |
 | 5. Architecture Docs | Medium | 2 |
 | 6. API Documentation | Low | 1 |
-| 7. Performance | Medium | 2-3 |
+| 7. Performance | Medium | 3 |
 | 8. Observability | Medium | 2-3 |
 | 9. Reliability | Medium | 2-3 |
 | 10. Metadata Sync Toggles | Medium | 2-3 |
