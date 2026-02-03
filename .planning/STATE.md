@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 3 of 11 (Integration Tests) - In progress
-Plan: 2 of 4 complete
-Status: Sync workflow integration tests complete
-Last activity: 2026-02-03 - Completed 03-02-PLAN.md
+Plan: 3 of 4 complete
+Status: Error scenario integration tests complete
+Last activity: 2026-02-03 - Completed 03-04-PLAN.md
 
-Progress: [█████░░░░░░░░░░░] 29% (3/11 phases complete + 2 plans in Phase 3)
+Progress: [█████░░░░░░░░░░░] 31% (3/11 phases complete + 3 plans in Phase 3)
 
 ## Decisions Log
 
@@ -43,6 +43,8 @@ Progress: [█████░░░░░░░░░░░] 29% (3/11 phases co
 | 2026-02-03 | 03-01 | 7 integration fixtures | Provide worker scenarios: success, no-match, connection-error, real queue, sample job, circuit breaker |
 | 2026-02-03 | 03-02 | get_all_edit_kwargs() helper | Processor calls edit() multiple times; helper collects all kwargs for assertions |
 | 2026-02-03 | 03-02 | Test class grouping by feature | TestFullSyncWorkflow, TestPreservePlexEditsMode, TestJobWithMissingFields |
+| 2026-02-03 | 03-04 | Tests verify actual behavior | PermanentError wrapped and translated to transient - tests document quirk |
+| 2026-02-03 | 03-04 | Missing path no unmark | Error before try block doesn't call unmark_scene_pending |
 
 ## Roadmap Evolution
 
@@ -121,23 +123,23 @@ Progress: [█████░░░░░░░░░░░] 29% (3/11 phases co
 ### v1.1 Phase 3: Integration Tests (In Progress)
 
 **Stats:**
-- 2 of 4 plans complete
-- 3 commits
-- 4 files created/modified
+- 3 of 4 plans complete
+- 4 commits
+- 5 files created/modified
 
 **Accomplishments:**
 1. **Integration test dependencies** - freezegun and pytest-timeout added
 2. **Integration fixtures** - 7 fixtures composing unit test mocks
 3. **Sync workflow tests** - 13 tests covering metadata sync, preserve mode, partial data (03-02)
+4. **Error scenario tests** - 15 tests covering Plex down, not found, permanent errors, strict matching (03-04)
 
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 03-02-PLAN.md (Full sync workflow integration tests)
+Stopped at: Completed 03-04-PLAN.md (Error scenario integration tests)
 Resume file: None
 
 ## Next Steps
 
-Phase 3 Plan 02 complete. Ready for:
-- 03-03: Error handling integration tests
-- 03-04: Queue persistence integration tests
+Phase 3 Plan 04 complete. Ready for:
+- 03-03: Queue persistence integration tests (final plan in Phase 3)
