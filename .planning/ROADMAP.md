@@ -24,22 +24,40 @@ Plans:
 
 ---
 
-### Phase 2: Core Unit Tests
+### Phase 2: Core Unit Tests ✓
 **Goal:** Unit test coverage for all core modules
-**Plans:** 4 plans
+**Plans:** 4 plans (complete)
+**Completed:** 2026-02-03
 
-- `sync_queue/` - QueueManager, operations, DLQ
-- `validation/` - metadata validation, config validation
-- `plex/` - matching logic, API client
-- `hooks/` - handler logic (without external calls)
+- `sync_queue/` - QueueManager, operations, DLQ (88.8% coverage)
+- `validation/` - metadata validation, config validation (94.2% coverage)
+- `plex/` - matching logic, API client (94.4% coverage)
+- `hooks/` - handler logic (96.9% coverage)
 
-**Success:** >80% coverage on core modules
+**Success:** >80% coverage on core modules ✓ (445 tests, all >80%)
 
 Plans:
-- [ ] 02-01-PLAN.md — sync_queue tests (QueueManager, operations, DLQ)
-- [ ] 02-02-PLAN.md — validation tests (SyncMetadata, PlexSyncConfig, sanitizers)
-- [ ] 02-03-PLAN.md — plex tests (matcher, client, exceptions)
-- [ ] 02-04-PLAN.md — hooks tests (handlers)
+- [x] 02-01-PLAN.md — sync_queue tests (QueueManager, operations, DLQ)
+- [x] 02-02-PLAN.md — validation tests (SyncMetadata, PlexSyncConfig, sanitizers)
+- [x] 02-03-PLAN.md — plex tests (matcher, client, exceptions)
+- [x] 02-04-PLAN.md — hooks tests (handlers)
+
+---
+
+### Phase 2.1: Fix Plex Device Registration (Bugfix)
+**Goal:** Refactor Plex connection to reuse device identity and avoid "new device" notifications
+
+- Investigate current PlexClient connection methodology
+- Implement persistent device identifier storage
+- Reuse X-Plex-Client-Identifier across connections
+- Test that repeated syncs don't trigger new device alerts
+
+**Success:** Plex no longer shows "new device" notifications on each sync
+
+**Priority:** HIGH (bugfix)
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 2.1 to break down)
 
 ---
 
@@ -161,6 +179,23 @@ Plans:
 
 ---
 
+### Phase 12: Process Queue Button
+**Goal:** Add process queue button to handle stalled queues due to time limits
+
+- Add task in plugin menu to manually trigger queue processing
+- Handle long queues that stall due to Stash plugin timeout
+- Allow resume/continue processing for large backlogs
+- Progress feedback during manual processing
+
+**Success:** Users can manually process stuck queues that timeout
+
+**Depends on:** Phase 11
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 12 to break down)
+
+---
+
 ## Phase Dependencies
 
 ```
@@ -186,6 +221,8 @@ Phase 4 (User Docs)                Phase 5 (Arch Docs)
                     Phase 10 (Toggles)
                               |
                     Phase 11 (Queue UI)
+                              |
+                    Phase 12 (Process Queue)
 ```
 
 ## Estimated Effort
@@ -203,8 +240,9 @@ Phase 4 (User Docs)                Phase 5 (Arch Docs)
 | 9. Reliability | Medium | 2-3 |
 | 10. Metadata Sync Toggles | Medium | 2-3 |
 | 11. Queue Management UI | Low | 1-2 |
+| 12. Process Queue Button | Low | 1-2 |
 
-**Total:** ~23-34 plans across 11 phases
+**Total:** ~24-36 plans across 12 phases
 
 ---
 *Created: 2026-02-03*

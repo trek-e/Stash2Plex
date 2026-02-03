@@ -2,3 +2,4 @@ persist-queue>=1.1.0
 stashapi
 plexapi>=4.17.0
 tenacity>=9.0.0
+pydantic>=2.0.0
