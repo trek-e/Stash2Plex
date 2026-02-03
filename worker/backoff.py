@@ -36,6 +36,13 @@ def calculate_delay(
 
     Returns:
         Delay in seconds, in range [0, min(cap, base * 2^retry_count)]
+
+    Example:
+        >>> from worker.backoff import calculate_delay
+        >>> delay = calculate_delay(retry_count=3, base=1.0, cap=60.0,
+        ...                         jitter_seed=42)
+        >>> 0 <= delay <= 8.0  # 2^3 = 8, with jitter
+        True
     """
     # Create seeded random generator for deterministic testing
     rng = random.Random(jitter_seed)

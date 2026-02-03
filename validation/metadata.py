@@ -33,6 +33,17 @@ class SyncMetadata(BaseModel):
 
     All string fields are automatically sanitized via field_validator
     to remove control characters and normalize text.
+
+    Example:
+        >>> from validation.metadata import SyncMetadata
+        >>> meta = SyncMetadata(
+        ...     scene_id=123,
+        ...     title="Example Scene",
+        ...     studio="Example Studio",
+        ...     performers=["Actor One", "Actor Two"]
+        ... )
+        >>> print(meta.title)
+        Example Scene
     """
 
     # Required fields

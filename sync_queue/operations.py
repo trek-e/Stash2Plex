@@ -28,6 +28,14 @@ def enqueue(queue: 'persistqueue.SQLiteAckQueue', scene_id: int, update_type: st
 
     Returns:
         The enqueued job dict
+
+    Example:
+        >>> from persistqueue import SQLiteAckQueue
+        >>> queue = SQLiteAckQueue('/tmp/queue')
+        >>> job = enqueue(queue, scene_id=123, update_type='metadata',
+        ...               data={'title': 'Example Scene'})
+        >>> print(job['scene_id'])
+        123
     """
     job = {
         'scene_id': scene_id,

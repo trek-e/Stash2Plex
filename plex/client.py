@@ -72,8 +72,13 @@ class PlexClient:
         read_timeout: Read timeout in seconds (default: 30.0)
 
     Example:
-        client = PlexClient(url="http://plex:32400", token="abc123")
-        library = client.get_library("Movies")
+        >>> from plex.client import PlexClient
+        >>> client = PlexClient(
+        ...     url="http://plex:32400",
+        ...     token="your-token",
+        ...     timeout=10
+        ... )
+        >>> library = client.get_library("Movies")
     """
 
     # Class-level cache for full retriable exceptions tuple
