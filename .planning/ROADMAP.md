@@ -95,10 +95,12 @@ Plans:
   1. Late metadata updates in Stash (after initial incomplete sync) trigger re-sync to Plex
   2. Matches scored with confidence level (high confidence auto-sync, low confidence log for review)
   3. User can review low-confidence matches in logs before manual sync
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 05-01: TBD
+- [ ] 05-01-PLAN.md - SyncState table and config flags (strict_matching, preserve_plex_edits)
+- [ ] 05-02-PLAN.md - Queue deduplication and confidence-scored matching
+- [ ] 05-03-PLAN.md - Hook and worker integration with late update detection
 
 ## Progress
 
@@ -111,4 +113,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 2. Validation & Error Classification | 3/3 | Complete | 2026-01-24 |
 | 3. Plex API Client | 3/3 | Complete | 2026-01-24 |
 | 4. Queue Processor with Retry | 4/4 | Complete | 2026-01-24 |
-| 5. Late Update Detection | 0/? | Not started | - |
+| 5. Late Update Detection | 0/3 | Not started | - |
