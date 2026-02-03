@@ -15,6 +15,8 @@ import threading
 import logging
 from typing import Optional, TYPE_CHECKING
 
+from worker.stats import SyncStats
+
 
 # Stash plugin log levels
 def log_trace(msg): print(f"\x01t\x02[PlexSync Worker] {msg}", file=sys.stderr)
@@ -86,6 +88,12 @@ class SyncWorker:
         # Initialize caches (lazy, created on first use)
         self._library_cache: Optional['PlexCache'] = None
         self._match_cache: Optional['MatchCache'] = None
+
+        # Initialize stats tracking
+        self._stats = SyncStats()
+        if data_dir is not None:
+            stats_path = os.path.join(data_dir, 'stats.json')
+            self._stats = SyncStats.load_from_file(stats_path)
 
         # DLQ status logging interval
         self._jobs_since_dlq_log = 0
@@ -268,23 +276,34 @@ class SyncWorker:
                 retry_count = item.get('retry_count', 0)
                 log_debug(f"Processing job {pqid} for scene {scene_id} (attempt {retry_count + 1})")
 
+                _job_start = time.perf_counter()
                 try:
-                    # Process the job
-                    self._process_job(item)
+                    # Process the job and get match confidence
+                    confidence = self._process_job(item)
+                    _job_elapsed = time.perf_counter() - _job_start
+
+                    # Record success with stats
+                    self._stats.record_success(_job_elapsed, confidence=confidence or 'high')
 
                     # Success: acknowledge job and record with circuit breaker
                     ack_job(self.queue, item)
                     self.circuit_breaker.record_success()
                     log_info(f"Job {pqid} completed")
 
-                    # Periodic DLQ and cache status logging
+                    # Periodic batch summary and cache status logging
                     self._jobs_since_dlq_log += 1
                     if self._jobs_since_dlq_log >= self._dlq_log_interval:
-                        self._log_dlq_status()
+                        self._log_batch_summary()
                         self._log_cache_stats()
                         self._jobs_since_dlq_log = 0
 
+                        # Save stats periodically
+                        if self.data_dir is not None:
+                            stats_path = os.path.join(self.data_dir, 'stats.json')
+                            self._stats.save_to_file(stats_path)
+
                 except TransientError as e:
+                    _job_elapsed = time.perf_counter() - _job_start
                     # Record failure with circuit breaker
                     self.circuit_breaker.record_failure()
                     if self.circuit_breaker.state == CircuitState.OPEN:
@@ -299,22 +318,28 @@ class SyncWorker:
                         log_warn(f"Job {pqid} exceeded max retries ({max_retries}), moving to DLQ")
                         fail_job(self.queue, item)
                         self.dlq.add(job, e, job_retry_count)
+                        self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
                     else:
                         delay = job.get('next_retry_at', 0) - time.time()
                         log_debug(f"Job {pqid} failed (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s: {e}")
                         self._requeue_with_metadata(job)
+                        self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=False)
 
                 except PermanentError as e:
+                    _job_elapsed = time.perf_counter() - _job_start
                     # Permanent error: move to DLQ immediately (doesn't count against circuit)
                     log_error(f"Job {pqid} permanent failure, moving to DLQ: {e}")
                     fail_job(self.queue, item)
                     self.dlq.add(item, e, item.get('retry_count', 0))
+                    self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
 
                 except Exception as e:
+                    _job_elapsed = time.perf_counter() - _job_start
                     # Unknown error: treat as transient with circuit breaker
                     self.circuit_breaker.record_failure()
                     log_warn(f"Job {pqid} unexpected error (treating as transient): {e}")
                     nack_job(self.queue, item)
+                    self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=False)
 
             except Exception as e:
                 # Worker loop error: log and continue
@@ -414,7 +439,7 @@ class SyncWorker:
                 hit_rate = stats['hits'] / total * 100
                 log_info(f"Match cache: {hit_rate:.1f}% hit rate ({stats['hits']} hits, {stats['misses']} misses)")
 
-    def _process_job(self, job: dict):
+    def _process_job(self, job: dict) -> Optional[str]:
         """
         Process a sync job by updating Plex metadata.
 
@@ -426,6 +451,9 @@ class SyncWorker:
                 - scene_id: Stash scene ID
                 - update_type: Type of update (e.g., 'metadata')
                 - data: Dict containing 'path' and metadata fields
+
+        Returns:
+            Match confidence level ('high' or 'low'), or None if job failed
 
         Raises:
             TransientError: For retry-able errors (network, timeout)
@@ -489,14 +517,17 @@ class SyncWorker:
                     unique_candidates.append(c)
 
             # Apply confidence scoring
+            confidence = None
             if len(unique_candidates) == 0:
                 raise PlexNotFound(f"Could not find Plex item for path: {file_path}")
             elif len(unique_candidates) == 1:
                 # HIGH confidence - single unique match
+                confidence = 'high'
                 plex_item = unique_candidates[0]
                 self._update_metadata(plex_item, data)
             else:
                 # LOW confidence - multiple matches
+                confidence = 'low'
                 paths = [c.media[0].parts[0].file if c.media and c.media[0].parts else c.key for c in unique_candidates]
                 if self.config.strict_matching:
                     logger.warning(
@@ -527,6 +558,8 @@ class SyncWorker:
                 log_info(f"_process_job took {_elapsed:.3f}s")
             else:
                 log_trace(f"_process_job took {_elapsed:.3f}s")
+
+            return confidence
 
         except (PlexTemporaryError, PlexPermanentError, PlexNotFound):
             unmark_scene_pending(scene_id)  # Allow re-enqueue on next hook
