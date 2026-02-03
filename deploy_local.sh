@@ -9,8 +9,9 @@ PLUGIN_PATH="/config/plugins/test/PlexSync"
 
 echo "Deploying PlexSync.py to $CONTAINER:$PLUGIN_PATH..."
 
-# Copy the main script
+# Copy the main script and manifest
 docker cp "$SCRIPT_DIR/PlexSync.py" "$CONTAINER:$PLUGIN_PATH/PlexSync.py"
+docker cp "$SCRIPT_DIR/PlexSync.yml" "$CONTAINER:$PLUGIN_PATH/PlexSync.yml"
 
 # Copy all module directories
 for dir in sync_queue worker hooks validation plex; do
