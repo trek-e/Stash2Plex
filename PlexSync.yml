@@ -1,7 +1,7 @@
 name: PlexSync
 description: Sync metadata from Stash to Plex with queue-based reliability
 version: 1.0.0
-url: https://github.com/stashapp/CommunityScripts/tree/main/plugins/PlexSync
+url: https://github.com/trek-e/PlexSync
 
 exec:
   - python3
