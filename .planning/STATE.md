@@ -9,28 +9,26 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: Ready for v1.2 planning
+Phase: 11 of 13 (Queue Management UI)
 Plan: Not started
-Status: Milestone v1.1 complete
-Last activity: 2026-02-03 — v1.1 milestone archived
+Status: Ready to plan
+Last activity: 2026-02-03 — Milestone v1.2 initialized
 
-Progress: v1.0 complete, v1.1 complete, v1.2 planned
+Progress: [░░░░░░░░░░░░░░░░░░░░] 0% (0/3 phases)
 
 ## Decisions Log
 
 See PROJECT.md Key Decisions table for full history.
 
-Recent v1.1 decisions:
-- 80% coverage threshold enforced via --cov-fail-under
-- 1-hour TTL for library cache, no TTL for match cache
+Recent decisions carried from v1.1:
 - LOCKED: Missing fields clear Plex values
 - All sync toggles default True for backward compatibility
 
 ## Roadmap Evolution
 
-- v1.0: Phases 1-5 (queue, validation, plex client, processor, late updates)
-- v1.1: Phases 1-10 + 2.1 (testing, docs, performance, observability, reliability, toggles)
-- v1.2: Phases 11-13 (queue management UI, process queue button, dynamic timeout)
+- v1.0: Phases 1-5 (queue, validation, plex client, processor, late updates) — archived
+- v1.1: Phases 1-10 + 2.1 (testing, docs, performance, observability, reliability, toggles) — archived
+- v1.2: Phases 11-13 (queue management UI, process queue button, dynamic timeout) — active
 
 ## Milestone Summary
 
@@ -40,34 +38,25 @@ See .planning/milestones/v1.0-ROADMAP.md
 
 ### v1.1 Foundation Hardening (Complete 2026-02-03)
 
-**Stats:**
-- 11 phases (1-10 + 2.1), 27 plans
-- 136 commits
-- 34,734 lines added
-- 18,904 total lines Python
+See .planning/milestones/v1.1-ROADMAP.md
 
-**Accomplishments:**
-1. **Testing Infrastructure** - pytest with 500+ tests, >80% coverage
-2. **Documentation Suite** - User guide, architecture docs, API reference (MkDocs)
-3. **Performance Caching** - Disk-backed library and match caching (diskcache)
-4. **Observability** - SyncStats, batch summary logging, JSON metrics
-5. **Reliability Hardening** - Field limits, partial failure recovery, response validation
-6. **Metadata Sync Toggles** - Enable/disable each field category
-7. **Device Identity** - Persistent UUID eliminates "new device" notifications
+### v1.2 Queue UI Improvements (Active)
 
-**Archived to:** .planning/milestones/v1.1-ROADMAP.md
+**Target:**
+- Phase 11: Queue Management UI (5 requirements)
+- Phase 12: Process Queue Button (4 requirements)
+- Phase 13: Dynamic Queue Timeout (5 requirements)
+
+**Total:** 14 requirements across 3 phases
 
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Milestone v1.1 complete
+Stopped at: Milestone v1.2 initialized
 Resume file: None
 
 ## Next Steps
 
-Ready for v1.2 planning. Remaining phases:
-- Phase 11: Queue Management UI
-- Phase 12: Process Queue Button
-- Phase 13: Dynamic Queue Timeout
+Ready to plan Phase 11: Queue Management UI
 
-Run `/gsd:new-milestone` to start v1.2.
+Run `/gsd:plan-phase 11` to create execution plan.
