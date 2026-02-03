@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 2 of 11 (Core Unit Tests) - In Progress
-Plan: 1 of 4 complete
-Status: 02-01 sync_queue tests complete
-Last activity: 2026-02-03 - Completed 02-01-PLAN.md
+Plan: 3 of 4 complete
+Status: 02-03 plex tests complete
+Last activity: 2026-02-03 - Completed 02-03-PLAN.md
 
-Progress: [███░░░░░░░░░░░░░] 15% (1.25/10 phases complete)
+Progress: [███░░░░░░░░░░░░░] 18% (1.75/10 phases complete)
 
 ## Decisions Log
 
@@ -29,6 +29,8 @@ Progress: [███░░░░░░░░░░░░░] 15% (1.25/10 phases
 | 2026-02-03 | 02-01 | tmp_path for SQLite tests | Fresh database per test prevents cross-test pollution |
 | 2026-02-03 | 02-01 | Real SQLiteAckQueue | More confident tests vs mocking complex queue behavior |
 | 2026-02-03 | 02-01 | models.py in operations tests | create_sync_job closely related to enqueue operations |
+| 2026-02-03 | 02-03 | create_mock_plex_item helper | Consistent mock Plex item creation across tests |
+| 2026-02-03 | 02-03 | Parametrized HTTP status tests | Clean coverage of all status code translations |
 
 ## Roadmap Evolution
 
@@ -81,22 +83,22 @@ Progress: [███░░░░░░░░░░░░░] 15% (1.25/10 phases
 ### v1.1 Phase 2: Core Unit Tests (In Progress)
 
 **Stats:**
-- 1 of 4 plans complete
-- 3 commits for 02-01
-- 3 test files created
+- 3 of 4 plans complete
+- 9 commits total (02-01: 3, 02-02: 3, 02-03: 3)
+- 9 test files created
 
 **Accomplishments:**
 1. **sync_queue tests** - 67 tests, 89% coverage (02-01)
+2. **validation tests** - tests for metadata and config validation (02-02)
+3. **plex tests** - 105 tests, 94% coverage (02-03)
 
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 02-01-PLAN.md
+Stopped at: Completed 02-03-PLAN.md
 Resume file: None
 
 ## Next Steps
 
-Phase 2 Plan 1 (sync_queue tests) complete. Ready for:
-- 02-02: validation module tests
-- 02-03: plex module tests
-- 02-04: hooks module tests
+Phase 2 Plan 3 (plex tests) complete. Ready for:
+- 02-04: hooks module tests (final plan in Phase 2)
