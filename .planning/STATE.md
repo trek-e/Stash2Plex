@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 7 of 13 (Performance Optimization) - In progress
-Plan: 1 of 3 complete
+Plan: 2 of 3 complete
 Status: In progress
-Last activity: 2026-02-03 - Completed 07-01-PLAN.md
+Last activity: 2026-02-03 - Completed 07-02-PLAN.md
 
-Progress: [█████████░░░░░░░] 58% (7/12 plan groups complete)
+Progress: [██████████░░░░░░] 67% (8/12 plan groups complete)
 
 ## Decisions Log
 
@@ -68,6 +68,10 @@ Progress: [█████████░░░░░░░] 58% (7/12 plan grou
 | 2026-02-03 | 07-01 | 1-hour TTL for library data | Balances freshness vs API call reduction per RESEARCH.md |
 | 2026-02-03 | 07-01 | 100MB default cache size limit | Prevents unbounded growth, configurable |
 | 2026-02-03 | 07-01 | Session-level stats tracking | Custom hit/miss counters for monitoring cache effectiveness |
+| 2026-02-03 | 07-02 | No TTL for match cache | File paths stable, invalidate manually or on failure |
+| 2026-02-03 | 07-02 | Case-insensitive path keys | Lowercase paths in cache for Windows/macOS consistency |
+| 2026-02-03 | 07-02 | Store only Plex key | fetchItem(key) is 1 API call vs N for search |
+| 2026-02-03 | 07-02 | Optional cache params | Backward compatible, functions work without caches |
 
 ## Roadmap Evolution
 
@@ -198,28 +202,31 @@ Progress: [█████████░░░░░░░] 58% (7/12 plan grou
 ### v1.1 Phase 7: Performance Optimization (In Progress)
 
 **Stats:**
-- 1 of 3 plans complete
-- 3 commits
-- 3 files created/modified
+- 2 of 3 plans complete
+- 6 commits
+- 7 files created/modified
 
 **Accomplishments:**
 1. **Caching infrastructure** - PlexCache class with diskcache for SQLite-backed storage (07-01)
 2. **TTL expiration** - 1-hour default for library and search data
 3. **Memory-safe design** - Store only essential item data (key, title, file_paths)
+4. **Match result caching** - MatchCache class for path-to-key mappings with no TTL (07-02)
+5. **Cache-integrated matcher** - find_plex_items_with_confidence accepts optional cache params (07-02)
+6. **Stale cache detection** - Auto-invalidate on fetchItem failure (07-02)
 
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 07-01-PLAN.md
+Stopped at: Completed 07-02-PLAN.md
 Resume file: None
 
 ## Next Steps
 
-Phase 7 Plan 1 (Caching Infrastructure) complete:
-- PlexCache class with diskcache backend
-- TTL-based expiration for library data
-- 30 unit tests with 96% coverage
+Phase 7 Plan 2 (Match Result Caching) complete:
+- MatchCache class for path-to-key mappings (no TTL)
+- Cache-integrated matcher with optional cache parameters
+- Stale cache auto-invalidation on fetchItem failure
+- 65 tests covering cache and matcher integration
 
 Next plans:
-- 07-02: Integrate caching with PlexClient
-- 07-03: Add match result caching and invalidation
+- 07-03: Integrate caching into worker pipeline
