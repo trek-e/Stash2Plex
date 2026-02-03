@@ -66,3 +66,44 @@ settings:
     displayName: Read Timeout
     description: "Plex read timeout in seconds (default: 30)"
     type: NUMBER
+  # ----- Field Sync Settings -----
+  sync_master:
+    displayName: "Enable Field Sync"
+    description: "Master toggle - when OFF, no metadata fields are synced"
+    type: BOOLEAN
+  sync_studio:
+    displayName: "Sync Studio"
+    description: "Sync studio name from Stash to Plex"
+    type: BOOLEAN
+  sync_summary:
+    displayName: "Sync Summary"
+    description: "Sync description/details from Stash to Plex"
+    type: BOOLEAN
+  sync_tagline:
+    displayName: "Sync Tagline"
+    description: "Sync tagline from Stash to Plex"
+    type: BOOLEAN
+  sync_date:
+    displayName: "Sync Date"
+    description: "Sync release date from Stash to Plex"
+    type: BOOLEAN
+  sync_performers:
+    displayName: "Sync Performers"
+    description: "Sync performers as actors in Plex"
+    type: BOOLEAN
+  sync_tags:
+    displayName: "Sync Tags"
+    description: "Sync tags as genres in Plex"
+    type: BOOLEAN
+  sync_poster:
+    displayName: "Sync Poster"
+    description: "Sync poster image from Stash to Plex"
+    type: BOOLEAN
+  sync_background:
+    displayName: "Sync Background"
+    description: "Sync background/fanart image from Stash to Plex"
+    type: BOOLEAN
+  sync_collection:
+    displayName: "Sync Collection"
+    description: "Add items to Plex collection based on studio name"
+    type: BOOLEAN
