@@ -6,20 +6,21 @@ Focus: Comprehensive testing, thorough documentation, then performance/observabi
 
 ## Phases
 
-### Phase 1: Testing Infrastructure
+### Phase 1: Testing Infrastructure ✓
 **Goal:** pytest setup with fixtures for mocking Plex/Stash APIs
-**Plans:** 2 plans
+**Plans:** 2 plans (complete)
+**Completed:** 2026-02-03
 
 - pytest configuration (pytest.ini, conftest.py)
 - Mock fixtures for PlexServer, StashInterface
 - Test directory structure mirroring source
 - Coverage reporting setup (pytest-cov)
 
-**Success:** `pytest` runs with mock infrastructure ready
+**Success:** `pytest` runs with mock infrastructure ready ✓
 
 Plans:
-- [ ] 01-01-PLAN.md — pytest.ini and requirements-dev.txt configuration
-- [ ] 01-02-PLAN.md — conftest.py fixtures and test directory structure
+- [x] 01-01-PLAN.md — pytest.ini and requirements-dev.txt configuration
+- [x] 01-02-PLAN.md — conftest.py fixtures and test directory structure
 
 ---
 
