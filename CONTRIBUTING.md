@@ -8,7 +8,7 @@ For an overview of the codebase architecture, see [docs/ARCHITECTURE.md](docs/AR
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/your-username/PlexSync.git
+   git clone https://github.com/trek-e/PlexSync.git
    cd PlexSync
    ```
 

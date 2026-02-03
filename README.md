@@ -2,6 +2,10 @@
 
 Sync metadata from Stash to Plex with queue-based reliability.
 
+[![Tests](https://img.shields.io/badge/tests-500%2B-brightgreen)](tests/)
+[![Coverage](https://img.shields.io/badge/coverage-%3E80%25-brightgreen)](pytest.ini)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+
 ## Overview
 
 PlexSync is a Stash plugin that automatically syncs scene metadata from Stash to Plex. When you update a scene in Stash (title, studio, performers, tags), PlexSync queues the change and syncs it to the matching item in your Plex library.
@@ -12,6 +16,9 @@ PlexSync is a Stash plugin that automatically syncs scene metadata from Stash to
 - **Automatic retry** - Failed syncs retry with exponential backoff
 - **Circuit breaker** - Protects Plex from being hammered when it's down
 - **Crash recovery** - In-progress jobs automatically resume after restart
+- **Performance caching** - Reduces Plex API calls with disk-backed caching
+- **Selective sync** - Toggle which metadata fields sync to Plex
+- **Sync statistics** - Track success rates and timing with batch summaries
 
 **Use PlexSync if you:**
 
@@ -46,7 +53,7 @@ Alternatively, see [Plex's official guide](https://support.plex.tv/articles/2040
    git clone https://github.com/trek-e/PlexSync.git
    ```
 
-   Or download and extract the ZIP from the releases page.
+   Or download and extract the ZIP from the [releases page](https://github.com/trek-e/PlexSync/releases).
 
 2. **Reload plugins** in Stash:
 
@@ -82,6 +89,8 @@ That's it! PlexSync is now syncing metadata from Stash to Plex.
 - [Installation Guide](docs/install.md) - Full setup instructions including Docker
 - [Configuration Reference](docs/config.md) - All settings explained
 - [Troubleshooting](docs/troubleshoot.md) - Common issues and solutions
+- [Architecture](docs/ARCHITECTURE.md) - System design and data flow
+- [Changelog](CHANGELOG.md) - Version history
 
 ## Requirements
 
@@ -93,8 +102,11 @@ That's it! PlexSync is now syncing metadata from Stash to Plex.
   - `pydantic` - Data validation
   - `tenacity` - Retry logic
   - `persistqueue` - SQLite-backed queue
+  - `diskcache` - Performance caching
 
 ## Settings Reference
+
+### Core Settings
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
@@ -102,12 +114,40 @@ That's it! PlexSync is now syncing metadata from Stash to Plex.
 | `plex_token` | string | - | Plex authentication token (required) |
 | `plex_library` | string | - | Plex library name (recommended) |
 | `enabled` | boolean | `true` | Enable/disable the plugin |
+
+### Behavior Settings
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
 | `max_retries` | number | `5` | Max retry attempts before DLQ |
 | `poll_interval` | number | `30` | Seconds between queue polls |
 | `strict_matching` | boolean | `true` | Skip sync when multiple matches found |
 | `preserve_plex_edits` | boolean | `false` | Don't overwrite existing Plex values |
 | `connect_timeout` | number | `5` | Plex connection timeout (seconds) |
 | `read_timeout` | number | `30` | Plex read timeout (seconds) |
+
+### Field Sync Toggles
+
+Control which metadata fields sync from Stash to Plex. All enabled by default.
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `sync_master` | boolean | `true` | Master toggle - when OFF, no fields sync |
+| `sync_studio` | boolean | `true` | Sync studio name |
+| `sync_summary` | boolean | `true` | Sync summary/details |
+| `sync_tagline` | boolean | `true` | Sync tagline |
+| `sync_date` | boolean | `true` | Sync release date |
+| `sync_performers` | boolean | `true` | Sync performers as actors |
+| `sync_tags` | boolean | `true` | Sync tags as genres |
+| `sync_poster` | boolean | `true` | Sync poster image |
+| `sync_background` | boolean | `true` | Sync background/fanart image |
+| `sync_collection` | boolean | `true` | Add to collection by studio name |
+
+See [Configuration Reference](docs/config.md) for detailed documentation of all settings.
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 
 ## License
 
