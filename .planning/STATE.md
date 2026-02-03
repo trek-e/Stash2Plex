@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 9 of 13 (Reliability Hardening)
-Plan: 1 of 1 complete
+Plan: 2 of 2 complete
 Status: Phase complete
-Last activity: 2026-02-03 - Completed 09-01-PLAN.md
+Last activity: 2026-02-03 - Completed 09-02-PLAN.md
 
-Progress: [████████████████] 100% (12/12 plan groups complete)
+Progress: [████████████████] 100% (13/13 plan groups complete)
 
 ## Decisions Log
 
@@ -85,6 +85,10 @@ Progress: [████████████████] 100% (12/12 plan gr
 | 2026-02-03 | 09-01 | MAX_PERFORMERS=50, MAX_TAGS=50 | Conservative limits for Plex list fields |
 | 2026-02-03 | 09-01 | strip_emoji=False by default | Preserve emojis unless explicitly requested |
 | 2026-02-03 | 09-01 | Field-not-in-data preserves | Only clear when key exists with None/empty value |
+| 2026-02-03 | 09-02 | Non-critical fields: performers, tags, poster, background, collection | Failures add warnings, don't fail job |
+| 2026-02-03 | 09-02 | Critical fields propagate errors | Core metadata edit failures still fail the job |
+| 2026-02-03 | 09-02 | Response validation at debug level | Mismatches may be expected due to sanitization |
+| 2026-02-03 | 09-02 | _update_metadata returns PartialSyncResult | Allows callers to inspect per-field status |
 
 ## Roadmap Evolution
 
@@ -249,9 +253,9 @@ Progress: [████████████████] 100% (12/12 plan gr
 ### v1.1 Phase 9: Reliability Hardening (Complete 2026-02-03)
 
 **Stats:**
-- 1 of 1 plan complete
-- 3 commits
-- 7 files created/modified
+- 2 of 2 plans complete
+- 6 commits (09-01: 3, 09-02: 3)
+- 12 files created/modified
 
 **Accomplishments:**
 1. **Field limits module** - validation/limits.py with MAX_TITLE_LENGTH, MAX_PERFORMERS, etc. (09-01)
@@ -259,11 +263,15 @@ Progress: [████████████████] 100% (12/12 plan gr
 3. **LOCKED missing field handling** - None/empty clears Plex values, absent preserves (09-01)
 4. **List truncation** - Performers/tags limited with warning logs (09-01)
 5. **19 integration tests** - Clearing, limits, and emoji scenario coverage (09-01)
+6. **FieldUpdateWarning and PartialSyncResult** - Dataclasses for partial sync tracking (09-02)
+7. **Granular per-field error handling** - Non-critical field failures add warnings (09-02)
+8. **Response validation** - _validate_edit_result detects silent API failures (09-02)
+9. **31 new tests** - Unit and integration tests for partial failure recovery (09-02)
 
 ## Session Continuity
 
-Last session: 2026-02-03 18:30 UTC
-Stopped at: Completed 09-01-PLAN.md
+Last session: 2026-02-03 18:26 UTC
+Stopped at: Completed 09-02-PLAN.md
 Resume file: None
 
 ## Next Steps
