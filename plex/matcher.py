@@ -145,23 +145,26 @@ def find_plex_items_with_confidence(
     Raises:
         PlexNotFound: When no matching items found (allows retry logic)
     """
+    import sys
     from plex.exceptions import PlexNotFound
 
     # Extract just the filename
     filename = Path(stash_path).name
     filename_lower = filename.lower()
 
-    logger.debug(f"Searching for filename: {filename}")
+    print(f"[PlexSync Matcher] Searching library '{library.title}' for filename: {filename}", file=sys.stderr)
 
     candidates = []
     try:
+        print(f"[PlexSync Matcher] Fetching all items from library...", file=sys.stderr)
         all_items = library.all()
+        print(f"[PlexSync Matcher] Got {len(all_items)} items, scanning for match...", file=sys.stderr)
         for item in all_items:
             if _item_has_file(item, filename_lower, exact=False, case_insensitive=True):
                 candidates.append(item)
-                logger.debug(f"Found filename match: {filename}")
+                print(f"[PlexSync Matcher] Found match: {item.title}", file=sys.stderr)
     except Exception as e:
-        logger.warning(f"Filename search failed: {e}")
+        print(f"[PlexSync Matcher] Filename search failed: {e}", file=sys.stderr)
 
     # Scoring logic
     if len(candidates) == 0:
