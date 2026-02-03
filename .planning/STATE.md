@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 8 of 13 (Observability Improvements)
-Plan: 2 of 2 complete
+Phase: 9 of 13 (Reliability Hardening)
+Plan: 1 of 1 complete
 Status: Phase complete
-Last activity: 2026-02-03 - Completed 08-02-PLAN.md
+Last activity: 2026-02-03 - Completed 09-01-PLAN.md
 
-Progress: [██████████████░░] 88% (11/12 plan groups complete)
+Progress: [████████████████] 100% (12/12 plan groups complete)
 
 ## Decisions Log
 
@@ -81,6 +81,10 @@ Progress: [██████████████░░] 88% (11/12 plan gro
 | 2026-02-03 | 08-02 | _process_job returns confidence | Returns 'high' or 'low' for single/multiple matches |
 | 2026-02-03 | 08-02 | Batch summary replaces _log_dlq_status | _log_batch_summary includes DLQ via get_error_summary(), kept _log_dlq_status for startup |
 | 2026-02-03 | 08-02 | JSON stats in batch summary | Machine-parseable JSON line for log aggregation tools |
+| 2026-02-03 | 09-01 | LOCKED: Missing fields clear Plex values | User decision: None/empty in data clears existing Plex value |
+| 2026-02-03 | 09-01 | MAX_PERFORMERS=50, MAX_TAGS=50 | Conservative limits for Plex list fields |
+| 2026-02-03 | 09-01 | strip_emoji=False by default | Preserve emojis unless explicitly requested |
+| 2026-02-03 | 09-01 | Field-not-in-data preserves | Only clear when key exists with None/empty value |
 
 ## Roadmap Evolution
 
@@ -242,16 +246,30 @@ Progress: [██████████████░░] 88% (11/12 plan gro
 6. **DLQ breakdown in logs** - Error type aggregation in batch summary (08-02)
 7. **71 new tests** - 44 for SyncStats, 4 for DLQ, 17 for processor stats, 6 integration
 
+### v1.1 Phase 9: Reliability Hardening (Complete 2026-02-03)
+
+**Stats:**
+- 1 of 1 plan complete
+- 3 commits
+- 7 files created/modified
+
+**Accomplishments:**
+1. **Field limits module** - validation/limits.py with MAX_TITLE_LENGTH, MAX_PERFORMERS, etc. (09-01)
+2. **Emoji sanitization** - strip_emojis() function in sanitizers.py (09-01)
+3. **LOCKED missing field handling** - None/empty clears Plex values, absent preserves (09-01)
+4. **List truncation** - Performers/tags limited with warning logs (09-01)
+5. **19 integration tests** - Clearing, limits, and emoji scenario coverage (09-01)
+
 ## Session Continuity
 
-Last session: 2026-02-03 18:00 UTC
-Stopped at: Completed 08-02-PLAN.md
+Last session: 2026-02-03 18:30 UTC
+Stopped at: Completed 09-01-PLAN.md
 Resume file: None
 
 ## Next Steps
 
-Phase 8 (Observability Improvements) complete.
+Phase 9 (Reliability Hardening) complete.
 
 Next phases per roadmap:
-- Phase 9: Reliability Hardening
 - Phase 10: Metadata Sync Toggles
+- Phase 11: Queue Management UI
