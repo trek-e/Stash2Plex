@@ -236,5 +236,7 @@ Phase 7 (Performance Optimization) complete:
 - Timing utilities for performance measurement
 - 91 tests covering caching and timing
 
-Next phase:
-- 08: Plex Collection Sync
+Next phases per roadmap:
+- Phase 8: Observability Improvements
+- Phase 9: Reliability Hardening
+- Phase 10: Metadata Sync Toggles
