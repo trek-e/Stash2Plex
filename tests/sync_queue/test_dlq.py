@@ -461,3 +461,67 @@ class TestDeadLetterQueueEdgeCases:
         assert all(r["scene_id"] == 500 for r in recent)
         error_types = {r["error_type"] for r in recent}
         assert error_types == {"ValueError", "RuntimeError"}
+
+
+class TestDeadLetterQueueErrorSummary:
+    """Tests for get_error_summary() method."""
+
+    def test_get_error_summary_returns_empty_dict_for_empty_dlq(self, dlq):
+        """get_error_summary() returns empty dict when DLQ is empty."""
+        result = dlq.get_error_summary()
+
+        assert result == {}
+
+    def test_get_error_summary_returns_correct_counts_by_error_type(self, dlq):
+        """get_error_summary() returns correct counts grouped by error type."""
+        job1 = {"pqid": 1, "scene_id": 100, "data": {}}
+        job2 = {"pqid": 2, "scene_id": 200, "data": {}}
+
+        dlq.add(job1, ValueError("Error 1"), retry_count=1)
+        dlq.add(job2, RuntimeError("Error 2"), retry_count=1)
+
+        result = dlq.get_error_summary()
+
+        assert result == {"ValueError": 1, "RuntimeError": 1}
+
+    def test_get_error_summary_with_multiple_entries_same_type(self, dlq):
+        """get_error_summary() correctly counts multiple entries of same error type."""
+        for i in range(3):
+            job = {"pqid": i, "scene_id": 100 + i, "data": {}}
+            dlq.add(job, ValueError(f"Error {i}"), retry_count=1)
+
+        result = dlq.get_error_summary()
+
+        assert result == {"ValueError": 3}
+
+    def test_get_error_summary_with_multiple_different_error_types(self, dlq):
+        """get_error_summary() correctly aggregates multiple different error types."""
+        # Add 3 PlexNotFound errors
+        for i in range(3):
+            job = {"pqid": i, "scene_id": 100 + i, "data": {}}
+
+            class PlexNotFound(Exception):
+                pass
+
+            dlq.add(job, PlexNotFound(f"Not found {i}"), retry_count=1)
+
+        # Add 2 PermanentError errors
+        for i in range(2):
+            job = {"pqid": 10 + i, "scene_id": 200 + i, "data": {}}
+
+            class PermanentError(Exception):
+                pass
+
+            dlq.add(job, PermanentError(f"Permanent {i}"), retry_count=1)
+
+        # Add 1 TransientError
+        job = {"pqid": 20, "scene_id": 300, "data": {}}
+
+        class TransientError(Exception):
+            pass
+
+        dlq.add(job, TransientError("Transient"), retry_count=1)
+
+        result = dlq.get_error_summary()
+
+        assert result == {"PlexNotFound": 3, "PermanentError": 2, "TransientError": 1}

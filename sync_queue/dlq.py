@@ -164,6 +164,19 @@ class DeadLetterQueue:
 
         log.info(f"Removed {count} DLQ entries older than {days} days")
 
+    def get_error_summary(self) -> dict[str, int]:
+        """
+        Get count of DLQ entries grouped by error type.
+
+        Returns:
+            Dict mapping error_type to count, e.g., {"PlexNotFound": 3, "PermanentError": 2}
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                'SELECT error_type, COUNT(*) as count FROM dead_letters GROUP BY error_type'
+            )
+            return {row[0]: row[1] for row in cursor.fetchall()}
+
 
 if __name__ == "__main__":
     import tempfile
