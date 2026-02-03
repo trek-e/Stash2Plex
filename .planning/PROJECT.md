@@ -10,16 +10,16 @@ Reliable sync: when metadata changes in Stash, it eventually reaches Plex — ev
 
 ## Requirements
 
-### Validated
+### Validated (v1.0)
 
-(None yet — ship to validate)
+- [x] Retry logic when Plex is unavailable (exponential backoff with jitter, circuit breaker)
+- [x] Late update handling — push metadata to Plex when Stash updates after initial sync
+- [x] Input sanitization — validate/clean data before sending to Plex API
+- [x] Improved matching logic — confidence scoring, reduced false negatives
 
 ### Active
 
-- [ ] Retry logic when Plex is unavailable (e.g., during backup)
-- [ ] Late update handling — push metadata to Plex when Stash updates after initial sync
-- [ ] Input sanitization — validate/clean data before sending to Plex API
-- [ ] Improved matching logic — reduce false negatives when finding Plex items for Stash scenes
+(None — v1.0 complete, ready for next milestone)
 
 ### Out of Scope
 
@@ -28,13 +28,7 @@ Reliable sync: when metadata changes in Stash, it eventually reaches Plex — ev
 
 ## Context
 
-**Current state:** PlexSync is a Python plugin from the stashapp/CommunityScripts repo. It fires on Stash scene updates and pushes metadata to Plex.
-
-**Known issues:**
-- If Plex is down (backup, restart), sync fails silently with no retry
-- If Stash hasn't indexed a file when it's first added, the initial sync has no metadata — later updates don't trigger a re-sync
-- Matching logic sometimes misses matches, requiring manual intervention
-- No input validation between systems
+**Current state:** PlexSync v1.0 complete. Queue-based architecture with SQLite persistence, exponential backoff, circuit breaker, confidence-scored matching, and late update detection.
 
 **Source:** https://github.com/stashapp/CommunityScripts/tree/main/plugins/PlexSync
 
@@ -48,6 +42,18 @@ Reliable sync: when metadata changes in Stash, it eventually reaches Plex — ev
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
 | Fork locally for development | Need to test changes against real Stash/Plex setup | — Pending |
+| persist-queue for SQLite queue | Built-in crash recovery vs custom SQLite queue | v1.0 |
+| Job metadata for sync state | Simpler than separate SQLite table | v1.0 |
+| JSON file for timestamps | sync_timestamps.json with atomic writes | v1.0 |
+| In-memory dedup | Resets on restart but meets <100ms hook requirement | v1.0 |
+| Confidence scoring | HIGH/LOW based on match uniqueness | v1.0 |
+| PlexNotFound as transient | Items may appear after library scan | v1.0 |
+
+## Milestones
+
+| Version | Status | Date | Notes |
+|---------|--------|------|-------|
+| v1.0 | Complete | 2026-02-03 | 5 phases, 16 plans, 76 commits |
 
 ---
-*Last updated: 2025-01-24 after initialization*
+*Last updated: 2026-02-03 after v1.0 completion*
