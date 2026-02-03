@@ -980,3 +980,77 @@ class TestOnSceneUpdate:
 
         # Should return False since no file path could be obtained
         assert result is False
+
+    def test_timestamp_fallback_when_updated_at_missing(self, mock_queue, mocker, mock_stash_gql, mock_validated_metadata):
+        """When sync_timestamps exists but updated_at is missing, use current time."""
+        mocker.patch('hooks.handlers.is_scan_running', return_value=False)
+        mock_enqueue = mocker.patch('hooks.handlers.enqueue')
+        mocker.patch('hooks.handlers.validate_metadata', return_value=(mock_validated_metadata, None))
+        mocker.patch('time.time', return_value=2000000000.0)
+
+        # Sync timestamp in past, no updated_at in update_data
+        sync_timestamps = {123: 1000000000.0}
+
+        result = on_scene_update(
+            scene_id=123,
+            update_data={"title": "Test"},  # No updated_at field
+            queue=mock_queue,
+            sync_timestamps=sync_timestamps,
+            stash=mock_stash_gql
+        )
+
+        # Should pass filter since current time (2000000000) > last_synced (1000000000)
+        assert result is True
+        mock_enqueue.assert_called_once()
+
+    def test_stash_without_call_gql_or_callGraphQL(self, mock_queue, mocker):
+        """Stash without call_GQL or _callGraphQL should use find_scene."""
+        mocker.patch('hooks.handlers.is_scan_running', return_value=False)
+        mock_enqueue = mocker.patch('hooks.handlers.enqueue')
+        mocker.patch('hooks.handlers.validate_metadata', return_value=(MagicMock(
+            title="Test Scene", scene_id=123, details=None, rating100=None,
+            date=None, studio=None, performers=None, tags=None
+        ), None))
+
+        # Create a mock stash that has neither call_GQL nor _callGraphQL
+        class MinimalStash:
+            def find_scene(self, scene_id):
+                return {
+                    "id": "123",
+                    "title": "Test Scene",
+                    "files": [{"path": "/media/test.mp4"}],
+                    "studio": None,
+                    "performers": [],
+                    "tags": [],
+                    "paths": {}
+                }
+
+        mock_stash = MinimalStash()
+
+        result = on_scene_update(
+            scene_id=123,
+            update_data={"title": "Test"},
+            queue=mock_queue,
+            stash=mock_stash
+        )
+
+        assert result is True
+        mock_enqueue.assert_called_once()
+
+    def test_validation_returns_none_with_non_title_error(self, mock_queue, mocker, mock_stash_gql):
+        """Validation returning None with non-title error should return False."""
+        mocker.patch('hooks.handlers.is_scan_running', return_value=False)
+        mock_enqueue = mocker.patch('hooks.handlers.enqueue')
+        # Validation returns None (no validated object) with non-title error
+        mocker.patch('hooks.handlers.validate_metadata', return_value=(None, "invalid date format"))
+
+        result = on_scene_update(
+            scene_id=123,
+            update_data={"title": "Test", "date": "not-a-date"},
+            queue=mock_queue,
+            stash=mock_stash_gql
+        )
+
+        # Should return False because validated is None (line 347)
+        assert result is False
+        mock_enqueue.assert_not_called()
