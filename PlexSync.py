@@ -434,20 +434,26 @@ def main():
         max_wait = 30
         wait_interval = 0.5
         waited = 0
+        last_logged_size = -1
         while waited < max_wait:
             try:
                 # Check if queue has pending items
-                if queue.size == 0:
-                    print(f"[PlexSync] Queue empty, exiting after {waited:.1f}s", file=sys.stderr)
+                size = queue.size
+                if size == 0:
                     break
-                print(f"[PlexSync] Queue has {queue.size} items, waiting...", file=sys.stderr)
+                # Only log on first check or if queue is growing (backlog)
+                if last_logged_size == -1:
+                    print(f"[PlexSync] Processing {size} queued item(s)...", file=sys.stderr)
+                elif size > last_logged_size:
+                    print(f"[PlexSync] Queue backlog: {size} items", file=sys.stderr)
+                last_logged_size = size
                 time.sleep(wait_interval)
                 waited += wait_interval
             except Exception as e:
                 print(f"[PlexSync] Error checking queue: {e}", file=sys.stderr)
                 break
         if waited >= max_wait:
-            print(f"[PlexSync] Timeout waiting for queue to drain", file=sys.stderr)
+            print(f"[PlexSync] Timeout waiting for queue ({queue.size} items remaining)", file=sys.stderr)
 
     # Return empty response (success)
     print("[PlexSync] Returning ok response", file=sys.stderr)
