@@ -157,9 +157,10 @@ Plans:
 
 ---
 
-### Phase 8: Observability Improvements
+### Phase 8: Observability Improvements ✓
 **Goal:** Better visibility into sync operations - diagnose sync issues from logs alone
-**Plans:** 2 plans
+**Plans:** 2 plans (complete)
+**Completed:** 2026-02-03
 
 - SyncStats dataclass for metrics tracking (success/fail counts, timing, confidence)
 - DLQ error aggregation by type
@@ -167,11 +168,11 @@ Plans:
 - JSON-formatted stats for machine parsing
 - Stats persistence to `{data_dir}/stats.json`
 
-**Success:** Can diagnose sync issues from logs alone
+**Success:** Can diagnose sync issues from logs alone ✓
 
 Plans:
-- [ ] 08-01-PLAN.md — Stats infrastructure (SyncStats dataclass, DLQ error summary)
-- [ ] 08-02-PLAN.md — Stats integration and batch summary logging
+- [x] 08-01-PLAN.md — Stats infrastructure (SyncStats dataclass, DLQ error summary)
+- [x] 08-02-PLAN.md — Stats integration and batch summary logging
 
 ---
 
