@@ -156,17 +156,19 @@ def on_scene_update(
                 scene_data['date'] = scene.get('date')
                 scene_data['rating100'] = scene.get('rating100')
 
-                # Get studio name
+                # Get studio name - debug raw value
                 studio = scene.get('studio')
+                print(f"[PlexSync] Scene {scene_id} raw studio: {studio}", file=sys.stderr)
                 if studio:
                     scene_data['studio'] = studio.get('name')
-                    print(f"[PlexSync] Scene {scene_id} studio: {scene_data['studio']}", file=sys.stderr)
+                    print(f"[PlexSync] Scene {scene_id} studio name: {scene_data['studio']}", file=sys.stderr)
 
-                # Get performer names
+                # Get performer names - debug raw value
                 performers = scene.get('performers', [])
+                print(f"[PlexSync] Scene {scene_id} raw performers: {performers}", file=sys.stderr)
                 if performers:
                     scene_data['performers'] = [p.get('name') for p in performers if p.get('name')]
-                    print(f"[PlexSync] Scene {scene_id} performers: {scene_data['performers']}", file=sys.stderr)
+                    print(f"[PlexSync] Scene {scene_id} performer names: {scene_data['performers']}", file=sys.stderr)
 
                 # Get tag names
                 tags = scene.get('tags', [])
