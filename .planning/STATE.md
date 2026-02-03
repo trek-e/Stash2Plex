@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 3 of 11 (Integration Tests) - In progress
-Plan: 1 of 4 complete
-Status: Integration test infrastructure ready
-Last activity: 2026-02-03 - Completed 03-01-PLAN.md
+Plan: 2 of 4 complete
+Status: Sync workflow integration tests complete
+Last activity: 2026-02-03 - Completed 03-02-PLAN.md
 
-Progress: [█████░░░░░░░░░░░] 27% (3/11 phases complete + 1 plan in Phase 3)
+Progress: [█████░░░░░░░░░░░] 29% (3/11 phases complete + 2 plans in Phase 3)
 
 ## Decisions Log
 
@@ -41,6 +41,8 @@ Progress: [█████░░░░░░░░░░░] 27% (3/11 phases co
 | 2026-02-03 | 02.1-01 | Real plexapi in tests with restore fixture | More reliable than complex mocking of late-bound imports |
 | 2026-02-03 | 03-01 | integration_config extends mock_config | Clean separation of base and integration-specific config attributes |
 | 2026-02-03 | 03-01 | 7 integration fixtures | Provide worker scenarios: success, no-match, connection-error, real queue, sample job, circuit breaker |
+| 2026-02-03 | 03-02 | get_all_edit_kwargs() helper | Processor calls edit() multiple times; helper collects all kwargs for assertions |
+| 2026-02-03 | 03-02 | Test class grouping by feature | TestFullSyncWorkflow, TestPreservePlexEditsMode, TestJobWithMissingFields |
 
 ## Roadmap Evolution
 
@@ -119,23 +121,23 @@ Progress: [█████░░░░░░░░░░░] 27% (3/11 phases co
 ### v1.1 Phase 3: Integration Tests (In Progress)
 
 **Stats:**
-- 1 of 4 plans complete
-- 2 commits
-- 3 files created/modified
+- 2 of 4 plans complete
+- 3 commits
+- 4 files created/modified
 
 **Accomplishments:**
 1. **Integration test dependencies** - freezegun and pytest-timeout added
 2. **Integration fixtures** - 7 fixtures composing unit test mocks
+3. **Sync workflow tests** - 13 tests covering metadata sync, preserve mode, partial data (03-02)
 
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 03-01-PLAN.md (Integration test infrastructure)
+Stopped at: Completed 03-02-PLAN.md (Full sync workflow integration tests)
 Resume file: None
 
 ## Next Steps
 
-Phase 3 Plan 01 complete. Ready for:
-- 03-02: Sync workflow integration tests
+Phase 3 Plan 02 complete. Ready for:
 - 03-03: Error handling integration tests
 - 03-04: Queue persistence integration tests
