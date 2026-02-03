@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 2.1 of 11 (Plex Device Reuse) - Complete
-Plan: 1 of 1 complete
-Status: Phase 2.1 complete - persistent device identity implemented
-Last activity: 2026-02-03 - Completed 02.1-01-PLAN.md
+Phase: 3 of 11 (Integration Tests) - In progress
+Plan: 1 of 4 complete
+Status: Integration test infrastructure ready
+Last activity: 2026-02-03 - Completed 03-01-PLAN.md
 
-Progress: [█████░░░░░░░░░░░] 25% (3/11 phases complete, including 2.1 bugfix)
+Progress: [█████░░░░░░░░░░░] 27% (3/11 phases complete + 1 plan in Phase 3)
 
 ## Decisions Log
 
@@ -39,6 +39,8 @@ Progress: [█████░░░░░░░░░░░] 25% (3/11 phases co
 | 2026-02-03 | 02.1-01 | plexapi imports inside function | Avoids import order issues since plexapi must be configured before PlexServer |
 | 2026-02-03 | 02.1-01 | reset_base_headers() after setting vars | Ensures BASE_HEADERS dict is rebuilt with new identifier values |
 | 2026-02-03 | 02.1-01 | Real plexapi in tests with restore fixture | More reliable than complex mocking of late-bound imports |
+| 2026-02-03 | 03-01 | integration_config extends mock_config | Clean separation of base and integration-specific config attributes |
+| 2026-02-03 | 03-01 | 7 integration fixtures | Provide worker scenarios: success, no-match, connection-error, real queue, sample job, circuit breaker |
 
 ## Roadmap Evolution
 
@@ -46,6 +48,7 @@ Progress: [█████░░░░░░░░░░░] 25% (3/11 phases co
 - Phase 11 added: Queue Management UI (button to delete queue/clear dead items)
 - Phase 12 added: Process Queue Button (manual processing for stalled queues)
 - Phase 2.1 inserted: Fix Plex Device Registration (bugfix - "new device" notifications)
+- Phase 13 added: Dynamic Queue Timeout (timeout based on item count × avg processing time)
 
 ## Milestone Summary
 
@@ -113,13 +116,26 @@ Progress: [█████░░░░░░░░░░░] 25% (3/11 phases co
 2. **plexapi module configuration** - X_PLEX_IDENTIFIER, X_PLEX_PRODUCT, X_PLEX_DEVICE_NAME set before connections
 3. **Eliminates "new device" notifications** - PlexSync appears as "PlexSync Plugin" consistently
 
+### v1.1 Phase 3: Integration Tests (In Progress)
+
+**Stats:**
+- 1 of 4 plans complete
+- 2 commits
+- 3 files created/modified
+
+**Accomplishments:**
+1. **Integration test dependencies** - freezegun and pytest-timeout added
+2. **Integration fixtures** - 7 fixtures composing unit test mocks
+
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 02.1-01-PLAN.md (Phase 2.1 complete)
+Stopped at: Completed 03-01-PLAN.md (Integration test infrastructure)
 Resume file: None
 
 ## Next Steps
 
-Phase 2.1 (Plex Device Reuse) complete and verified. Ready for:
-- Phase 3: Integration Tests
+Phase 3 Plan 01 complete. Ready for:
+- 03-02: Sync workflow integration tests
+- 03-03: Error handling integration tests
+- 03-04: Queue persistence integration tests
