@@ -1,13 +1,8 @@
-# PlexSync Stash Plugin Source
-# Add this URL to Stash: https://trek-e.github.io/PlexSync/index.yml
-# Or use raw GitHub: https://raw.githubusercontent.com/trek-e/PlexSync/main/index.yml
-
 - id: PlexSync
   name: PlexSync
   metadata:
     description: Sync metadata from Stash to Plex with queue-based reliability
-    version: 1.0.0-b426836
-    date: 2026-02-03 00:00:00
-    path: https://github.com/trek-e/PlexSync/releases/download/v1.0.0/PlexSync.zip
-    sha256: 348b87333522a30c15db973f5b6f2636331ae927d06b8adfada61458056df4b7
-    requires: []
+  version: 1.0.0-b426836
+  date: 2026-02-03 00:00:00
+  path: https://github.com/trek-e/PlexSync/releases/download/v1.0.0/PlexSync.zip
+  sha256: 348b87333522a30c15db973f5b6f2636331ae927d06b8adfada61458056df4b7
