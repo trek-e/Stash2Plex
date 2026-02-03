@@ -8,6 +8,7 @@ Implements reliable job processing with acknowledgment workflow:
 - Circuit breaker pauses processing during Plex outages
 """
 
+import os
 import sys
 import time
 import threading
@@ -31,6 +32,7 @@ logger = logging.getLogger('PlexSync.worker')
 if TYPE_CHECKING:
     from validation.config import PlexSyncConfig
     from plex.client import PlexClient
+    from plex.cache import PlexCache, MatchCache
 
 
 class TransientError(Exception):
@@ -80,6 +82,10 @@ class SyncWorker:
         self.running = False
         self.thread: Optional[threading.Thread] = None
         self._plex_client: Optional['PlexClient'] = None
+
+        # Initialize caches (lazy, created on first use)
+        self._library_cache: Optional['PlexCache'] = None
+        self._match_cache: Optional['MatchCache'] = None
 
         # DLQ status logging interval
         self._jobs_since_dlq_log = 0
@@ -271,10 +277,11 @@ class SyncWorker:
                     self.circuit_breaker.record_success()
                     log_info(f"Job {pqid} completed")
 
-                    # Periodic DLQ status logging
+                    # Periodic DLQ and cache status logging
                     self._jobs_since_dlq_log += 1
                     if self._jobs_since_dlq_log >= self._dlq_log_interval:
                         self._log_dlq_status()
+                        self._log_cache_stats()
                         self._jobs_since_dlq_log = 0
 
                 except TransientError as e:
@@ -373,6 +380,40 @@ class SyncWorker:
             )
         return self._plex_client
 
+    def _get_caches(self) -> tuple[Optional['PlexCache'], Optional['MatchCache']]:
+        """
+        Get or create cache instances (lazy initialization).
+
+        Caches are only created when data_dir is set. When data_dir is None,
+        returns (None, None) and processing continues without caching.
+
+        Returns:
+            Tuple of (PlexCache or None, MatchCache or None)
+        """
+        if self._library_cache is None and self.data_dir is not None:
+            from plex.cache import PlexCache, MatchCache
+            cache_dir = os.path.join(self.data_dir, 'cache')
+            self._library_cache = PlexCache(cache_dir)
+            self._match_cache = MatchCache(cache_dir)
+            log_debug(f"Initialized caches at {cache_dir}")
+        return self._library_cache, self._match_cache
+
+    def _log_cache_stats(self):
+        """Log cache hit/miss statistics."""
+        library_cache, match_cache = self._get_caches()
+        if library_cache is not None:
+            stats = library_cache.get_stats()
+            total = stats.get('hits', 0) + stats.get('misses', 0)
+            if total > 0:
+                hit_rate = stats['hits'] / total * 100
+                log_debug(f"Library cache: {hit_rate:.1f}% hit rate ({stats['hits']} hits, {stats['misses']} misses)")
+        if match_cache is not None:
+            stats = match_cache.get_stats()
+            total = stats.get('hits', 0) + stats.get('misses', 0)
+            if total > 0:
+                hit_rate = stats['hits'] / total * 100
+                log_info(f"Match cache: {hit_rate:.1f}% hit rate ({stats['hits']} hits, {stats['misses']} misses)")
+
     def _process_job(self, job: dict):
         """
         Process a sync job by updating Plex metadata.
@@ -419,11 +460,19 @@ class SyncWorker:
                 sections = client.server.library.sections()
                 log_info(f"Searching all {len(sections)} libraries (set plex_library to speed up)")
 
+            # Get caches for optimized matching
+            library_cache, match_cache = self._get_caches()
+
             # Search library sections, collect ALL candidates
             all_candidates = []
             for section in sections:
                 try:
-                    confidence, item, candidates = find_plex_items_with_confidence(section, file_path)
+                    confidence, item, candidates = find_plex_items_with_confidence(
+                        section,
+                        file_path,
+                        library_cache=library_cache,
+                        match_cache=match_cache,
+                    )
                     all_candidates.extend(candidates)
                 except PlexNotFound:
                     continue  # No match in this section, try next
