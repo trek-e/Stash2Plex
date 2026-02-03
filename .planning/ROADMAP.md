@@ -84,6 +84,7 @@ Plans:
 
 ### Phase 4: User Documentation
 **Goal:** Complete user-facing documentation
+**Plans:** 4 plans
 
 - Installation guide (Stash plugin setup)
 - Configuration reference (all settings explained)
@@ -91,6 +92,12 @@ Plans:
 - Quick start tutorial
 
 **Success:** New user can install and configure without external help
+
+Plans:
+- [ ] 04-01-PLAN.md — README.md with overview and quick start
+- [ ] 04-02-PLAN.md — docs/install.md installation guide
+- [ ] 04-03-PLAN.md — docs/config.md configuration reference
+- [ ] 04-04-PLAN.md — docs/troubleshoot.md troubleshooting guide
 
 ---
 
@@ -264,7 +271,7 @@ Note: Phase 2.1 (Bugfix) can run in parallel with Phase 3 - it's independent.
 | 2. Core Unit Tests | High | 4 |
 | 2.1. Plex Device Registration | Low | 1 |
 | 3. Integration Tests | High | 4 |
-| 4. User Documentation | Medium | 2-3 |
+| 4. User Documentation | Medium | 4 |
 | 5. Architecture Docs | Medium | 2-3 |
 | 6. API Documentation | Low | 1-2 |
 | 7. Performance | Medium | 2-3 |
