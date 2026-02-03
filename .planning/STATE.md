@@ -50,6 +50,8 @@ Progress: [██████░░░░░░░░░░] 36% (4/11 phases co
 | 2026-02-03 | 04-01 | AGPL-3.0 license in README | Matches LICENSE file (plan said GPL-3.0 but file is AGPL-3.0) |
 | 2026-02-03 | 04-01 | Settings table in README | Quick reference for users before detailed docs |
 | 2026-02-03 | 04-01 | No screenshots in docs | Per user decision in CONTEXT.md |
+| 2026-02-03 | 04-02 | Two installation methods | Plugin repo (recommended) and manual for flexibility |
+| 2026-02-03 | 04-02 | Docker path mapping emphasis | Critical for matching - paths must be identical between Stash and Plex |
 
 ## Roadmap Evolution
 
@@ -143,25 +145,24 @@ Progress: [██████░░░░░░░░░░] 36% (4/11 phases co
 ### v1.1 Phase 4: User Documentation (In Progress)
 
 **Stats:**
-- 1 of 4 plans complete
-- 2 commits
-- 2 files created
+- 2 of 4 plans complete
+- 3 commits
+- 3 files created
 
 **Accomplishments:**
-1. **README.md** - Project overview, quick start guide, documentation links
-2. **docs/ directory** - Structure prepared for install.md, config.md, troubleshoot.md
+1. **README.md** - Project overview, quick start guide, documentation links (04-01)
+2. **docs/install.md** - Complete installation guide with PythonDepManager, Docker/bare metal (04-02)
 
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 04-01-PLAN.md (README.md and docs/ structure)
+Stopped at: Completed 04-02-PLAN.md (docs/install.md)
 Resume file: None
 
 ## Next Steps
 
-Phase 4 Plan 1 complete. README.md created with quick start guide.
+Phase 4 Plan 2 complete. Installation guide created.
 
 Ready for:
-- 04-02: Installation Guide (docs/install.md)
 - 04-03: Configuration Reference (docs/config.md)
 - 04-04: Troubleshooting Guide (docs/troubleshoot.md)
