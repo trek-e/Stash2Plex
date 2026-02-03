@@ -9,9 +9,10 @@ import time
 from typing import Optional
 
 try:
-    from queue.operations import enqueue
+    from queue.operations import enqueue, load_sync_timestamps
 except ImportError:
     enqueue = None
+    load_sync_timestamps = None
 
 try:
     from validation.metadata import validate_metadata
@@ -75,7 +76,13 @@ def requires_plex_sync(update_data: dict) -> bool:
     return False
 
 
-def on_scene_update(scene_id: int, update_data: dict, queue) -> bool:
+def on_scene_update(
+    scene_id: int,
+    update_data: dict,
+    queue,
+    data_dir: Optional[str] = None,
+    sync_timestamps: Optional[dict[int, float]] = None
+) -> bool:
     """
     Handle scene update event with fast enqueue.
 
@@ -86,6 +93,8 @@ def on_scene_update(scene_id: int, update_data: dict, queue) -> bool:
         scene_id: Stash scene ID
         update_data: Scene update data from hook
         queue: Queue instance for job storage
+        data_dir: Plugin data directory for sync timestamps
+        sync_timestamps: Dict mapping scene_id to last sync timestamp
 
     Returns:
         True if job was enqueued, False if filtered out or validation failed
@@ -95,6 +104,26 @@ def on_scene_update(scene_id: int, update_data: dict, queue) -> bool:
     # Filter non-sync events before enqueueing
     if not requires_plex_sync(update_data):
         print(f"[PlexSync] Scene {scene_id} update filtered (no metadata changes)")
+        return False
+
+    # Filter: Timestamp comparison for late update detection
+    if sync_timestamps is not None:
+        # Try to get updated_at from Stash hook data
+        # Fallback to current time if field missing (Stash may not always provide it)
+        stash_updated_at = update_data.get('updated_at')
+        if stash_updated_at is None:
+            # Stash didn't provide updated_at - use current time as proxy
+            # This means we'll re-sync, which is safe (idempotent)
+            stash_updated_at = time.time()
+
+        last_synced = sync_timestamps.get(scene_id)
+        if last_synced and stash_updated_at <= last_synced:
+            print(f"[PlexSync] Scene {scene_id} already synced (Stash: {stash_updated_at} <= Last: {last_synced})")
+            return False
+
+    # Filter: Queue deduplication using in-memory tracking
+    if is_scene_pending(scene_id):
+        print(f"[PlexSync] Scene {scene_id} already in queue, skipping duplicate")
         return False
 
     # Enqueue job for background processing
@@ -162,6 +191,9 @@ def on_scene_update(scene_id: int, update_data: dict, queue) -> bool:
         # No title in update or validation not available, enqueue as-is
         # (title might be in Stash already, worker can lookup)
         enqueue(queue, scene_id, "metadata", update_data)
+
+    # Mark scene as pending to prevent duplicate enqueues
+    mark_scene_pending(scene_id)
 
     # Calculate elapsed time and warn if over target
     elapsed_ms = (time.time() - start) * 1000
