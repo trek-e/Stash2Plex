@@ -117,6 +117,24 @@ def extract_config_from_input(input_data: dict) -> dict:
     global stash_interface
     config_dict = {}
 
+    # Extract Stash connection info for image fetching
+    server_conn = input_data.get('server_connection', {})
+    if server_conn:
+        scheme = server_conn.get('Scheme', server_conn.get('scheme', 'http'))
+        host = server_conn.get('Host', server_conn.get('host', '127.0.0.1'))
+        port = server_conn.get('Port', server_conn.get('port', 9999))
+        config_dict['stash_url'] = f"{scheme}://{host}:{port}"
+
+        # Get session cookie for authentication
+        session_cookie = server_conn.get('SessionCookie', {})
+        if session_cookie:
+            if isinstance(session_cookie, dict):
+                cookie_name = session_cookie.get('Name', 'session')
+                cookie_value = session_cookie.get('Value', '')
+                config_dict['stash_session_cookie'] = f"{cookie_name}={cookie_value}"
+            else:
+                config_dict['stash_session_cookie'] = str(session_cookie)
+
     # Fetch settings from Stash using stashapi
     stash = get_stash_interface(input_data)
     stash_interface = stash  # Store globally for hook handlers

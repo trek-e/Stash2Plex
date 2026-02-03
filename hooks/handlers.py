@@ -26,6 +26,40 @@ except ImportError:
 _pending_scene_ids: set[int] = set()
 
 
+# GraphQL query for fetching complete scene metadata
+# stashapi's find_scene uses a minimal fragment that only returns id for nested objects
+SCENE_QUERY = """
+query FindScene($id: ID!) {
+    findScene(id: $id) {
+        id
+        title
+        details
+        date
+        rating100
+        files {
+            path
+        }
+        studio {
+            id
+            name
+        }
+        performers {
+            id
+            name
+        }
+        tags {
+            id
+            name
+        }
+        paths {
+            screenshot
+            preview
+        }
+    }
+}
+"""
+
+
 def mark_scene_pending(scene_id: int) -> None:
     """Mark scene as having a pending job in queue."""
     _pending_scene_ids.add(scene_id)
@@ -139,43 +173,55 @@ def on_scene_update(
     scene_data = {}
     if stash:
         try:
-            scene = stash.find_scene(scene_id)
-            if scene:
-                # Debug: log all keys in the scene object
-                print(f"[PlexSync] Scene {scene_id} keys: {list(scene.keys())}", file=sys.stderr)
+            # Use raw GraphQL call for complete metadata (stashapi's find_scene uses minimal fragment)
+            scene = None
+            try:
+                if hasattr(stash, 'call_GQL'):
+                    result = stash.call_GQL(SCENE_QUERY, {"id": scene_id})
+                    scene = result.get("findScene") if result else None
+                elif hasattr(stash, '_callGraphQL'):
+                    result = stash._callGraphQL(SCENE_QUERY, {"id": scene_id})
+                    scene = result.get("findScene") if result else None
+                else:
+                    scene = stash.find_scene(scene_id)
+            except Exception as gql_err:
+                print(f"[PlexSync] GQL call failed: {gql_err}, falling back to find_scene", file=sys.stderr)
+                scene = stash.find_scene(scene_id)
 
+            if scene:
                 # Get file path
                 files = scene.get('files', [])
                 if files:
                     file_path = files[0].get('path')
-                    print(f"[PlexSync] Scene {scene_id} file path: {file_path}", file=sys.stderr)
 
                 # Extract full metadata from scene
                 scene_data['title'] = scene.get('title')
-                scene_data['details'] = scene.get('details')  # summary/description
+                scene_data['details'] = scene.get('details')
                 scene_data['date'] = scene.get('date')
                 scene_data['rating100'] = scene.get('rating100')
 
-                # Get studio name - debug raw value
+                # Get studio name
                 studio = scene.get('studio')
-                print(f"[PlexSync] Scene {scene_id} raw studio: {studio}", file=sys.stderr)
                 if studio:
                     scene_data['studio'] = studio.get('name')
-                    print(f"[PlexSync] Scene {scene_id} studio name: {scene_data['studio']}", file=sys.stderr)
 
-                # Get performer names - debug raw value
+                # Get performer names
                 performers = scene.get('performers', [])
-                print(f"[PlexSync] Scene {scene_id} raw performers: {performers}", file=sys.stderr)
                 if performers:
                     scene_data['performers'] = [p.get('name') for p in performers if p.get('name')]
-                    print(f"[PlexSync] Scene {scene_id} performer names: {scene_data['performers']}", file=sys.stderr)
 
                 # Get tag names
                 tags = scene.get('tags', [])
                 if tags:
                     scene_data['tags'] = [t.get('name') for t in tags if t.get('name')]
 
-                print(f"[PlexSync] Scene {scene_id} metadata: title={scene_data.get('title')}, studio={scene_data.get('studio')}, performers={len(scene_data.get('performers', []))}, details={bool(scene_data.get('details'))}", file=sys.stderr)
+                # Get image paths (poster/background)
+                paths = scene.get('paths', {})
+                if paths:
+                    if paths.get('screenshot'):
+                        scene_data['poster_url'] = paths['screenshot']
+                    if paths.get('preview'):
+                        scene_data['background_url'] = paths['preview']
 
         except Exception as e:
             import traceback

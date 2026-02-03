@@ -307,6 +307,45 @@ class SyncWorker:
                 print(f"[PlexSync Worker] Worker loop error: {e}", file=sys.stderr)
                 time.sleep(1)  # Avoid tight loop on persistent errors
 
+    def _fetch_stash_image(self, url: str) -> Optional[bytes]:
+        """
+        Fetch image from Stash URL.
+
+        Downloads the image bytes so we can upload directly to Plex,
+        avoiding issues with Plex not being able to reach Stash's internal URL.
+
+        Args:
+            url: Stash image URL (screenshot, preview, etc.)
+
+        Returns:
+            Image bytes or None if fetch failed
+        """
+        import urllib.request
+        import urllib.error
+
+        try:
+            # Build request with authentication from Stash connection
+            req = urllib.request.Request(url)
+
+            # Add API key header if available
+            api_key = getattr(self.config, 'stash_api_key', None)
+            if api_key:
+                req.add_header('ApiKey', api_key)
+
+            # Add session cookie if available
+            session_cookie = getattr(self.config, 'stash_session_cookie', None)
+            if session_cookie:
+                req.add_header('Cookie', session_cookie)
+
+            with urllib.request.urlopen(req, timeout=30) as response:
+                return response.read()
+        except urllib.error.URLError as e:
+            print(f"[PlexSync Worker] WARNING: Failed to fetch image from Stash: {e}", file=sys.stderr)
+            return None
+        except Exception as e:
+            print(f"[PlexSync Worker] WARNING: Image fetch error: {e}", file=sys.stderr)
+            return None
+
     def _get_plex_client(self) -> 'PlexClient':
         """
         Get PlexClient with lazy initialization.
@@ -479,4 +518,107 @@ class SyncWorker:
             mode = "preserved" if self.config.preserve_plex_edits else "overwrite"
             print(f"[PlexSync Worker] Updated metadata ({mode} mode): {plex_item.title}", file=sys.stderr)
         else:
-            print(f"[PlexSync Worker] No fields to update for: {plex_item.title}", file=sys.stderr)
+            print(f"[PlexSync Worker] No metadata fields to update for: {plex_item.title}", file=sys.stderr)
+
+        # Sync performers as actors
+        performers = data.get('performers', [])
+        if performers:
+            try:
+                # Get current actors
+                current_actors = [actor.tag for actor in getattr(plex_item, 'actors', [])]
+                new_performers = [p for p in performers if p not in current_actors]
+
+                if new_performers:
+                    # Build actor edit params - each actor needs actor[N].tag.tag format
+                    actor_edits = {}
+                    all_actors = current_actors + new_performers
+                    for i, actor_name in enumerate(all_actors):
+                        actor_edits[f'actor[{i}].tag.tag'] = actor_name
+
+                    plex_item.edit(**actor_edits)
+                    plex_item.reload()
+                    print(f"[PlexSync Worker] Added {len(new_performers)} performers: {new_performers}", file=sys.stderr)
+                else:
+                    print(f"[PlexSync Worker] Performers already in Plex: {performers}", file=sys.stderr)
+            except Exception as e:
+                print(f"[PlexSync Worker] WARNING: Failed to sync performers: {e}", file=sys.stderr)
+
+        # Sync poster image (download from Stash, save to temp file, upload to Plex)
+        poster_url = data.get('poster_url')
+        if poster_url:
+            try:
+                image_data = self._fetch_stash_image(poster_url)
+                if image_data:
+                    import tempfile
+                    import os
+                    with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as f:
+                        f.write(image_data)
+                        temp_path = f.name
+                    try:
+                        plex_item.uploadPoster(filepath=temp_path)
+                        print(f"[PlexSync Worker] Uploaded poster ({len(image_data)} bytes)", file=sys.stderr)
+                    finally:
+                        os.unlink(temp_path)
+            except Exception as e:
+                print(f"[PlexSync Worker] WARNING: Failed to upload poster: {e}", file=sys.stderr)
+
+        # Sync background/art image (download from Stash, save to temp file, upload to Plex)
+        background_url = data.get('background_url')
+        if background_url:
+            try:
+                image_data = self._fetch_stash_image(background_url)
+                if image_data:
+                    import tempfile
+                    import os
+                    with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as f:
+                        f.write(image_data)
+                        temp_path = f.name
+                    try:
+                        plex_item.uploadArt(filepath=temp_path)
+                        print(f"[PlexSync Worker] Uploaded background ({len(image_data)} bytes)", file=sys.stderr)
+                    finally:
+                        os.unlink(temp_path)
+            except Exception as e:
+                print(f"[PlexSync Worker] WARNING: Failed to upload background: {e}", file=sys.stderr)
+
+        # Sync tags as genres
+        tags = data.get('tags', [])
+        if tags:
+            try:
+                current_genres = [g.tag for g in getattr(plex_item, 'genres', [])]
+                new_tags = [t for t in tags if t not in current_genres]
+
+                if new_tags:
+                    # Build genre edit params
+                    genre_edits = {}
+                    all_genres = current_genres + new_tags
+                    for i, genre_name in enumerate(all_genres):
+                        genre_edits[f'genre[{i}].tag.tag'] = genre_name
+
+                    plex_item.edit(**genre_edits)
+                    plex_item.reload()
+                    print(f"[PlexSync Worker] Added {len(new_tags)} tags as genres: {new_tags}", file=sys.stderr)
+                else:
+                    print(f"[PlexSync Worker] Tags already in Plex: {tags}", file=sys.stderr)
+            except Exception as e:
+                print(f"[PlexSync Worker] WARNING: Failed to sync tags: {e}", file=sys.stderr)
+
+        # Add to studio collection
+        studio = data.get('studio')
+        if studio:
+            try:
+                current_collections = [c.tag for c in getattr(plex_item, 'collections', [])]
+                if studio not in current_collections:
+                    # Build collection edit params
+                    collection_edits = {}
+                    all_collections = current_collections + [studio]
+                    for i, coll_name in enumerate(all_collections):
+                        collection_edits[f'collection[{i}].tag.tag'] = coll_name
+
+                    plex_item.edit(**collection_edits)
+                    plex_item.reload()
+                    print(f"[PlexSync Worker] Added to collection: {studio}", file=sys.stderr)
+                else:
+                    print(f"[PlexSync Worker] Already in collection: {studio}", file=sys.stderr)
+            except Exception as e:
+                print(f"[PlexSync Worker] WARNING: Failed to add to collection: {e}", file=sys.stderr)

@@ -63,6 +63,20 @@ class PlexSyncConfig(BaseModel):
         description="Preserve manual Plex edits. True = only update empty fields, False = Stash always wins."
     )
 
+    # Stash connection (for fetching images)
+    stash_url: Optional[str] = Field(
+        default=None,
+        description="Stash server URL (extracted from connection)"
+    )
+    stash_api_key: Optional[str] = Field(
+        default=None,
+        description="Stash API key for authenticated image fetching"
+    )
+    stash_session_cookie: Optional[str] = Field(
+        default=None,
+        description="Stash session cookie for authenticated image fetching"
+    )
+
     @field_validator('plex_url', mode='after')
     @classmethod
     def validate_plex_url(cls, v: str) -> str:
