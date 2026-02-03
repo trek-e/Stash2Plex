@@ -173,25 +173,30 @@ def initialize(config_dict: dict = None):
         raise SystemExit(1)
 
     config = validated_config
-    config.log_config()
+    print(f"[PlexSync] Config assigned, plex_url={config.plex_url}", file=sys.stderr)
 
     # Check if plugin is disabled
     if not config.enabled:
-        print("[PlexSync] Plugin is disabled via configuration")
+        print("[PlexSync] Plugin is disabled via configuration", file=sys.stderr)
         return
 
+    print("[PlexSync] Plugin is enabled, getting data dir...", file=sys.stderr)
     data_dir = get_plugin_data_dir()
-    print(f"[PlexSync] Initializing with data directory: {data_dir}")
+    print(f"[PlexSync] Data dir: {data_dir}", file=sys.stderr)
 
     # Load sync timestamps for late update detection
+    print("[PlexSync] Loading sync timestamps...", file=sys.stderr)
     sync_timestamps = load_sync_timestamps(data_dir)
-    print(f"[PlexSync] Loaded {len(sync_timestamps)} sync timestamps")
+    print(f"[PlexSync] Loaded {len(sync_timestamps)} sync timestamps", file=sys.stderr)
 
     # Initialize queue infrastructure
+    print("[PlexSync] Creating QueueManager...", file=sys.stderr)
     queue_manager = QueueManager(data_dir)
+    print("[PlexSync] Creating DeadLetterQueue...", file=sys.stderr)
     dlq = DeadLetterQueue(data_dir)
 
     # Start background worker with data_dir for timestamp updates
+    print("[PlexSync] Creating SyncWorker...", file=sys.stderr)
     worker = SyncWorker(
         queue_manager.get_queue(),
         dlq,
@@ -199,9 +204,10 @@ def initialize(config_dict: dict = None):
         data_dir=data_dir,
         max_retries=config.max_retries
     )
+    print("[PlexSync] Starting worker...", file=sys.stderr)
     worker.start()
 
-    print("[PlexSync] Initialization complete")
+    print("[PlexSync] Initialization complete", file=sys.stderr)
 
 
 def shutdown():
