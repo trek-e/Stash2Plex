@@ -21,6 +21,8 @@ Requirements for Queue UI Improvements milestone. Each maps to roadmap phases.
 - [ ] **PROC-02**: User can resume/continue processing for large backlogs
 - [ ] **PROC-03**: User sees progress feedback during manual processing
 - [ ] **PROC-04**: System handles long queues that stall due to Stash plugin timeout
+- [ ] **PROC-05**: Worker continues processing until queue is empty (not limited to 30s)
+- [ ] **PROC-06**: System supports batch processing mode for large queues
 
 ### Dynamic Timeout
 

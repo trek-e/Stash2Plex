@@ -450,24 +450,34 @@ def main():
     if worker and queue_manager:
         import time
         queue = queue_manager.get_queue()
-        # Wait up to 30 seconds for queue to drain
-        max_wait = 30
+
+        # Dynamic timeout: ~2 seconds per item, min 30s, max 600s (10 min)
+        initial_size = queue.size
+        max_wait = max(30, min(initial_size * 2, 600))
         wait_interval = 0.5
         waited = 0
+        last_size = initial_size
+
+        if initial_size > 0:
+            log_info(f"Processing {initial_size} queued item(s), timeout {max_wait}s...")
+
         while waited < max_wait:
             try:
                 size = queue.size
                 if size == 0:
                     break
-                if waited == 0:
-                    log_info(f"Processing {size} queued item(s)...")
+                # Log progress every 10 items processed
+                if last_size - size >= 10:
+                    log_info(f"Progress: {initial_size - size}/{initial_size} processed, {size} remaining")
+                    last_size = size
                 time.sleep(wait_interval)
                 waited += wait_interval
             except Exception as e:
                 log_error(f"Error checking queue: {e}")
                 break
-        if waited >= max_wait:
-            log_warn(f"Timeout waiting for queue ({queue.size} items remaining)")
+
+        if waited >= max_wait and queue.size > 0:
+            log_warn(f"Timeout after {max_wait}s ({queue.size} items remaining - run 'Sync Recent' task to continue)")
 
     # Return empty response (success)
     print(json.dumps({"output": "ok"}))
