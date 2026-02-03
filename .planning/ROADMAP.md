@@ -26,6 +26,7 @@ Plans:
 
 ### Phase 2: Core Unit Tests
 **Goal:** Unit test coverage for all core modules
+**Plans:** 4 plans
 
 - `sync_queue/` - QueueManager, operations, DLQ
 - `validation/` - metadata validation, config validation
@@ -33,6 +34,12 @@ Plans:
 - `hooks/` - handler logic (without external calls)
 
 **Success:** >80% coverage on core modules
+
+Plans:
+- [ ] 02-01-PLAN.md — sync_queue tests (QueueManager, operations, DLQ)
+- [ ] 02-02-PLAN.md — validation tests (SyncMetadata, PlexSyncConfig, sanitizers)
+- [ ] 02-03-PLAN.md — plex tests (matcher, client, exceptions)
+- [ ] 02-04-PLAN.md — hooks tests (handlers)
 
 ---
 
@@ -137,6 +144,23 @@ Plans:
 
 ---
 
+### Phase 11: Queue Management UI
+**Goal:** Add button to delete queue in plugin menu to clear out dead items
+
+- Add task in plugin menu to clear/delete queue items
+- Allow users to purge dead letter queue entries
+- Confirmation dialog before destructive operations
+- Status feedback after queue operations
+
+**Success:** Users can clear stuck/dead queue items from Stash UI
+
+**Depends on:** Phase 10
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 11 to break down)
+
+---
+
 ## Phase Dependencies
 
 ```
@@ -160,6 +184,8 @@ Phase 4 (User Docs)                Phase 5 (Arch Docs)
               +---------------+---------------+
                               |
                     Phase 10 (Toggles)
+                              |
+                    Phase 11 (Queue UI)
 ```
 
 ## Estimated Effort
@@ -167,7 +193,7 @@ Phase 4 (User Docs)                Phase 5 (Arch Docs)
 | Phase | Complexity | Plans |
 |-------|------------|-------|
 | 1. Test Infrastructure | Medium | 2 |
-| 2. Core Unit Tests | High | 4-5 |
+| 2. Core Unit Tests | High | 4 |
 | 3. Integration Tests | High | 3-4 |
 | 4. User Documentation | Medium | 2-3 |
 | 5. Architecture Docs | Medium | 2-3 |
@@ -176,8 +202,9 @@ Phase 4 (User Docs)                Phase 5 (Arch Docs)
 | 8. Observability | Medium | 2-3 |
 | 9. Reliability | Medium | 2-3 |
 | 10. Metadata Sync Toggles | Medium | 2-3 |
+| 11. Queue Management UI | Low | 1-2 |
 
-**Total:** ~22-32 plans across 10 phases
+**Total:** ~23-34 plans across 11 phases
 
 ---
 *Created: 2026-02-03*
