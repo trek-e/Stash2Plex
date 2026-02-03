@@ -158,14 +158,20 @@ Plans:
 ---
 
 ### Phase 8: Observability Improvements
-**Goal:** Better visibility into sync operations
+**Goal:** Better visibility into sync operations - diagnose sync issues from logs alone
+**Plans:** 2 plans
 
-- Structured logging (JSON format option)
-- Sync statistics tracking (success/fail counts)
-- Match confidence histograms
-- Error categorization and reporting
+- SyncStats dataclass for metrics tracking (success/fail counts, timing, confidence)
+- DLQ error aggregation by type
+- Batch summary logging every 10 jobs
+- JSON-formatted stats for machine parsing
+- Stats persistence to `{data_dir}/stats.json`
 
 **Success:** Can diagnose sync issues from logs alone
+
+Plans:
+- [ ] 08-01-PLAN.md — Stats infrastructure (SyncStats dataclass, DLQ error summary)
+- [ ] 08-02-PLAN.md — Stats integration and batch summary logging
 
 ---
 
@@ -295,7 +301,7 @@ Note: Phase 2.1 (Bugfix) can run in parallel with Phase 3 - it's independent.
 | 5. Architecture Docs | Medium | 2 |
 | 6. API Documentation | Low | 1 |
 | 7. Performance | Medium | 3 |
-| 8. Observability | Medium | 2-3 |
+| 8. Observability | Medium | 2 |
 | 9. Reliability | Medium | 2-3 |
 | 10. Metadata Sync Toggles | Medium | 2-3 |
 | 11. Queue Management UI | Low | 1-2 |
