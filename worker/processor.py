@@ -16,11 +16,11 @@ from typing import Optional, TYPE_CHECKING
 
 
 # Stash plugin log levels
-def log_trace(msg): print(f"\x01t\x02[PlexSync Worker] {msg}", file=sys.stderr, file=sys.stderr)
-def log_debug(msg): print(f"\x01d\x02[PlexSync Worker] {msg}", file=sys.stderr, file=sys.stderr)
-def log_info(msg): print(f"\x01i\x02[PlexSync Worker] {msg}", file=sys.stderr, file=sys.stderr)
-def log_warn(msg): print(f"\x01w\x02[PlexSync Worker] {msg}", file=sys.stderr, file=sys.stderr)
-def log_error(msg): print(f"\x01e\x02[PlexSync Worker] {msg}", file=sys.stderr, file=sys.stderr)
+def log_trace(msg): print(f"\x01t\x02[PlexSync Worker] {msg}", file=sys.stderr)
+def log_debug(msg): print(f"\x01d\x02[PlexSync Worker] {msg}", file=sys.stderr)
+def log_info(msg): print(f"\x01i\x02[PlexSync Worker] {msg}", file=sys.stderr)
+def log_warn(msg): print(f"\x01w\x02[PlexSync Worker] {msg}", file=sys.stderr)
+def log_error(msg): print(f"\x01e\x02[PlexSync Worker] {msg}", file=sys.stderr)
 
 try:
     from sync_queue.operations import get_pending, ack_job, nack_job, fail_job, enqueue, save_sync_timestamp
