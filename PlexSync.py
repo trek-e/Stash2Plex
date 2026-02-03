@@ -17,6 +17,7 @@ if PLUGIN_DIR not in sys.path:
 
 from queue.manager import QueueManager
 from queue.dlq import DeadLetterQueue
+from queue.operations import load_sync_timestamps
 from worker.processor import SyncWorker
 from hooks.handlers import on_scene_update
 from validation.config import validate_config, PlexSyncConfig
@@ -26,6 +27,7 @@ queue_manager = None
 dlq = None
 worker = None
 config: PlexSyncConfig = None
+sync_timestamps: dict = None
 
 
 def get_plugin_data_dir():
@@ -110,7 +112,7 @@ def initialize(config_dict: dict = None):
     Raises:
         SystemExit: If configuration validation fails
     """
-    global queue_manager, dlq, worker, config
+    global queue_manager, dlq, worker, config, sync_timestamps
 
     # Validate configuration
     if config_dict is None:
@@ -142,12 +144,22 @@ def initialize(config_dict: dict = None):
     data_dir = get_plugin_data_dir()
     print(f"[PlexSync] Initializing with data directory: {data_dir}")
 
+    # Load sync timestamps for late update detection
+    sync_timestamps = load_sync_timestamps(data_dir)
+    print(f"[PlexSync] Loaded {len(sync_timestamps)} sync timestamps")
+
     # Initialize queue infrastructure
     queue_manager = QueueManager(data_dir)
     dlq = DeadLetterQueue(data_dir)
 
-    # Start background worker with config values
-    worker = SyncWorker(queue_manager.get_queue(), dlq, config, max_retries=config.max_retries)
+    # Start background worker with data_dir for timestamp updates
+    worker = SyncWorker(
+        queue_manager.get_queue(),
+        dlq,
+        config,
+        data_dir=data_dir,
+        max_retries=config.max_retries
+    )
     worker.start()
 
     print("[PlexSync] Initialization complete")
@@ -181,13 +193,22 @@ def handle_hook(hook_context: dict):
     Args:
         hook_context: Hook context from Stash
     """
+    global sync_timestamps
+
     hook_type = hook_context.get("type", "")
     input_data = hook_context.get("input", {})
 
     if hook_type == "Scene.Update.Post":
         scene_id = input_data.get("id")
         if scene_id:
-            on_scene_update(scene_id, input_data, queue_manager.get_queue())
+            data_dir = get_plugin_data_dir()
+            on_scene_update(
+                scene_id,
+                input_data,
+                queue_manager.get_queue(),
+                data_dir=data_dir,
+                sync_timestamps=sync_timestamps
+            )
         else:
             print("[PlexSync] WARNING: Scene.Update.Post hook missing scene ID")
     else:
