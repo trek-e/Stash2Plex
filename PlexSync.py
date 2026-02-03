@@ -305,12 +305,25 @@ def main():
         return
 
     # Handle the hook
+    print(f"[PlexSync] Checking for hook: 'args' in input_data={('args' in input_data)}", file=sys.stderr)
+    if "args" in input_data:
+        print(f"[PlexSync] args keys: {list(input_data['args'].keys())}", file=sys.stderr)
+        print(f"[PlexSync] 'hookContext' in args={('hookContext' in input_data['args'])}", file=sys.stderr)
+
     if "args" in input_data and "hookContext" in input_data["args"]:
-        handle_hook(input_data["args"]["hookContext"])
+        print("[PlexSync] Calling handle_hook...", file=sys.stderr)
+        try:
+            handle_hook(input_data["args"]["hookContext"])
+            print("[PlexSync] handle_hook completed", file=sys.stderr)
+        except Exception as e:
+            print(f"[PlexSync] handle_hook exception: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
     else:
-        print("[PlexSync] No hookContext in input, skipping")
+        print("[PlexSync] No hookContext in input, skipping", file=sys.stderr)
 
     # Return empty response (success)
+    print("[PlexSync] Returning ok response", file=sys.stderr)
     print(json.dumps({"output": "ok"}))
 
 
