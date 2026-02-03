@@ -7,6 +7,8 @@ Slow fallback: scan all items if title search fails.
 
 from enum import Enum
 import logging
+import re
+import sys
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
@@ -15,6 +17,11 @@ if TYPE_CHECKING:
     from plexapi.video import Video
 
 logger = logging.getLogger('PlexSync.plex.matcher')
+
+# Stash plugin log levels
+def log_debug(msg): print(f"\x01d\x02[PlexSync Matcher] {msg}", file=sys.stderr)
+def log_info(msg): print(f"\x01i\x02[PlexSync Matcher] {msg}", file=sys.stderr)
+def log_warn(msg): print(f"\x01w\x02[PlexSync Matcher] {msg}", file=sys.stderr)
 
 
 def _item_has_file(item, path_or_filename: str, exact: bool = True, case_insensitive: bool = False) -> bool:
@@ -89,9 +96,6 @@ def find_plex_item_by_path(
     Returns:
         Matching Plex item or None if not found / ambiguous
     """
-    import sys
-    import re
-
     path = Path(stash_path)
     filename = path.name
     filename_lower = filename.lower()
@@ -172,8 +176,8 @@ def find_plex_items_with_confidence(
     # Remove date suffix like "- 2026-01-30" or "2026-01-30"
     title_base = re.sub(r'\s*[-_]?\s*\d{4}-\d{2}-\d{2}\s*$', '', title_search)
 
-    print(f"[PlexSync Matcher] Searching '{library.title}' for: {filename}", file=sys.stderr)
-    print(f"[PlexSync Matcher] Title variants: '{title_search}' / '{title_base}'", file=sys.stderr)
+    log_debug(f"Searching '{library.title}' for: {filename}")
+    log_debug(f"Title variants: '{title_search}' / '{title_base}'")
 
     candidates = []
 
@@ -182,28 +186,28 @@ def find_plex_items_with_confidence(
         for title in [title_search, title_base]:
             if candidates:
                 break
-            print(f"[PlexSync Matcher] Title search: '{title}'", file=sys.stderr)
+            log_debug(f"Title search: '{title}'")
             results = library.search(title=title)
-            print(f"[PlexSync Matcher] Got {len(results)} title matches", file=sys.stderr)
+            log_debug(f"Got {len(results)} title matches")
             for item in results:
                 if _item_has_file(item, filename_lower, exact=False, case_insensitive=True):
                     candidates.append(item)
-                    print(f"[PlexSync Matcher] Found: {item.title}", file=sys.stderr)
+                    log_info(f"Found: {item.title}")
     except Exception as e:
-        print(f"[PlexSync Matcher] Title search failed: {e}", file=sys.stderr)
+        log_warn(f"Title search failed: {e}")
 
     # Slow fallback: scan all items if title search found nothing
     if not candidates:
         try:
-            print(f"[PlexSync Matcher] Fallback: scanning all items...", file=sys.stderr)
+            log_debug(f"Fallback: scanning all items...")
             all_items = library.all()
-            print(f"[PlexSync Matcher] Scanning {len(all_items)} items...", file=sys.stderr)
+            log_debug(f"Scanning {len(all_items)} items...")
             for item in all_items:
                 if _item_has_file(item, filename_lower, exact=False, case_insensitive=True):
                     candidates.append(item)
-                    print(f"[PlexSync Matcher] Found: {item.title}", file=sys.stderr)
+                    log_info(f"Found: {item.title}")
         except Exception as e:
-            print(f"[PlexSync Matcher] Scan failed: {e}", file=sys.stderr)
+            log_warn(f"Scan failed: {e}")
 
     # Scoring logic
     if len(candidates) == 0:
