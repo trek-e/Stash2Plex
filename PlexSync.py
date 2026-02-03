@@ -12,11 +12,11 @@ import json
 
 
 # Stash plugin log levels - prefix format: \x01 + level + \x02 + message
-def log_trace(msg): print(f"\x01t\x02[PlexSync] {msg}")
-def log_debug(msg): print(f"\x01d\x02[PlexSync] {msg}")
-def log_info(msg): print(f"\x01i\x02[PlexSync] {msg}")
-def log_warn(msg): print(f"\x01w\x02[PlexSync] {msg}")
-def log_error(msg): print(f"\x01e\x02[PlexSync] {msg}")
+def log_trace(msg): print(f"\x01t\x02[PlexSync] {msg}", file=sys.stderr)
+def log_debug(msg): print(f"\x01d\x02[PlexSync] {msg}", file=sys.stderr)
+def log_info(msg): print(f"\x01i\x02[PlexSync] {msg}", file=sys.stderr)
+def log_warn(msg): print(f"\x01w\x02[PlexSync] {msg}", file=sys.stderr)
+def log_error(msg): print(f"\x01e\x02[PlexSync] {msg}", file=sys.stderr)
 def log_progress(p): print(f"\x01p\x02{p}")
 
 
@@ -198,9 +198,9 @@ def initialize(config_dict: dict = None):
     print(f"[PlexSync] Validating config: {list(config_dict.keys())}")
     try:
         validated_config, error = validate_config(config_dict)
-        print(f"[PlexSync] Validation result: error={error}, config={validated_config}")
+        print(f"[PlexSync] Validation result: error={error}, config={validated_config}", file=sys.stderr)
     except Exception as e:
-        print(f"[PlexSync] validate_config exception: {e}")
+        print(f"[PlexSync] validate_config exception: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         raise
@@ -212,9 +212,9 @@ def initialize(config_dict: dict = None):
 
     try:
         config = validated_config
-        print(f"[PlexSync] Config assigned, plex_url={config.plex_url}")
+        print(f"[PlexSync] Config assigned, plex_url={config.plex_url}", file=sys.stderr)
     except Exception as e:
-        print(f"[PlexSync] Config assignment exception: {e}")
+        print(f"[PlexSync] Config assignment exception: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         raise
@@ -224,23 +224,23 @@ def initialize(config_dict: dict = None):
         log_info("Plugin is disabled via configuration")
         return
 
-    print("[PlexSync] Plugin is enabled, getting data dir...")
+    print("[PlexSync] Plugin is enabled, getting data dir...", file=sys.stderr)
     data_dir = get_plugin_data_dir()
-    print(f"[PlexSync] Data dir: {data_dir}")
+    print(f"[PlexSync] Data dir: {data_dir}", file=sys.stderr)
 
     # Load sync timestamps for late update detection
-    print("[PlexSync] Loading sync timestamps...")
+    print("[PlexSync] Loading sync timestamps...", file=sys.stderr)
     sync_timestamps = load_sync_timestamps(data_dir)
     print(f"[PlexSync] Loaded {len(sync_timestamps)} sync timestamps")
 
     # Initialize queue infrastructure
-    print("[PlexSync] Creating QueueManager...")
+    print("[PlexSync] Creating QueueManager...", file=sys.stderr)
     queue_manager = QueueManager(data_dir)
-    print("[PlexSync] Creating DeadLetterQueue...")
+    print("[PlexSync] Creating DeadLetterQueue...", file=sys.stderr)
     dlq = DeadLetterQueue(data_dir)
 
     # Start background worker with data_dir for timestamp updates
-    print("[PlexSync] Creating SyncWorker...")
+    print("[PlexSync] Creating SyncWorker...", file=sys.stderr)
     worker = SyncWorker(
         queue_manager.get_queue(),
         dlq,
@@ -248,7 +248,7 @@ def initialize(config_dict: dict = None):
         data_dir=data_dir,
         max_retries=config.max_retries
     )
-    print("[PlexSync] Starting worker...")
+    print("[PlexSync] Starting worker...", file=sys.stderr)
     worker.start()
 
     log_info("Initialization complete")
@@ -259,14 +259,14 @@ def shutdown():
     global worker, queue_manager
 
     if worker:
-        print("[PlexSync] Stopping worker...")
+        print("[PlexSync] Stopping worker...", file=sys.stderr)
         worker.stop()
 
     if queue_manager:
-        print("[PlexSync] Shutting down queue...")
+        print("[PlexSync] Shutting down queue...", file=sys.stderr)
         queue_manager.shutdown()
 
-    print("[PlexSync] Shutdown complete")
+    print("[PlexSync] Shutdown complete", file=sys.stderr)
 
 
 def handle_hook(hook_context: dict, stash=None):
@@ -285,17 +285,17 @@ def handle_hook(hook_context: dict, stash=None):
     """
     global sync_timestamps
 
-    print(f"[PlexSync] handle_hook called with keys: {list(hook_context.keys())}")
+    print(f"[PlexSync] handle_hook called with keys: {list(hook_context.keys())}", file=sys.stderr)
     hook_type = hook_context.get("type", "")
-    input_data = hook_context.get("input", {})
-    print(f"[PlexSync] hook_type={hook_type}, input_data keys={list(input_data.keys()) if input_data else 'None'}")
+    input_data = hook_context.get("input") or {}  # Handle None explicitly
+    print(f"[PlexSync] hook_type={hook_type}, input_data keys={list(input_data.keys()) if input_data else 'None'}", file=sys.stderr)
 
     if hook_type in ("Scene.Update.Post", "Scene.Create.Post"):
         scene_id = input_data.get("id")
-        print(f"[PlexSync] {hook_type}: scene_id={scene_id}")
+        print(f"[PlexSync] {hook_type}: scene_id={scene_id}", file=sys.stderr)
         if scene_id:
             data_dir = get_plugin_data_dir()
-            print(f"[PlexSync] Calling on_scene_update for scene {scene_id}...")
+            print(f"[PlexSync] Calling on_scene_update for scene {scene_id}...", file=sys.stderr)
             try:
                 on_scene_update(
                     scene_id,
@@ -305,15 +305,15 @@ def handle_hook(hook_context: dict, stash=None):
                     sync_timestamps=sync_timestamps,
                     stash=stash
                 )
-                print(f"[PlexSync] on_scene_update completed for scene {scene_id}")
+                print(f"[PlexSync] on_scene_update completed for scene {scene_id}", file=sys.stderr)
             except Exception as e:
-                print(f"[PlexSync] on_scene_update exception: {e}")
+                print(f"[PlexSync] on_scene_update exception: {e}", file=sys.stderr)
                 import traceback
                 traceback.print_exc()
         else:
             log_warn(f" {hook_type} hook missing scene ID")
     else:
-        print(f"[PlexSync] Unhandled hook type: {hook_type}")
+        print(f"[PlexSync] Unhandled hook type: {hook_type}", file=sys.stderr)
 
 
 def handle_task(task_args: dict, stash=None):
@@ -389,16 +389,16 @@ def main():
         input_data = json.loads(raw_input)
         print(f"[PlexSync] Parsed JSON, keys: {list(input_data.keys())}")
     except json.JSONDecodeError as e:
-        print(f"[PlexSync] JSON decode error: {e}")
+        print(f"[PlexSync] JSON decode error: {e}", file=sys.stderr)
         print(json.dumps({"error": f"Invalid JSON input: {e}"}))
         sys.exit(1)
 
     # Initialize on first call
     global queue_manager, config
-    print(f"[PlexSync] queue_manager is None: {queue_manager is None}")
+    print(f"[PlexSync] queue_manager is None: {queue_manager is None}", file=sys.stderr)
     if queue_manager is None:
         # Extract config from Stash input
-        print("[PlexSync] Extracting config...")
+        print("[PlexSync] Extracting config...", file=sys.stderr)
         config_dict = extract_config_from_input(input_data)
         print(f"[PlexSync] Config dict keys: {list(config_dict.keys())}")
         print("[PlexSync] Calling initialize()...")
@@ -414,26 +414,26 @@ def main():
 
     if "hookContext" in args:
         # Hook triggered
-        print("[PlexSync] Calling handle_hook...")
+        print("[PlexSync] Calling handle_hook...", file=sys.stderr)
         try:
             handle_hook(args["hookContext"], stash=stash_interface)
-            print("[PlexSync] handle_hook completed")
+            print("[PlexSync] handle_hook completed", file=sys.stderr)
         except Exception as e:
-            print(f"[PlexSync] handle_hook exception: {e}")
+            print(f"[PlexSync] handle_hook exception: {e}", file=sys.stderr)
             import traceback
             traceback.print_exc()
     elif "mode" in args:
         # Task triggered (has mode argument)
-        print("[PlexSync] Calling handle_task...")
+        print("[PlexSync] Calling handle_task...", file=sys.stderr)
         try:
             handle_task(args, stash=stash_interface)
-            print("[PlexSync] handle_task completed")
+            print("[PlexSync] handle_task completed", file=sys.stderr)
         except Exception as e:
-            print(f"[PlexSync] handle_task exception: {e}")
+            print(f"[PlexSync] handle_task exception: {e}", file=sys.stderr)
             import traceback
             traceback.print_exc()
     else:
-        print("[PlexSync] No hookContext or task mode in input, skipping")
+        print("[PlexSync] No hookContext or task mode in input, skipping", file=sys.stderr)
 
     # Give worker time to process pending jobs before exiting
     # Worker thread is daemon, so it dies when main process exits
@@ -455,18 +455,18 @@ def main():
                 if last_logged_size == -1:
                     print(f"[PlexSync] Processing {size} queued item(s)...")
                 elif size > last_logged_size:
-                    print(f"[PlexSync] Queue backlog: {size} items")
+                    print(f"[PlexSync] Queue backlog: {size} items", file=sys.stderr)
                 last_logged_size = size
                 time.sleep(wait_interval)
                 waited += wait_interval
             except Exception as e:
-                print(f"[PlexSync] Error checking queue: {e}")
+                print(f"[PlexSync] Error checking queue: {e}", file=sys.stderr)
                 break
         if waited >= max_wait:
             print(f"[PlexSync] Timeout waiting for queue ({queue.size} items remaining)")
 
     # Return empty response (success)
-    print("[PlexSync] Returning ok response")
+    print("[PlexSync] Returning ok response", file=sys.stderr)
     print(json.dumps({"output": "ok"}))
 
 
@@ -474,7 +474,7 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n[PlexSync] Interrupted by user")
+        print("\n[PlexSync] Interrupted by user", file=sys.stderr)
         shutdown()
         sys.exit(0)
     except Exception as e:
