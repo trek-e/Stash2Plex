@@ -9,10 +9,10 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 3 of 11 (Integration Tests) - Complete
-Plan: 4 of 4 complete
-Status: Integration test suite complete (62 tests)
-Last activity: 2026-02-03 - Completed 03-03-PLAN.md
+Phase: 4 of 11 (User Documentation) - In Progress
+Plan: 2 of 4 complete
+Status: Installation guide complete
+Last activity: 2026-02-03 - Completed 04-02-PLAN.md
 
 Progress: [██████░░░░░░░░░░] 36% (4/11 phases complete)
 
@@ -47,6 +47,9 @@ Progress: [██████░░░░░░░░░░] 36% (4/11 phases co
 | 2026-02-03 | 03-04 | Missing path no unmark | Error before try block doesn't call unmark_scene_pending |
 | 2026-02-03 | 03-03 | Freezegun nested contexts | Use decorator + nested with blocks for state transition tests |
 | 2026-02-03 | 03-03 | Real queue for persistence tests | More reliable than mocking SQLiteAckQueue internals |
+| 2026-02-03 | 04-01 | AGPL-3.0 license in README | Matches LICENSE file (plan said GPL-3.0 but file is AGPL-3.0) |
+| 2026-02-03 | 04-01 | Settings table in README | Quick reference for users before detailed docs |
+| 2026-02-03 | 04-01 | No screenshots in docs | Per user decision in CONTEXT.md |
 
 ## Roadmap Evolution
 
@@ -137,15 +140,28 @@ Progress: [██████░░░░░░░░░░] 36% (4/11 phases co
 5. **Circuit breaker tests** - 20 tests with freezegun time control for state machine (03-03)
 6. **Error scenario tests** - 15 tests covering Plex down, not found, permanent errors, strict matching (03-04)
 
+### v1.1 Phase 4: User Documentation (In Progress)
+
+**Stats:**
+- 1 of 4 plans complete
+- 2 commits
+- 2 files created
+
+**Accomplishments:**
+1. **README.md** - Project overview, quick start guide, documentation links
+2. **docs/ directory** - Structure prepared for install.md, config.md, troubleshoot.md
+
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed Phase 3 (Integration Tests) - all 589 tests pass with 84% coverage
+Stopped at: Completed 04-01-PLAN.md (README.md and docs/ structure)
 Resume file: None
 
 ## Next Steps
 
-Phase 3 complete. Total test suite: 589 tests (527 unit + 62 integration), 84% coverage.
+Phase 4 Plan 1 complete. README.md created with quick start guide.
 
 Ready for:
-- Phase 4: User Documentation
+- 04-02: Installation Guide (docs/install.md)
+- 04-03: Configuration Reference (docs/config.md)
+- 04-04: Troubleshooting Guide (docs/troubleshoot.md)
