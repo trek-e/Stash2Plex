@@ -9,7 +9,7 @@ Provides a PlexClient class that wraps plexapi.server.PlexServer with:
 """
 
 import logging
-from typing import Optional, Tuple, Type, TYPE_CHECKING
+from typing import Any, Optional, Tuple, Type, TYPE_CHECKING
 
 from tenacity import (
     retry,
@@ -162,7 +162,7 @@ class PlexClient:
             self._server = self._get_server()
         return self._server
 
-    def get_library(self, section_name: str):
+    def get_library(self, section_name: str) -> Any:
         """
         Get a library section by name.
 

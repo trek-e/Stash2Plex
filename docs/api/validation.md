@@ -1,3 +1,33 @@
 # validation Module
 
-Placeholder - will be filled in Task 2.
+Metadata validation and sanitization for Plex sync jobs.
+
+**Architecture:** See [Data Quality Layer](../ARCHITECTURE.md#validation-data-quality-layer) for design rationale.
+
+## SyncMetadata
+
+::: validation.metadata
+    options:
+      members_order: source
+      show_source: true
+
+## PlexSyncConfig
+
+::: validation.config
+    options:
+      members_order: source
+      show_source: true
+
+## Sanitizers
+
+::: validation.sanitizers
+    options:
+      members_order: source
+      show_source: true
+
+## Errors
+
+::: validation.errors
+    options:
+      members_order: source
+      show_source: true
