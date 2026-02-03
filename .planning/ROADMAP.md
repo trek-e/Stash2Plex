@@ -104,6 +104,7 @@ Plans:
 
 ### Phase 5: Architecture Documentation
 **Goal:** Developer/maintainer documentation
+**Plans:** 2 plans
 
 - Component diagram (queue, worker, hooks, plex client)
 - Data flow documentation (event → queue → sync → Plex)
@@ -111,6 +112,10 @@ Plans:
 - Contributing guide
 
 **Success:** New contributor can understand architecture quickly
+
+Plans:
+- [ ] 05-01-PLAN.md — docs/ARCHITECTURE.md with system diagram, module overview, data flow, design decisions
+- [ ] 05-02-PLAN.md — CONTRIBUTING.md with dev setup, PR guidelines, testing expectations
 
 ---
 
@@ -273,7 +278,7 @@ Note: Phase 2.1 (Bugfix) can run in parallel with Phase 3 - it's independent.
 | 2.1. Plex Device Registration | Low | 1 |
 | 3. Integration Tests | High | 4 |
 | 4. User Documentation | Medium | 4 |
-| 5. Architecture Docs | Medium | 2-3 |
+| 5. Architecture Docs | Medium | 2 |
 | 6. API Documentation | Low | 1-2 |
 | 7. Performance | Medium | 2-3 |
 | 8. Observability | Medium | 2-3 |
