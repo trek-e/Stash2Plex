@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 9 of 13 (Reliability Hardening)
-Plan: 2 of 2 complete
-Status: Phase complete
-Last activity: 2026-02-03 - Completed 09-02-PLAN.md
+Phase: 10 of 13 (Metadata Sync Toggles)
+Plan: 1 of 2 complete
+Status: In progress
+Last activity: 2026-02-03 - Completed 10-01-PLAN.md
 
-Progress: [████████████████] 100% (13/13 plan groups complete)
+Progress: [████████████████░░] 89% (14/16 plans complete)
 
 ## Decisions Log
 
@@ -89,6 +89,9 @@ Progress: [████████████████] 100% (13/13 plan gr
 | 2026-02-03 | 09-02 | Critical fields propagate errors | Core metadata edit failures still fail the job |
 | 2026-02-03 | 09-02 | Response validation at debug level | Mismatches may be expected due to sanitization |
 | 2026-02-03 | 09-02 | _update_metadata returns PartialSyncResult | Allows callers to inspect per-field status |
+| 2026-02-03 | 10-01 | All toggles default True | Backward compatible - existing users get same behavior |
+| 2026-02-03 | 10-01 | Toggle summary log line | Groups disabled fields instead of 10 separate lines |
+| 2026-02-03 | 10-01 | snake_case setting keys | Match Python field names exactly for consistency |
 
 ## Roadmap Evolution
 
@@ -268,16 +271,32 @@ Progress: [████████████████] 100% (13/13 plan gr
 8. **Response validation** - _validate_edit_result detects silent API failures (09-02)
 9. **31 new tests** - Unit and integration tests for partial failure recovery (09-02)
 
+### v1.1 Phase 10: Metadata Sync Toggles (In Progress)
+
+**Stats:**
+- 1 of 2 plans complete
+- 3 commits
+- 3 files modified
+
+**Accomplishments (Plan 01):**
+1. **10 sync toggle fields** - sync_master + 9 individual field toggles in PlexSyncConfig
+2. **Stash UI settings** - 10 new BOOLEAN settings in PlexSync.yml
+3. **String coercion** - All toggles accept 'true'/'false'/'1'/'0' strings
+4. **Toggle summary logging** - Grouped log output instead of 10 lines
+5. **8 new tests** - TestSyncToggles class with comprehensive coverage
+
 ## Session Continuity
 
-Last session: 2026-02-03 18:26 UTC
-Stopped at: Completed 09-02-PLAN.md
+Last session: 2026-02-03
+Stopped at: Completed 10-01-PLAN.md (Toggle Config)
 Resume file: None
 
 ## Next Steps
 
-Phase 9 (Reliability Hardening) complete.
+Phase 10 Plan 01 complete. Ready for Plan 02 (Toggle Integration).
 
-Next phases per roadmap:
-- Phase 10: Metadata Sync Toggles
+Next plans:
+- 10-02: Integrate toggles into processor.py
 - Phase 11: Queue Management UI
+- Phase 12: Process Queue Button
+- Phase 13: Dynamic Queue Timeout
