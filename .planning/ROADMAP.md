@@ -195,22 +195,23 @@ Plans:
 
 ---
 
-### Phase 10: Metadata Sync Toggles
+### Phase 10: Metadata Sync Toggles ✓
 **Goal:** Add toggles for enabling/disabling each metadata category sync
-**Plans:** 2 plans
+**Plans:** 2 plans (complete)
+**Completed:** 2026-02-03
 
 - Configuration options for each metadata field (studio, performers, tags, etc.)
 - Allow users to selectively enable/disable sync for specific fields
 - Update worker to respect toggle settings
 - Documentation for new settings
 
-**Success:** Users can configure which metadata fields sync to Plex
+**Success:** Users can configure which metadata fields sync to Plex ✓
 
 **Depends on:** Phase 9
 
 Plans:
-- [ ] 10-01-PLAN.md — Add toggle fields to PlexSyncConfig and PlexSync.yml settings
-- [ ] 10-02-PLAN.md — Implement toggle logic in processor, add tests and documentation
+- [x] 10-01-PLAN.md — Add toggle fields to PlexSyncConfig and PlexSync.yml settings
+- [x] 10-02-PLAN.md — Implement toggle logic in processor, add tests and documentation
 
 ---
 
