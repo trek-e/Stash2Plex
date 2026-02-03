@@ -1004,3 +1004,297 @@ class TestPartialSyncFailure:
         assert result.success is True
         assert 'metadata' in result.fields_updated
         assert any(w.field_name == 'background' for w in result.warnings)
+
+
+class TestSyncToggles:
+    """Tests for field sync toggle behavior."""
+
+    @pytest.fixture
+    def toggle_worker(self, mock_queue, mock_dlq, mock_config, tmp_path):
+        """Create SyncWorker configured for toggle tests."""
+        from worker.processor import SyncWorker
+
+        mock_config.plex_connect_timeout = 10.0
+        mock_config.plex_read_timeout = 30.0
+        mock_config.preserve_plex_edits = False
+        mock_config.strict_matching = False
+        mock_config.dlq_retention_days = 30
+        # All toggles default True
+        mock_config.sync_master = True
+        mock_config.sync_studio = True
+        mock_config.sync_summary = True
+        mock_config.sync_tagline = True
+        mock_config.sync_date = True
+        mock_config.sync_performers = True
+        mock_config.sync_tags = True
+        mock_config.sync_poster = True
+        mock_config.sync_background = True
+        mock_config.sync_collection = True
+
+        worker = SyncWorker(
+            queue=mock_queue,
+            dlq=mock_dlq,
+            config=mock_config,
+            data_dir=str(tmp_path),
+        )
+        return worker
+
+    def test_master_toggle_off_skips_all_fields(self, toggle_worker, capsys):
+        """When sync_master=False, no fields are synced."""
+        toggle_worker.config.sync_master = False
+        toggle_worker.config.sync_studio = True  # Even with individual ON
+
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        data = {'studio': 'Test Studio', 'details': 'Test Summary'}
+
+        result = toggle_worker._update_metadata(mock_plex_item, data)
+
+        # edit() should not be called at all
+        mock_plex_item.edit.assert_not_called()
+
+        # Debug log should mention master toggle
+        captured = capsys.readouterr()
+        assert "Master sync toggle is OFF" in captured.err
+
+    def test_individual_toggle_off_skips_that_field(self, toggle_worker):
+        """When individual toggle=False, that field is skipped."""
+        toggle_worker.config.sync_master = True
+        toggle_worker.config.sync_studio = False
+        toggle_worker.config.sync_summary = True
+
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        data = {'studio': 'Test Studio', 'details': 'Test Summary'}
+
+        result = toggle_worker._update_metadata(mock_plex_item, data)
+
+        # edit() should be called but only with summary, not studio
+        assert mock_plex_item.edit.called
+        edit_kwargs = mock_plex_item.edit.call_args_list[0][1]
+        assert 'studio.value' not in edit_kwargs
+        assert 'summary.value' in edit_kwargs
+
+    def test_toggle_off_does_not_clear_field(self, toggle_worker):
+        """Toggle OFF should NOT clear the Plex field (distinct from empty value clearing)."""
+        toggle_worker.config.sync_master = True
+        toggle_worker.config.sync_studio = False
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = "Existing Studio"  # Plex has a value
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        data = {'studio': 'New Studio'}  # Stash has a value
+
+        result = toggle_worker._update_metadata(mock_plex_item, data)
+
+        # Studio should NOT appear in edits at all (not cleared, not updated)
+        if mock_plex_item.edit.called:
+            for call in mock_plex_item.edit.call_args_list:
+                kwargs = call[1]
+                assert 'studio.value' not in kwargs, "Toggle OFF should skip field, not clear it"
+
+    def test_toggle_on_with_empty_value_clears_field(self, toggle_worker):
+        """Toggle ON with None/empty value should CLEAR field (LOCKED decision)."""
+        toggle_worker.config.sync_master = True
+        toggle_worker.config.sync_studio = True
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = "Existing Studio"
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        data = {'studio': None}  # Stash value is None
+
+        result = toggle_worker._update_metadata(mock_plex_item, data)
+
+        # Studio should be cleared (LOCKED Phase 9 behavior)
+        edit_kwargs = mock_plex_item.edit.call_args_list[0][1]
+        assert edit_kwargs.get('studio.value') == ''
+
+    def test_toggle_on_preserves_preserve_mode_behavior(self, toggle_worker):
+        """Toggle ON + preserve_plex_edits ON should preserve existing values."""
+        toggle_worker.config.sync_master = True
+        toggle_worker.config.sync_studio = True
+        toggle_worker.config.preserve_plex_edits = True
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = "Existing Studio"  # Plex has value
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        data = {'studio': 'New Studio'}
+
+        result = toggle_worker._update_metadata(mock_plex_item, data)
+
+        # With preserve mode, existing value should be kept
+        if mock_plex_item.edit.called:
+            for call in mock_plex_item.edit.call_args_list:
+                kwargs = call[1]
+                assert 'studio.value' not in kwargs, "Preserve mode should skip field with existing value"
+
+    def test_all_individual_toggles_respected(self, toggle_worker):
+        """Each individual toggle should control its respective field."""
+        # Set all toggles OFF except one
+        toggle_worker.config.sync_master = True
+        toggle_worker.config.sync_studio = False
+        toggle_worker.config.sync_summary = False
+        toggle_worker.config.sync_tagline = True  # Only this ON
+        toggle_worker.config.sync_date = False
+
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.tagline = None
+        mock_plex_item.originallyAvailableAt = None
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        data = {
+            'studio': 'Test Studio',
+            'details': 'Test Summary',
+            'tagline': 'Test Tagline',
+            'date': '2024-01-01',
+        }
+
+        result = toggle_worker._update_metadata(mock_plex_item, data)
+
+        # Only tagline should be in edits
+        edit_kwargs = mock_plex_item.edit.call_args_list[0][1]
+        assert 'studio.value' not in edit_kwargs
+        assert 'summary.value' not in edit_kwargs
+        assert 'tagline.value' in edit_kwargs
+        assert 'originallyAvailableAt.value' not in edit_kwargs
+
+    def test_performers_toggle_off_skips_performers(self, toggle_worker):
+        """sync_performers=False should skip performer sync entirely."""
+        toggle_worker.config.sync_master = True
+        toggle_worker.config.sync_performers = False
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        data = {'performers': ['Actor 1', 'Actor 2']}
+
+        result = toggle_worker._update_metadata(mock_plex_item, data)
+
+        # No performer-related edits should happen
+        for call in mock_plex_item.edit.call_args_list:
+            kwargs = call[1]
+            assert not any('actor' in k for k in kwargs.keys())
+
+    def test_tags_toggle_off_skips_tags(self, toggle_worker):
+        """sync_tags=False should skip tag/genre sync entirely."""
+        toggle_worker.config.sync_master = True
+        toggle_worker.config.sync_tags = False
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        data = {'tags': ['Genre 1', 'Genre 2']}
+
+        result = toggle_worker._update_metadata(mock_plex_item, data)
+
+        # No genre-related edits should happen
+        for call in mock_plex_item.edit.call_args_list:
+            kwargs = call[1]
+            assert not any('genre' in k for k in kwargs.keys())
+
+    def test_poster_toggle_off_skips_poster(self, toggle_worker):
+        """sync_poster=False should skip poster upload."""
+        toggle_worker.config.sync_master = True
+        toggle_worker.config.sync_poster = False
+
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Mock _fetch_stash_image to verify it's not called
+        toggle_worker._fetch_stash_image = MagicMock(return_value=b'fake image data')
+
+        data = {'poster_url': 'http://stash/image.jpg'}
+
+        result = toggle_worker._update_metadata(mock_plex_item, data)
+
+        # uploadPoster should not be called
+        mock_plex_item.uploadPoster.assert_not_called()
+
+    def test_collection_toggle_off_skips_collection(self, toggle_worker):
+        """sync_collection=False should skip collection assignment."""
+        toggle_worker.config.sync_master = True
+        toggle_worker.config.sync_collection = False
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        data = {'studio': 'Test Studio'}  # Studio triggers collection
+
+        # Need to also enable sync_studio to get studio synced
+        toggle_worker.config.sync_studio = True
+
+        result = toggle_worker._update_metadata(mock_plex_item, data)
+
+        # No collection-related edits should happen
+        for call in mock_plex_item.edit.call_args_list:
+            kwargs = call[1]
+            assert not any('collection' in k for k in kwargs.keys())
+
+    def test_background_toggle_off_skips_background(self, toggle_worker):
+        """sync_background=False should skip background upload."""
+        toggle_worker.config.sync_master = True
+        toggle_worker.config.sync_background = False
+
+        mock_plex_item = MagicMock()
+        mock_plex_item.studio = ""
+        mock_plex_item.title = ""
+        mock_plex_item.summary = ""
+        mock_plex_item.actors = []
+        mock_plex_item.genres = []
+        mock_plex_item.collections = []
+
+        # Mock _fetch_stash_image to verify it's not called
+        toggle_worker._fetch_stash_image = MagicMock(return_value=b'fake image data')
+
+        data = {'background_url': 'http://stash/background.jpg'}
+
+        result = toggle_worker._update_metadata(mock_plex_item, data)
+
+        # uploadArt should not be called
+        mock_plex_item.uploadArt.assert_not_called()
