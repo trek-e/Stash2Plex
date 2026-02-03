@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 4 of 11 (User Documentation) - Complete
-Plan: 4 of 4 complete
-Status: Phase complete - all user documentation created
-Last activity: 2026-02-03 - Completed 04-04-PLAN.md
+Phase: 6 of 13 (API Documentation) - Complete
+Plan: 1 of 1 complete
+Status: Phase 6 complete
+Last activity: 2026-02-03 - Completed 06-01-PLAN.md
 
-Progress: [███████░░░░░░░░░] 45% (5/11 phases complete)
+Progress: [█████████░░░░░░░] 55% (6/11 phases complete)
 
 ## Decisions Log
 
@@ -57,6 +57,13 @@ Progress: [███████░░░░░░░░░] 45% (5/11 phases co
 | 2026-02-03 | 04-04 | Line-by-line log annotation | Table explaining each line in success flow log example |
 | 2026-02-03 | 04-04 | Error classification tables | Transient vs permanent errors clearly documented |
 | 2026-02-03 | 04-04 | Issue template markdown format | GitHub-friendly copy-paste format |
+| 2026-02-03 | 05-02 | Concise contributing guide | ~80 lines per user decision - not enterprise walkthrough |
+| 2026-02-03 | 05-02 | Reference existing files | Don't duplicate requirements content, link to troubleshoot.md |
+| 2026-02-03 | 05-02 | Note no formatters configured | Contributors should follow existing code patterns |
+| 2026-02-03 | 06-01 | mkdocs-material theme | Best UX, responsive design, built-in search |
+| 2026-02-03 | 06-01 | google docstring style | Matches existing codebase docstrings |
+| 2026-02-03 | 06-01 | show_source: true | Helps developers understand implementation |
+| 2026-02-03 | 06-01 | filter private members | Focus on public API, reduce clutter |
 
 ## Roadmap Evolution
 
@@ -160,16 +167,43 @@ Progress: [███████░░░░░░░░░] 45% (5/11 phases co
 3. **docs/config.md** - Configuration reference with all 10 settings, 5 examples, validation rules (04-03)
 4. **docs/troubleshoot.md** - Troubleshooting guide with 8 common issues, log interpretation, DLQ explanation (04-04)
 
+### v1.1 Phase 5: Architecture Documentation (Complete 2026-02-03)
+
+**Stats:**
+- 2 of 2 plans complete
+- 2 commits
+- 2 files created
+
+**Accomplishments:**
+1. **docs/ARCHITECTURE.md** - System architecture with mermaid diagram, module overview, data flow (05-01)
+2. **CONTRIBUTING.md** - Contributor guidelines with dev setup, pytest testing, PR workflow (05-02)
+
+### v1.1 Phase 6: API Documentation (Complete 2026-02-03)
+
+**Stats:**
+- 1 of 1 plan complete
+- 3 commits
+- 7 files created, 5 modified
+
+**Accomplishments:**
+1. **MkDocs configuration** - mkdocs.yml with material theme, mkdocstrings plugin
+2. **API reference pages** - 5 pages covering sync_queue, validation, plex, worker modules
+3. **Docstring examples** - Added Example sections to key functions/classes
+4. **Documentation site** - `mkdocs build` generates complete site with API reference
+
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 04-04-PLAN.md (docs/troubleshoot.md)
+Stopped at: Completed 06-01-PLAN.md
 Resume file: None
 
 ## Next Steps
 
-Phase 4 (User Documentation) complete. All user-facing documentation created:
-- README.md, docs/install.md, docs/config.md, docs/troubleshoot.md
+Phase 6 (API Documentation) complete:
+- MkDocs with mkdocstrings configured
+- 5 API reference pages with autodoc
+- Docstring examples added to key functions
 
-Ready for:
-- Phase 5: Developer Guide (architecture docs, contribution guide)
+Next phases per roadmap:
+- Phase 7: Configuration Validation
+- Phase 8-13: Feature phases
