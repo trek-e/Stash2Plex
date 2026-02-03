@@ -165,15 +165,28 @@ def initialize(config_dict: dict = None):
             config_dict['plex_token'] = env_token
 
     print(f"[PlexSync] Validating config: {list(config_dict.keys())}", file=sys.stderr)
-    validated_config, error = validate_config(config_dict)
-    print(f"[PlexSync] Validation result: error={error}", file=sys.stderr)
+    try:
+        validated_config, error = validate_config(config_dict)
+        print(f"[PlexSync] Validation result: error={error}, config={validated_config}", file=sys.stderr)
+    except Exception as e:
+        print(f"[PlexSync] validate_config exception: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        raise
+
     if error:
         error_msg = f"PlexSync configuration error: {error}"
         print(f"[PlexSync] ERROR: {error_msg}", file=sys.stderr)
         raise SystemExit(1)
 
-    config = validated_config
-    print(f"[PlexSync] Config assigned, plex_url={config.plex_url}", file=sys.stderr)
+    try:
+        config = validated_config
+        print(f"[PlexSync] Config assigned, plex_url={config.plex_url}", file=sys.stderr)
+    except Exception as e:
+        print(f"[PlexSync] Config assignment exception: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        raise
 
     # Check if plugin is disabled
     if not config.enabled:
