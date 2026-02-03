@@ -1,14 +1,20 @@
 """
-Tests for error classification functions.
+Tests for error classification functions and partial sync result tracking.
 
 Tests classify_http_error and classify_exception for correct routing
 of errors to retry (TransientError) or DLQ (PermanentError).
+Also tests FieldUpdateWarning and PartialSyncResult for granular error handling.
 """
 
 import pytest
 from unittest.mock import MagicMock
 
-from validation.errors import classify_http_error, classify_exception
+from validation.errors import (
+    classify_http_error,
+    classify_exception,
+    FieldUpdateWarning,
+    PartialSyncResult,
+)
 from worker.processor import TransientError, PermanentError
 
 
@@ -295,3 +301,165 @@ class TestClassifyExceptionLogging:
         classify_exception(ValueError("test"))
         mock_logger.debug.assert_called_once()
         assert "permanent" in mock_logger.debug.call_args[0][0].lower()
+
+
+class TestFieldUpdateWarning:
+    """Tests for FieldUpdateWarning dataclass."""
+
+    def test_creation_with_all_fields(self):
+        """FieldUpdateWarning stores all required fields."""
+        warning = FieldUpdateWarning(
+            field_name="performers",
+            error_message="Connection timeout",
+            error_type="TimeoutError"
+        )
+        assert warning.field_name == "performers"
+        assert warning.error_message == "Connection timeout"
+        assert warning.error_type == "TimeoutError"
+
+    def test_str_representation(self):
+        """FieldUpdateWarning __str__ returns field: message format."""
+        warning = FieldUpdateWarning(
+            field_name="poster",
+            error_message="Upload failed",
+            error_type="HTTPError"
+        )
+        assert str(warning) == "poster: Upload failed"
+
+    def test_str_with_long_message(self):
+        """FieldUpdateWarning __str__ includes full message."""
+        long_msg = "A very long error message that explains what went wrong in detail"
+        warning = FieldUpdateWarning(
+            field_name="tags",
+            error_message=long_msg,
+            error_type="ValueError"
+        )
+        assert long_msg in str(warning)
+
+    def test_equality(self):
+        """Two FieldUpdateWarning with same values are equal."""
+        w1 = FieldUpdateWarning("performers", "error", "TypeError")
+        w2 = FieldUpdateWarning("performers", "error", "TypeError")
+        assert w1 == w2
+
+    def test_inequality(self):
+        """Two FieldUpdateWarning with different values are not equal."""
+        w1 = FieldUpdateWarning("performers", "error", "TypeError")
+        w2 = FieldUpdateWarning("tags", "error", "TypeError")
+        assert w1 != w2
+
+
+class TestPartialSyncResult:
+    """Tests for PartialSyncResult dataclass."""
+
+    def test_default_values(self):
+        """PartialSyncResult has sensible defaults."""
+        result = PartialSyncResult()
+        assert result.success is True
+        assert result.warnings == []
+        assert result.fields_updated == []
+
+    def test_add_warning_creates_field_update_warning(self):
+        """add_warning creates FieldUpdateWarning from exception."""
+        result = PartialSyncResult()
+        error = ValueError("Invalid data")
+
+        result.add_warning("studio", error)
+
+        assert len(result.warnings) == 1
+        assert result.warnings[0].field_name == "studio"
+        assert result.warnings[0].error_message == "Invalid data"
+        assert result.warnings[0].error_type == "ValueError"
+
+    def test_add_warning_multiple(self):
+        """add_warning can be called multiple times."""
+        result = PartialSyncResult()
+
+        result.add_warning("performers", ValueError("error 1"))
+        result.add_warning("tags", TypeError("error 2"))
+        result.add_warning("poster", ConnectionError("error 3"))
+
+        assert len(result.warnings) == 3
+        assert result.warnings[0].field_name == "performers"
+        assert result.warnings[1].field_name == "tags"
+        assert result.warnings[2].field_name == "poster"
+
+    def test_add_success_records_field(self):
+        """add_success records field name in fields_updated."""
+        result = PartialSyncResult()
+
+        result.add_success("title")
+        result.add_success("studio")
+
+        assert "title" in result.fields_updated
+        assert "studio" in result.fields_updated
+        assert len(result.fields_updated) == 2
+
+    def test_has_warnings_false_when_empty(self):
+        """has_warnings is False with no warnings."""
+        result = PartialSyncResult()
+        assert result.has_warnings is False
+
+    def test_has_warnings_true_with_warnings(self):
+        """has_warnings is True when warnings exist."""
+        result = PartialSyncResult()
+        result.add_warning("performers", ValueError("error"))
+        assert result.has_warnings is True
+
+    def test_warning_summary_empty_when_no_warnings(self):
+        """warning_summary returns empty string with no warnings."""
+        result = PartialSyncResult()
+        assert result.warning_summary == ""
+
+    def test_warning_summary_single_warning(self):
+        """warning_summary formats single warning correctly."""
+        result = PartialSyncResult()
+        result.add_warning("performers", ValueError("connection failed"))
+
+        summary = result.warning_summary
+        assert "1 warnings:" in summary
+        assert "performers: connection failed" in summary
+
+    def test_warning_summary_multiple_warnings(self):
+        """warning_summary formats multiple warnings with semicolons."""
+        result = PartialSyncResult()
+        result.add_warning("performers", ValueError("error 1"))
+        result.add_warning("tags", TypeError("error 2"))
+
+        summary = result.warning_summary
+        assert "2 warnings:" in summary
+        assert "performers: error 1" in summary
+        assert "tags: error 2" in summary
+        assert "; " in summary  # Semicolon separator
+
+    def test_success_can_be_set_false(self):
+        """success can be explicitly set to False."""
+        result = PartialSyncResult(success=False)
+        assert result.success is False
+
+    def test_mixed_success_and_warnings(self):
+        """Result can have both successful fields and warnings."""
+        result = PartialSyncResult()
+
+        # Some fields succeed
+        result.add_success("title")
+        result.add_success("studio")
+
+        # Some fields fail
+        result.add_warning("performers", ValueError("error"))
+
+        assert len(result.fields_updated) == 2
+        assert len(result.warnings) == 1
+        assert result.success is True  # Overall still success
+        assert result.has_warnings is True
+
+    def test_warning_from_exception_preserves_type(self):
+        """add_warning preserves exception type name."""
+        result = PartialSyncResult()
+
+        class CustomError(Exception):
+            pass
+
+        result.add_warning("custom_field", CustomError("custom message"))
+
+        assert result.warnings[0].error_type == "CustomError"
