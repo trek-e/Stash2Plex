@@ -114,3 +114,41 @@ class TestQueueManager:
         finally:
             # Restore
             manager_module.persistqueue = original_pq
+
+    def test_uses_default_fallback_when_no_env_var(self, monkeypatch):
+        """QueueManager falls back to home dir when no env var and no data_dir."""
+        from sync_queue.manager import QueueManager
+        import os
+
+        # Ensure STASH_PLUGIN_DATA is not set
+        monkeypatch.delenv("STASH_PLUGIN_DATA", raising=False)
+
+        # Mock expanduser to return a known path
+        mock_home = "/mock/home"
+        monkeypatch.setattr(os.path, "expanduser", lambda x: mock_home if x == "~" else x)
+
+        # Mock makedirs to avoid actual directory creation
+        created_paths = []
+        original_makedirs = os.makedirs
+
+        def mock_makedirs(path, exist_ok=False):
+            created_paths.append(path)
+
+        monkeypatch.setattr(os, "makedirs", mock_makedirs)
+
+        # Need to also mock _init_queue to avoid actual queue creation
+        import sync_queue.manager as manager_module
+        monkeypatch.setattr(
+            manager_module.QueueManager,
+            "_init_queue",
+            lambda self: MagicMock()
+        )
+
+        manager = QueueManager()
+
+        # Verify fallback path was used
+        expected_data_dir = os.path.join(mock_home, ".stash", "plugins", "PlexSync", "data")
+        assert manager.data_dir == expected_data_dir
+        assert manager.queue_path == os.path.join(expected_data_dir, "queue")
+
+        manager.shutdown()
