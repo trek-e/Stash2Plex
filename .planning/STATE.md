@@ -2,25 +2,27 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-03)
+See: .planning/PROJECT.md (updated 2026-02-04)
 
 **Core value:** Reliable sync — when metadata changes in Stash, it eventually reaches Plex
-**Current focus:** v1.2 Queue UI Improvements
 
 ## Current Position
 
-Phase: 13 of 13 (Dynamic Queue Timeout)
-Plan: 01 of 01 complete
-Status: v1.2 Milestone complete
-Last activity: 2026-02-04 — Completed 13-01-PLAN.md
+Milestone: v1.2 complete
+Status: Between milestones
+Last activity: 2026-02-04 — Archived v1.2 milestone
 
-Progress: [████████████████████] 100% (3/3 phases)
+## Milestones
 
-## Decisions Log
+| Version | Status | Phases | Plans |
+|---------|--------|--------|-------|
+| v1.0 | Shipped | 1-5 | 16 |
+| v1.1 | Shipped | 1-10 + 2.1 | 27 |
+| v1.2 | Shipped | 11-13 | 3 |
 
-See PROJECT.md Key Decisions table for full history.
+## v1.2 Key Decisions
 
-Recent decisions carried from v1.1:
+Carried from v1.1:
 - LOCKED: Missing fields clear Plex values
 - All sync toggles default True for backward compatibility
 
@@ -32,44 +34,16 @@ Phase 12 decisions:
 Phase 13 decisions:
 - Blend measured and default for small samples (1-4 jobs) - gradually trust measured data
 
-## Roadmap Evolution
-
-- v1.0: Phases 1-5 (queue, validation, plex client, processor, late updates) — archived
-- v1.1: Phases 1-10 + 2.1 (testing, docs, performance, observability, reliability, toggles) — archived
-- v1.2: Phases 11-13 (queue management UI, process queue button, dynamic timeout) — COMPLETE
-
-## Milestone Summary
-
-### v1.0 (Complete 2026-02-03)
-
-See .planning/milestones/v1.0-ROADMAP.md
-
-### v1.1 Foundation Hardening (Complete 2026-02-03)
-
-See .planning/milestones/v1.1-ROADMAP.md
-
-### v1.2 Queue UI Improvements (Complete 2026-02-04)
-
-**Target:**
-- Phase 11: Queue Management UI (5 requirements) - COMPLETE
-- Phase 12: Process Queue Button (4 requirements) - COMPLETE
-- Phase 13: Dynamic Queue Timeout (5 requirements) - COMPLETE
-
-**Total:** 14 requirements across 3 phases - ALL COMPLETE
-
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 13-01-PLAN.md (v1.2 milestone complete)
+Stopped at: Milestone v1.2 archived
 Resume file: None
 
 ## Next Steps
 
-v1.2 Queue UI Improvements milestone is complete.
+All planned milestones complete. Ready for:
+- Release packaging (v1.2 tag)
+- Next milestone planning (v1.3)
 
-All phases delivered:
-- Dynamic queue timeout using measured processing times
-- Process Queue task for foreground processing without timeout limits
-- Queue management UI with status, clear, and DLQ operations
-
-Ready for release packaging or next milestone planning.
+See PROJECT.md Out of Scope and Future Requirements sections for potential v1.3 work.

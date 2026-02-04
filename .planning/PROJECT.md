@@ -8,18 +8,25 @@ Improvements to the PlexSync plugin for Stash, which syncs metadata from Stash t
 
 Reliable sync: when metadata changes in Stash, it eventually reaches Plex — even if Plex was temporarily unavailable or Stash hadn't finished indexing yet.
 
-## Current State (v1.1)
+## Current State (v1.2)
 
-**Shipped:** 2026-02-03
+**Shipped:** 2026-02-04
 
-PlexSync v1.1 provides a hardened foundation:
+PlexSync v1.2 adds user-facing queue management:
+- Queue status viewing and clearing from Stash UI
+- Dead letter queue management (clear, purge old entries)
+- Process Queue button for foreground processing without timeout limits
+- Dynamic timeout based on measured processing times
+- 5 new plugin tasks (7 total)
+- ~370 lines added
+
+Built on v1.1 foundation:
 - 500+ tests with >80% coverage across all modules
 - Complete documentation (user guide, architecture, API reference)
 - Disk-backed caching reducing Plex API calls
 - SyncStats with batch summary logging
 - Partial failure recovery with per-field tracking
 - Metadata sync toggles for selective field syncing
-- 18,904 lines of Python
 
 **Tech stack:** Python 3.9+, SQLite (persist-queue), plexapi, pydantic, diskcache, MkDocs
 
@@ -49,11 +56,11 @@ PlexSync v1.1 provides a hardened foundation:
 - [x] Partial failure recovery with per-field error tracking
 - [x] Metadata sync toggles (enable/disable each field category)
 
-### Active (v1.2)
+### Validated (v1.2)
 
-- [ ] Queue Management UI — button to delete queue/clear dead items from Stash UI
-- [ ] Process Queue Button — manual trigger for stalled queues
-- [ ] Dynamic Queue Timeout — timeout based on item count × avg processing time
+- [x] Queue Management UI — view status, clear queue, clear/purge DLQ from Stash UI
+- [x] Process Queue Button — foreground processing until queue empty
+- [x] Dynamic Queue Timeout — timeout based on item count × avg processing time
 
 ### Out of Scope
 
@@ -92,7 +99,7 @@ PlexSync v1.1 provides a hardened foundation:
 |---------|--------|------|-------|
 | v1.0 | Complete | 2026-02-03 | 5 phases, 16 plans, 76 commits |
 | v1.1 | Complete | 2026-02-03 | 11 phases, 27 plans, 136 commits |
-| v1.2 | Planned | — | Queue UI improvements (phases 11-13) |
+| v1.2 | Complete | 2026-02-04 | 3 phases, 3 plans, 15 commits |
 
 ---
-*Last updated: 2026-02-03 after v1.1 milestone*
+*Last updated: 2026-02-04 after v1.2 milestone*
