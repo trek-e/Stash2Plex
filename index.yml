@@ -6,9 +6,9 @@
   name: Stash2Plex
   metadata:
     description: Sync metadata from Stash to Plex with queue-based reliability. Features persistent queue, automatic retry with exponential backoff, performance caching, and selective field sync toggles.
-  version: 1.1.5-f7b7a9f
-  date: "2026-02-03 20:15:00"
+  version: 1.1.6-e90dc10
+  date: "2026-02-03 20:50:00"
   path: Stash2Plex.zip
-  sha256: 022a175886c7601b5577ad835f148b129fc1853ac240c644ba888745f165d27c
+  sha256: a65e98f1cc5cfbc05daccaf134ac765efedd03d7ae27b11f4100e9e6fab24f04
   requires:
     - PythonDepManager
