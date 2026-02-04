@@ -845,17 +845,29 @@ def main():
     # Worker thread is daemon, so it dies when main process exits
     if worker and queue_manager:
         import time
+        from worker.stats import SyncStats
         queue = queue_manager.get_queue()
+        data_dir = get_plugin_data_dir()
 
-        # Dynamic timeout: ~2 seconds per item, min 30s, max 600s (10 min)
+        # Load stats for dynamic timeout calculation
+        stats_path = os.path.join(data_dir, 'stats.json')
+        stats = SyncStats.load_from_file(stats_path)
+
+        # Dynamic timeout based on measured processing time
         initial_size = queue.size
-        max_wait = max(30, min(initial_size * 2, 600))
+        max_wait = stats.get_estimated_timeout(initial_size)
         wait_interval = 0.5
         waited = 0
         last_size = initial_size
 
+        # Determine time_per_item for messaging
+        time_per_item = stats.avg_processing_time if stats.jobs_processed >= 5 else stats.DEFAULT_TIME_PER_ITEM
+
         if initial_size > 0:
-            log_info(f"Processing {initial_size} queued item(s), timeout {max_wait}s...")
+            if stats.jobs_processed >= 5:
+                log_info(f"Processing {initial_size} queued item(s), timeout {max_wait:.0f}s (based on {stats.avg_processing_time:.2f}s/item avg)")
+            else:
+                log_info(f"Processing {initial_size} queued item(s), timeout {max_wait:.0f}s (using default estimate)")
 
         while waited < max_wait:
             try:
@@ -873,7 +885,13 @@ def main():
                 break
 
         if waited >= max_wait and queue.size > 0:
-            log_warn(f"Timeout after {max_wait}s ({queue.size} items remaining - run 'Sync Recent' task to continue)")
+            remaining = queue.size
+            estimated_remaining_time = remaining * time_per_item
+            log_warn(
+                f"Timeout after {max_wait:.0f}s with {remaining} items remaining "
+                f"(est. {estimated_remaining_time:.0f}s more needed). "
+                f"Run 'Process Queue' task to continue without timeout limits."
+            )
 
     # Return empty response (success)
     print(json.dumps({"output": "ok"}))
