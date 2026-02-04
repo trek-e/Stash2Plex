@@ -380,11 +380,15 @@ def handle_hook(hook_context: dict, stash=None):
     elif hook_type == "Scene.Create.Post":
         # Scene was just created by Stash scan
         # If trigger_plex_scan is enabled, notify Plex so it discovers the file
-        if scene_id and config and config.trigger_plex_scan:
-            log_debug(f"New scene {scene_id} created, triggering Plex scan")
-            trigger_plex_scan_for_scene(scene_id, stash)
+        if not scene_id:
+            log_trace(f"Skipping {hook_type} - no scene ID")
+        elif not config:
+            log_trace(f"Skipping {hook_type} - config not loaded")
+        elif not config.trigger_plex_scan:
+            log_trace(f"Skipping {hook_type} - trigger_plex_scan disabled")
         else:
-            log_trace(f"Skipping {hook_type} - scene creation from scan")
+            log_info(f"New scene {scene_id} created, triggering Plex scan")
+            trigger_plex_scan_for_scene(scene_id, stash)
     else:
         log_trace(f"Unhandled hook type: {hook_type}")
 
@@ -542,9 +546,15 @@ def main():
     is_hook = "hookContext" in args
 
     # For hooks: create minimal stash connection to check for scans
+    # Exception: Scene.Create.Post may need to trigger Plex scan even during Stash scan
     if is_hook:
+        hook_context = args.get("hookContext", {})
+        hook_type = hook_context.get("type", "")
         temp_stash = get_stash_interface(input_data)
-        if is_scan_job_running(temp_stash):
+
+        # Allow Scene.Create.Post through - it triggers Plex scan for new files
+        # Other hooks (Scene.Update.Post) are skipped during scans to avoid noise
+        if hook_type != "Scene.Create.Post" and is_scan_job_running(temp_stash):
             # Scan running - exit immediately without initialization
             print(json.dumps({"output": "ok"}))
             return

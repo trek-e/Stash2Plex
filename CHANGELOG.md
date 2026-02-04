@@ -5,6 +5,12 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.6] - 2026-02-03
+
+### Fixed
+
+- **Scene.Create.Post During Scans**: Fixed `trigger_plex_scan` not working because Scene.Create.Post hooks were being skipped during active Stash scans. Now allows Scene.Create.Post through to trigger Plex scan for new files.
+
 ## [1.1.5] - 2026-02-03
 
 ### Added
@@ -98,6 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `connect_timeout` - Plex connection timeout
 - `read_timeout` - Plex read timeout
 
+[1.1.6]: https://github.com/trek-e/Stash2Plex/compare/v1.1.5...v1.1.6
 [1.1.5]: https://github.com/trek-e/Stash2Plex/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/trek-e/Stash2Plex/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/trek-e/Stash2Plex/compare/v1.1.2...v1.1.3
