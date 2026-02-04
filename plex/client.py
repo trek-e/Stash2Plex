@@ -185,3 +185,26 @@ class PlexClient:
             return self.server.library.section(section_name)
         except Exception as exc:
             raise translate_plex_exception(exc) from exc
+
+    def scan_library(self, section_name: str, path: Optional[str] = None) -> None:
+        """
+        Trigger a library scan for a specific section.
+
+        Args:
+            section_name: Name of the library section to scan
+            path: Optional path to scan (partial scan). If None, scans entire section.
+
+        Raises:
+            PlexNotFound: If section doesn't exist
+            PlexTemporaryError: On connection errors
+        """
+        try:
+            section = self.server.library.section(section_name)
+            if path:
+                logger.debug(f"Triggering partial scan of '{section_name}' for path: {path}")
+                section.update(path=path)
+            else:
+                logger.debug(f"Triggering full scan of '{section_name}'")
+                section.update()
+        except Exception as exc:
+            raise translate_plex_exception(exc) from exc

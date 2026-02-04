@@ -256,6 +256,69 @@ def shutdown():
     log_trace("Shutdown complete")
 
 
+def trigger_plex_scan_for_scene(scene_id: int, stash) -> bool:
+    """
+    Trigger a Plex library scan for a scene's file location.
+
+    Args:
+        scene_id: Stash scene ID
+        stash: StashInterface for API calls
+
+    Returns:
+        True if scan was triggered, False otherwise
+    """
+    if not config or not config.trigger_plex_scan:
+        return False
+
+    if not config.plex_library:
+        log_warn("trigger_plex_scan enabled but plex_library not set")
+        return False
+
+    if not stash:
+        log_warn("No Stash connection available for scene lookup")
+        return False
+
+    try:
+        # Get scene file path
+        scene = stash.find_scene(scene_id)
+        if not scene:
+            log_warn(f"Scene {scene_id} not found")
+            return False
+
+        files = scene.get('files', [])
+        if not files:
+            log_warn(f"Scene {scene_id} has no files")
+            return False
+
+        file_path = files[0].get('path')
+        if not file_path:
+            log_warn(f"Scene {scene_id} file has no path")
+            return False
+
+        # Get the parent directory for partial scan
+        import os
+        scan_path = os.path.dirname(file_path)
+
+        # Create Plex client and trigger scan
+        from plex.client import PlexClient
+        plex_client = PlexClient(
+            url=config.plex_url,
+            token=config.plex_token,
+            connect_timeout=config.plex_connect_timeout,
+            read_timeout=config.plex_read_timeout
+        )
+
+        plex_client.scan_library(config.plex_library, path=scan_path)
+        log_info(f"Triggered Plex scan for: {scan_path}")
+        return True
+
+    except Exception as e:
+        log_error(f"Failed to trigger Plex scan: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def handle_hook(hook_context: dict, stash=None):
     """
     Handle incoming Stash hook.
@@ -287,6 +350,15 @@ def handle_hook(hook_context: dict, stash=None):
             log_trace(f"Skipping {hook_type} - no input data (likely scan)")
             return
 
+        # Check if this is an identification event (stash_ids added)
+        # If so, trigger Plex library scan so Plex discovers the new file
+        if 'stash_ids' in input_data and scene_id:
+            log_debug(f"Scene {scene_id} identified via stash-box")
+            if trigger_plex_scan_for_scene(scene_id, stash):
+                # After triggering scan, also queue the metadata sync
+                # The worker will retry if Plex hasn't found the file yet
+                pass
+
         if scene_id:
             data_dir = get_plugin_data_dir()
             try:
@@ -306,7 +378,13 @@ def handle_hook(hook_context: dict, stash=None):
         else:
             log_warn(f"{hook_type} hook missing scene ID")
     elif hook_type == "Scene.Create.Post":
-        log_trace(f"Skipping {hook_type} - scene creation from scan")
+        # Scene was just created by Stash scan
+        # If trigger_plex_scan is enabled, notify Plex so it discovers the file
+        if scene_id and config and config.trigger_plex_scan:
+            log_debug(f"New scene {scene_id} created, triggering Plex scan")
+            trigger_plex_scan_for_scene(scene_id, stash)
+        else:
+            log_trace(f"Skipping {hook_type} - scene creation from scan")
     else:
         log_trace(f"Unhandled hook type: {hook_type}")
 

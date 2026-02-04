@@ -5,6 +5,46 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.5] - 2026-02-03
+
+### Added
+
+- **Plex Library Scan Trigger**: New `trigger_plex_scan` setting that triggers a Plex library scan when Stash identifies a new scene. This ensures Plex discovers files added via Stash before metadata sync occurs.
+- **Scene.Create.Post Hook**: Plugin now listens for new scene creation events to trigger Plex scans immediately when files are discovered.
+
+### Configuration
+
+- `trigger_plex_scan` - Enable automatic Plex library scans when Stash identifies scenes (default: false)
+
+## [1.1.4] - 2026-02-03
+
+### Changed
+
+- **Batch Scene Fetching**: Instead of making individual GraphQL calls per scene, all scene data is now fetched in a single batch query. This prevents Stash from killing the plugin due to timeout when processing large queues.
+
+## [1.1.3] - 2026-02-03
+
+### Added
+
+- **Dynamic Queue Timeout**: Processing timeout now scales based on queue size (~2s per item, min 30s, max 600s)
+- **Progress Logging**: Queue processing logs progress every 10 items
+
+### Changed
+
+- **Timeout Recovery**: Better timeout error message with recovery instructions
+
+## [1.1.2] - 2026-02-03
+
+### Fixed
+
+- **Log Noise**: Sanitization messages (for cleaning invisible characters) now log at debug level instead of warning, reducing false error noise in Stash logs
+
+## [1.1.1] - 2026-02-03
+
+### Fixed
+
+- **Job Validation**: Path, poster_url, and background_url fields are now correctly included in sanitized job data, fixing "missing file path" errors
+
 ## [1.1.0] - 2026-02-03
 
 ### Added
@@ -58,5 +98,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `connect_timeout` - Plex connection timeout
 - `read_timeout` - Plex read timeout
 
-[1.1.0]: https://github.com/trek-e/Stash2Plex/compare/v1.0...v1.1
-[1.0.0]: https://github.com/trek-e/Stash2Plex/releases/tag/v1.0
+[1.1.5]: https://github.com/trek-e/Stash2Plex/compare/v1.1.4...v1.1.5
+[1.1.4]: https://github.com/trek-e/Stash2Plex/compare/v1.1.3...v1.1.4
+[1.1.3]: https://github.com/trek-e/Stash2Plex/compare/v1.1.2...v1.1.3
+[1.1.2]: https://github.com/trek-e/Stash2Plex/compare/v1.1.1...v1.1.2
+[1.1.1]: https://github.com/trek-e/Stash2Plex/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/trek-e/Stash2Plex/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/trek-e/Stash2Plex/releases/tag/v1.0.0

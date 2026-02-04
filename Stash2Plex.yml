@@ -1,7 +1,7 @@
 # requires: PythonDepManager
 name: Stash2Plex
 description: Sync metadata from Stash to Plex with queue-based reliability
-version: 1.1.4
+version: 1.1.5
 url: https://github.com/trek-e/Stash2Plex
 
 exec:
@@ -15,6 +15,7 @@ hooks:
     description: Syncs scene metadata to Plex when a scene is manually updated
     triggeredBy:
       - Scene.Update.Post
+      - Scene.Create.Post
 
 tasks:
   - name: Sync All Scenes to Plex
@@ -107,4 +108,8 @@ settings:
   sync_collection:
     displayName: "Sync Collection"
     description: "Add items to Plex collection based on studio name"
+    type: BOOLEAN
+  trigger_plex_scan:
+    displayName: "Trigger Plex Scan"
+    description: "Trigger Plex library scan when Stash identifies a new scene (default: false)"
     type: BOOLEAN

@@ -108,6 +108,12 @@ class Stash2PlexConfig(BaseModel):
         description="Add items to Plex collection based on studio name"
     )
 
+    # Plex library scan trigger
+    trigger_plex_scan: bool = Field(
+        default=False,
+        description="Trigger Plex library scan when Stash identifies a new scene"
+    )
+
     # Stash connection (for fetching images)
     stash_url: Optional[str] = Field(
         default=None,
@@ -146,7 +152,7 @@ class Stash2PlexConfig(BaseModel):
         'strict_matching', 'preserve_plex_edits',
         'sync_master', 'sync_studio', 'sync_summary', 'sync_tagline',
         'sync_date', 'sync_performers', 'sync_tags', 'sync_poster',
-        'sync_background', 'sync_collection',
+        'sync_background', 'sync_collection', 'trigger_plex_scan',
         mode='before'
     )
     @classmethod
