@@ -40,6 +40,8 @@ class SyncStats:
         Success rate: 50.0%
     """
 
+    DEFAULT_TIME_PER_ITEM: float = 2.0  # Conservative default for cold start
+
     jobs_processed: int = 0
     jobs_succeeded: int = 0
     jobs_failed: int = 0
@@ -114,6 +116,42 @@ class SyncStats:
         if self.jobs_processed == 0:
             return 0.0
         return self.total_processing_time / self.jobs_processed
+
+    def get_estimated_timeout(
+        self,
+        item_count: int,
+        buffer_factor: float = 1.5,
+        min_timeout: float = 30.0,
+        max_timeout: float = 600.0
+    ) -> float:
+        """
+        Calculate estimated timeout for processing item_count items.
+
+        Uses avg_processing_time if available (jobs_processed >= 5),
+        otherwise falls back to DEFAULT_TIME_PER_ITEM. Applies buffer_factor
+        for safety margin and clamps result to [min_timeout, max_timeout].
+
+        Args:
+            item_count: Number of items to process
+            buffer_factor: Multiplier for safety margin (default 1.5 = 50% buffer)
+            min_timeout: Minimum timeout in seconds (default 30.0)
+            max_timeout: Maximum timeout in seconds (default 600.0)
+
+        Returns:
+            Calculated timeout in seconds
+        """
+        # Use measured average if we have sufficient sample size
+        if self.jobs_processed >= 5:
+            time_per_item = self.avg_processing_time
+        elif self.jobs_processed > 0:
+            # Blend measured with default for small samples
+            weight = self.jobs_processed / 5.0
+            time_per_item = (weight * self.avg_processing_time) + ((1 - weight) * self.DEFAULT_TIME_PER_ITEM)
+        else:
+            time_per_item = self.DEFAULT_TIME_PER_ITEM
+
+        estimated = item_count * time_per_item * buffer_factor
+        return max(min_timeout, min(estimated, max_timeout))
 
     def to_dict(self) -> dict:
         """
