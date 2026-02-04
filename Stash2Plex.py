@@ -654,6 +654,9 @@ def handle_task(task_args: dict, stash=None):
         days = task_args.get('days', 30)
         handle_purge_dlq(days)
         return
+    elif mode == 'process_queue':
+        handle_process_queue()
+        return
 
     # Sync tasks require Stash connection
     from sync_queue.operations import enqueue

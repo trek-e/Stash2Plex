@@ -43,6 +43,10 @@ tasks:
     defaultArgs:
       mode: purge_dlq
       days: 30
+  - name: Process Queue
+    description: Process all pending queue items until empty (resumes stuck queues)
+    defaultArgs:
+      mode: process_queue
 
 settings:
   plex_url:
