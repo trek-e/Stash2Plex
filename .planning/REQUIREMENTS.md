@@ -26,11 +26,11 @@ Requirements for Queue UI Improvements milestone. Each maps to roadmap phases.
 
 ### Dynamic Timeout
 
-- [ ] **TIME-01**: System tracks average time to process each queue item
-- [ ] **TIME-02**: System calculates required timeout based on items × avg_time
-- [ ] **TIME-03**: System requests appropriate timeout from Stash plugin system
-- [ ] **TIME-04**: System handles cases where calculated timeout exceeds Stash limits
-- [ ] **TIME-05**: System provides fallback behavior when timeout cannot be extended
+- [x] **TIME-01**: System tracks average time to process each queue item
+- [x] **TIME-02**: System calculates required timeout based on items × avg_time
+- [x] **TIME-03**: System requests appropriate timeout from Stash plugin system (N/A - Stash doesn't expose API)
+- [x] **TIME-04**: System handles cases where calculated timeout exceeds Stash limits
+- [x] **TIME-05**: System provides fallback behavior when timeout cannot be extended
 
 ## Future Requirements
 
@@ -75,11 +75,11 @@ Which phases cover which requirements.
 | PROC-04 | Phase 12 | Complete |
 | PROC-05 | Phase 12 | Complete |
 | PROC-06 | Phase 12 | Complete |
-| TIME-01 | Phase 13 | Pending |
-| TIME-02 | Phase 13 | Pending |
-| TIME-03 | Phase 13 | Pending |
-| TIME-04 | Phase 13 | Pending |
-| TIME-05 | Phase 13 | Pending |
+| TIME-01 | Phase 13 | Complete |
+| TIME-02 | Phase 13 | Complete |
+| TIME-03 | Phase 13 | N/A (Stash limitation) |
+| TIME-04 | Phase 13 | Complete |
+| TIME-05 | Phase 13 | Complete |
 
 **Coverage:**
 - v1.2 requirements: 14 total

@@ -8,7 +8,7 @@ Focus: User-facing queue management improvements. Allow users to manage stuck/de
 
 - [x] **v1.0 MVP** — Phases 1-5 (shipped 2026-02-03) → [archived](milestones/v1.0-ROADMAP.md)
 - [x] **v1.1 Foundation Hardening** — Phases 1-10 + 2.1 (shipped 2026-02-03) → [archived](milestones/v1.1-ROADMAP.md)
-- [ ] **v1.2 Queue UI** — Phases 11-13 (in progress)
+- [x] **v1.2 Queue UI** — Phases 11-13 (shipped 2026-02-04) → [archived](milestones/v1.2-ROADMAP.md)
 
 ## Phases
 
@@ -50,7 +50,7 @@ Plans:
 
 ---
 
-### Phase 13: Dynamic Queue Timeout
+### Phase 13: Dynamic Queue Timeout ✓
 **Goal:** Make queue processing timeout dynamic based on item count and average processing time
 
 - Track average time to process each queue item
@@ -66,7 +66,7 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [ ] 13-01-PLAN.md — Dynamic timeout calculation using measured processing times
+- [x] 13-01-PLAN.md — Dynamic timeout calculation using measured processing times
 
 ---
 
