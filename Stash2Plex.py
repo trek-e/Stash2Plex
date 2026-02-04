@@ -9,6 +9,7 @@ starts background worker, and handles Stash hooks.
 import os
 import sys
 import json
+import time
 
 
 # Stash plugin log levels - prefix format: \x01 + level + \x02 + message
@@ -502,6 +503,128 @@ def handle_purge_dlq(days: int = 30):
 
     except Exception as e:
         log_error(f"Failed to purge old DLQ entries: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def handle_process_queue():
+    """
+    Process all pending queue items until empty.
+
+    Runs in foreground (not daemon thread), processing until queue is empty.
+    Reports progress via log_progress() for Stash UI visibility.
+    Respects circuit breaker - stops if Plex becomes unavailable.
+    """
+    global config
+
+    try:
+        data_dir = get_plugin_data_dir()
+        queue_path = os.path.join(data_dir, 'queue')
+
+        # Check initial queue state
+        from sync_queue.operations import get_stats, get_pending, ack_job, fail_job
+        stats = get_stats(queue_path)
+        total = stats['pending'] + stats['in_progress']
+
+        if total == 0:
+            log_info("Queue is empty - nothing to process")
+            return
+
+        log_info(f"Starting batch processing of {total} items...")
+        log_progress(0)
+
+        # Initialize infrastructure
+        from sync_queue.manager import QueueManager
+        from sync_queue.dlq import DeadLetterQueue
+        from worker.processor import SyncWorker, TransientError, PermanentError
+
+        # Configure device identity before Plex operations
+        configure_plex_device_identity(data_dir)
+
+        queue_manager_local = QueueManager(data_dir)
+        queue = queue_manager_local.get_queue()
+        dlq_local = DeadLetterQueue(data_dir)
+
+        # Create worker instance (handles Plex client, caches, circuit breaker)
+        worker_local = SyncWorker(queue, dlq_local, config, data_dir=data_dir)
+
+        processed = 0
+        failed = 0
+        start_time = time.time()
+        last_progress_time = start_time
+
+        while True:
+            # Check circuit breaker before processing
+            if not worker_local.circuit_breaker.can_execute():
+                log_warn("Circuit breaker OPEN - Plex may be unavailable")
+                log_info(f"Processed {processed} items before circuit break")
+                break
+
+            # Get next job (1 second timeout to check for empty queue)
+            job = get_pending(queue, timeout=1)
+            if job is None:
+                break  # Queue is empty
+
+            scene_id = job.get('scene_id', '?')
+            retry_count = job.get('retry_count', 0)
+
+            try:
+                worker_local._process_job(job)
+                ack_job(queue, job)
+                worker_local.circuit_breaker.record_success()
+                processed += 1
+
+            except TransientError as e:
+                worker_local.circuit_breaker.record_failure()
+                job = worker_local._prepare_for_retry(job, e)
+                max_retries = worker_local._get_max_retries_for_error(e)
+
+                if job.get('retry_count', 0) >= max_retries:
+                    log_warn(f"Scene {scene_id}: max retries exceeded, moving to DLQ")
+                    fail_job(queue, job)
+                    dlq_local.add(job, e, job.get('retry_count', 0))
+                    failed += 1
+                else:
+                    # Re-queue for retry
+                    worker_local._requeue_with_metadata(job)
+                    log_debug(f"Scene {scene_id}: transient error, will retry")
+
+            except PermanentError as e:
+                log_warn(f"Scene {scene_id}: permanent error: {e}")
+                fail_job(queue, job)
+                dlq_local.add(job, e, retry_count)
+                failed += 1
+
+            except Exception as e:
+                log_error(f"Scene {scene_id}: unexpected error: {e}")
+                fail_job(queue, job)
+                dlq_local.add(job, e, retry_count)
+                failed += 1
+
+            # Report progress every 5 items or every 10 seconds
+            now = time.time()
+            if processed % 5 == 0 or (now - last_progress_time) >= 10:
+                progress = (processed / total) * 100 if total > 0 else 100
+                remaining = queue.size
+                log_progress(progress)
+                elapsed = now - start_time
+                rate = processed / elapsed if elapsed > 0 else 0
+                log_info(f"Progress: {processed}/{total} ({progress:.0f}%), "
+                        f"{remaining} remaining, {rate:.1f} items/sec")
+                last_progress_time = now
+
+        # Final summary
+        elapsed = time.time() - start_time
+        log_progress(100)
+        log_info(f"Batch processing complete: {processed} succeeded, {failed} failed in {elapsed:.1f}s")
+
+        # Show DLQ count if items were added
+        if failed > 0:
+            dlq_count = dlq_local.get_count()
+            log_warn(f"DLQ contains {dlq_count} items requiring review")
+
+    except Exception as e:
+        log_error(f"Process queue error: {e}")
         import traceback
         traceback.print_exc()
 
