@@ -26,6 +26,23 @@ tasks:
     description: Sync scenes updated in the last 24 hours
     defaultArgs:
       mode: recent
+  - name: View Queue Status
+    description: Show current queue and DLQ statistics in logs
+    defaultArgs:
+      mode: queue_status
+  - name: Clear Pending Queue
+    description: "WARNING: Remove all pending queue items (completed/in-progress unaffected)"
+    defaultArgs:
+      mode: clear_queue
+  - name: Clear Dead Letter Queue
+    description: "WARNING: Remove all items from dead letter queue"
+    defaultArgs:
+      mode: clear_dlq
+  - name: Purge Old DLQ Entries
+    description: Remove DLQ entries older than 30 days
+    defaultArgs:
+      mode: purge_dlq
+      days: 30
 
 settings:
   plex_url:
