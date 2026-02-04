@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 11 of 13 (Queue Management UI)
+Phase: 12 of 13 (Process Queue Button)
 Plan: 01 of 01 complete
 Status: Phase complete
-Last activity: 2026-02-04 — Completed 11-01-PLAN.md
+Last activity: 2026-02-04 — Completed 12-01-PLAN.md
 
-Progress: [███████░░░░░░░░░░░░░] 33% (1/3 phases)
+Progress: [██████████████░░░░░░] 67% (2/3 phases)
 
 ## Decisions Log
 
@@ -23,6 +23,11 @@ See PROJECT.md Key Decisions table for full history.
 Recent decisions carried from v1.1:
 - LOCKED: Missing fields clear Plex values
 - All sync toggles default True for backward compatibility
+
+Phase 12 decisions:
+- Use local worker instance (worker_local) to avoid conflicts with global daemon worker
+- Progress reporting every 5 items OR every 10 seconds (whichever first)
+- Circuit breaker checked before each job, not just at start
 
 ## Roadmap Evolution
 
@@ -43,8 +48,8 @@ See .planning/milestones/v1.1-ROADMAP.md
 ### v1.2 Queue UI Improvements (Active)
 
 **Target:**
-- Phase 11: Queue Management UI (5 requirements)
-- Phase 12: Process Queue Button (4 requirements)
+- Phase 11: Queue Management UI (5 requirements) - COMPLETE
+- Phase 12: Process Queue Button (4 requirements) - COMPLETE
 - Phase 13: Dynamic Queue Timeout (5 requirements)
 
 **Total:** 14 requirements across 3 phases
@@ -52,11 +57,11 @@ See .planning/milestones/v1.1-ROADMAP.md
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 11-01-PLAN.md
+Stopped at: Completed 12-01-PLAN.md
 Resume file: None
 
 ## Next Steps
 
-Phase 11 complete. Ready for Phase 12: Process Queue Button.
+Phase 12 complete. Ready for Phase 13: Dynamic Queue Timeout.
 
-Run `/gsd:plan-phase 12` to create execution plan.
+Run `/gsd:plan-phase 13` to create execution plan.
