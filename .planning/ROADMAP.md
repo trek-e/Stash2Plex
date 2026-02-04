@@ -43,8 +43,10 @@ Plans:
 
 **Depends on:** Phase 11
 
+**Plans:** 1 plan
+
 Plans:
-- [ ] TBD (run /gsd:plan-phase 12 to break down)
+- [ ] 12-01-PLAN.md — Add foreground queue processor with progress reporting
 
 ---
 
@@ -81,10 +83,10 @@ Phase 13 (Dynamic Timeout)
 | Phase | Complexity | Plans |
 |-------|------------|-------|
 | 11. Queue Management UI | Low | 1 |
-| 12. Process Queue Button | Low | 1-2 |
+| 12. Process Queue Button | Low | 1 |
 | 13. Dynamic Queue Timeout | Medium | 1-2 |
 
-**Total:** ~3-5 plans across 3 phases
+**Total:** ~3-4 plans across 3 phases
 
 ---
 *Created: 2026-02-03*
