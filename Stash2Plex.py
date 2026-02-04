@@ -393,18 +393,147 @@ def handle_hook(hook_context: dict, stash=None):
         log_trace(f"Unhandled hook type: {hook_type}")
 
 
+def handle_queue_status():
+    """Display current queue and DLQ statistics."""
+    try:
+        data_dir = get_plugin_data_dir()
+        queue_path = os.path.join(data_dir, 'queue')
+
+        from sync_queue.operations import get_stats
+        from sync_queue.dlq import DeadLetterQueue
+
+        stats = get_stats(queue_path)
+        dlq = DeadLetterQueue(data_dir)
+        dlq_count = dlq.get_count()
+        dlq_summary = dlq.get_error_summary()
+
+        log_info("=== Queue Status ===")
+        log_info(f"Pending: {stats['pending']}")
+        log_info(f"In Progress: {stats['in_progress']}")
+        log_info(f"Completed: {stats['completed']}")
+        log_info(f"Failed (queue): {stats['failed']}")
+        log_info(f"Dead Letter Queue: {dlq_count} items")
+
+        if dlq_summary:
+            log_info("DLQ Error Breakdown:")
+            for error_type, count in dlq_summary.items():
+                log_info(f"  {error_type}: {count}")
+
+    except Exception as e:
+        log_error(f"Failed to get queue status: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def handle_clear_queue():
+    """Clear all pending queue items."""
+    try:
+        data_dir = get_plugin_data_dir()
+        queue_path = os.path.join(data_dir, 'queue')
+
+        from sync_queue.operations import get_stats, clear_pending_items
+
+        before_stats = get_stats(queue_path)
+        pending = before_stats['pending']
+
+        if pending == 0:
+            log_info("Queue is empty - nothing to clear")
+            return
+
+        log_warn(f"Clearing {pending} pending queue items...")
+        deleted = clear_pending_items(queue_path)
+        log_info(f"Successfully cleared {deleted} pending items from queue")
+
+        after_stats = get_stats(queue_path)
+        log_info(f"Remaining - Pending: {after_stats['pending']}, In Progress: {after_stats['in_progress']}")
+
+    except Exception as e:
+        log_error(f"Failed to clear queue: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def handle_clear_dlq():
+    """Clear all items from dead letter queue."""
+    try:
+        data_dir = get_plugin_data_dir()
+
+        from sync_queue.dlq import DeadLetterQueue
+        dlq = DeadLetterQueue(data_dir)
+
+        count_before = dlq.get_count()
+
+        if count_before == 0:
+            log_info("Dead letter queue is empty - nothing to clear")
+            return
+
+        log_warn(f"Clearing {count_before} items from dead letter queue...")
+
+        with dlq._get_connection() as conn:
+            cursor = conn.execute("DELETE FROM dead_letters")
+            deleted = cursor.rowcount
+            conn.commit()
+
+        log_info(f"Successfully cleared {deleted} items from DLQ")
+
+    except Exception as e:
+        log_error(f"Failed to clear DLQ: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def handle_purge_dlq(days: int = 30):
+    """Remove DLQ entries older than specified days."""
+    try:
+        data_dir = get_plugin_data_dir()
+
+        from sync_queue.dlq import DeadLetterQueue
+        dlq = DeadLetterQueue(data_dir)
+
+        count_before = dlq.get_count()
+        log_info(f"Purging DLQ entries older than {days} days...")
+
+        dlq.delete_older_than(days)
+
+        count_after = dlq.get_count()
+        removed = count_before - count_after
+
+        log_info(f"Removed {removed} old DLQ entries ({count_after} remain)")
+
+    except Exception as e:
+        log_error(f"Failed to purge old DLQ entries: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def handle_task(task_args: dict, stash=None):
     """
     Handle manual task trigger from Stash UI.
 
     Args:
-        task_args: Task arguments (mode: 'all' or 'recent')
-        stash: StashInterface for API calls
+        task_args: Task arguments (mode determines operation)
+        stash: StashInterface for API calls (required for sync modes)
     """
-    from sync_queue.operations import enqueue
-
     mode = task_args.get('mode', 'recent')
     log_info(f"Task starting with mode: {mode}")
+
+    # Queue management tasks don't need Stash connection
+    if mode == 'queue_status':
+        handle_queue_status()
+        return
+    elif mode == 'clear_queue':
+        handle_clear_queue()
+        return
+    elif mode == 'clear_dlq':
+        handle_clear_dlq()
+        return
+    elif mode == 'purge_dlq':
+        days = task_args.get('days', 30)
+        handle_purge_dlq(days)
+        return
+
+    # Sync tasks require Stash connection
+    from sync_queue.operations import enqueue
 
     if not stash:
         log_error("No Stash connection available")
