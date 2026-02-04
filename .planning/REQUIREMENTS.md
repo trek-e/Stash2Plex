@@ -9,20 +9,20 @@ Requirements for Queue UI Improvements milestone. Each maps to roadmap phases.
 
 ### Queue Management
 
-- [ ] **QUEUE-01**: User can view current queue status from Stash UI
-- [ ] **QUEUE-02**: User can clear/delete all queue items from Stash UI
-- [ ] **QUEUE-03**: User can purge dead letter queue entries from Stash UI
-- [ ] **QUEUE-04**: User sees confirmation dialog before destructive queue operations
-- [ ] **QUEUE-05**: User receives status feedback after queue operations complete
+- [x] **QUEUE-01**: User can view current queue status from Stash UI
+- [x] **QUEUE-02**: User can clear/delete all queue items from Stash UI
+- [x] **QUEUE-03**: User can purge dead letter queue entries from Stash UI
+- [x] **QUEUE-04**: User sees confirmation dialog before destructive queue operations
+- [x] **QUEUE-05**: User receives status feedback after queue operations complete
 
 ### Queue Processing
 
-- [ ] **PROC-01**: User can manually trigger queue processing from Stash UI
-- [ ] **PROC-02**: User can resume/continue processing for large backlogs
-- [ ] **PROC-03**: User sees progress feedback during manual processing
-- [ ] **PROC-04**: System handles long queues that stall due to Stash plugin timeout
-- [ ] **PROC-05**: Worker continues processing until queue is empty (not limited to 30s)
-- [ ] **PROC-06**: System supports batch processing mode for large queues
+- [x] **PROC-01**: User can manually trigger queue processing from Stash UI
+- [x] **PROC-02**: User can resume/continue processing for large backlogs
+- [x] **PROC-03**: User sees progress feedback during manual processing
+- [x] **PROC-04**: System handles long queues that stall due to Stash plugin timeout
+- [x] **PROC-05**: Worker continues processing until queue is empty (not limited to 30s)
+- [x] **PROC-06**: System supports batch processing mode for large queues
 
 ### Dynamic Timeout
 
@@ -64,15 +64,17 @@ Which phases cover which requirements.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| QUEUE-01 | Phase 11 | Pending |
-| QUEUE-02 | Phase 11 | Pending |
-| QUEUE-03 | Phase 11 | Pending |
-| QUEUE-04 | Phase 11 | Pending |
-| QUEUE-05 | Phase 11 | Pending |
-| PROC-01 | Phase 12 | Pending |
-| PROC-02 | Phase 12 | Pending |
-| PROC-03 | Phase 12 | Pending |
-| PROC-04 | Phase 12 | Pending |
+| QUEUE-01 | Phase 11 | Complete |
+| QUEUE-02 | Phase 11 | Complete |
+| QUEUE-03 | Phase 11 | Complete |
+| QUEUE-04 | Phase 11 | Complete |
+| QUEUE-05 | Phase 11 | Complete |
+| PROC-01 | Phase 12 | Complete |
+| PROC-02 | Phase 12 | Complete |
+| PROC-03 | Phase 12 | Complete |
+| PROC-04 | Phase 12 | Complete |
+| PROC-05 | Phase 12 | Complete |
+| PROC-06 | Phase 12 | Complete |
 | TIME-01 | Phase 13 | Pending |
 | TIME-02 | Phase 13 | Pending |
 | TIME-03 | Phase 13 | Pending |

@@ -12,7 +12,7 @@ Focus: User-facing queue management improvements. Allow users to manage stuck/de
 
 ## Phases
 
-### Phase 11: Queue Management UI
+### Phase 11: Queue Management UI ✓
 **Goal:** Add queue management tasks to Stash plugin menu for viewing status and clearing stuck/dead items
 
 - Add task in plugin menu to clear/delete queue items
@@ -27,11 +27,11 @@ Focus: User-facing queue management improvements. Allow users to manage stuck/de
 **Plans:** 1 plan
 
 Plans:
-- [ ] 11-01-PLAN.md — Add queue management tasks (status, clear queue, clear/purge DLQ)
+- [x] 11-01-PLAN.md — Add queue management tasks (status, clear queue, clear/purge DLQ)
 
 ---
 
-### Phase 12: Process Queue Button
+### Phase 12: Process Queue Button ✓
 **Goal:** Add process queue button to handle stalled queues due to time limits
 
 - Add task in plugin menu to manually trigger queue processing
@@ -46,7 +46,7 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [ ] 12-01-PLAN.md — Add foreground queue processor with progress reporting
+- [x] 12-01-PLAN.md — Add foreground queue processor with progress reporting
 
 ---
 
