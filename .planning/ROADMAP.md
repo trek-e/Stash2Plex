@@ -63,8 +63,10 @@ Plans:
 
 **Depends on:** Phase 12
 
+**Plans:** 1 plan
+
 Plans:
-- [ ] TBD (run /gsd:plan-phase 13 to break down)
+- [ ] 13-01-PLAN.md — Dynamic timeout calculation using measured processing times
 
 ---
 
@@ -84,9 +86,9 @@ Phase 13 (Dynamic Timeout)
 |-------|------------|-------|
 | 11. Queue Management UI | Low | 1 |
 | 12. Process Queue Button | Low | 1 |
-| 13. Dynamic Queue Timeout | Medium | 1-2 |
+| 13. Dynamic Queue Timeout | Low | 1 |
 
-**Total:** ~3-4 plans across 3 phases
+**Total:** 3 plans across 3 phases
 
 ---
 *Created: 2026-02-03*
