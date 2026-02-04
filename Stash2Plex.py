@@ -30,6 +30,22 @@ if PLUGIN_DIR not in sys.path:
 
 log_trace(f"PLUGIN_DIR: {PLUGIN_DIR}")
 
+# Install dependencies via PythonDepManager (if available)
+try:
+    from PythonDepManager import ensure_import
+    log_trace("Installing dependencies via PythonDepManager...")
+    ensure_import(
+        "pydantic>=2.0.0",
+        "plexapi>=4.17.0",
+        "tenacity>=9.0.0",
+        "persistqueue:persist-queue>=1.1.0",
+        "diskcache>=5.6.0",
+        "stashapi:stashapp-tools",
+    )
+    log_trace("Dependencies installed")
+except ImportError:
+    log_trace("PythonDepManager not available, assuming dependencies are pre-installed")
+
 try:
     from sync_queue.manager import QueueManager
     from sync_queue.dlq import DeadLetterQueue
