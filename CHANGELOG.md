@@ -5,6 +5,33 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-02-04
+
+### Added
+
+- **Queue Status Task**: View pending queue count, DLQ count, and error summary directly from Stash UI
+- **Clear Queue Task**: Delete all pending queue items with confirmation dialog
+- **Clear DLQ Task**: Remove all dead letter queue entries with confirmation
+- **Purge DLQ Task**: Remove DLQ entries older than 7 days
+- **Process Queue Task**: Manually trigger foreground queue processing that runs until empty (no timeout limits)
+- **Progress Feedback**: Processing shows progress every 5 items or 10 seconds during manual queue processing
+- **Smart Timeout Calculation**: Dynamic timeout based on measured average processing time per item
+- **Cold Start Handling**: Conservative 2.0s/item estimate when no history available, gradually trusting measured data
+
+### Changed
+
+- **Timeout Guidance**: When queue processing times out, message now guides users to use "Process Queue" task to continue
+- **Timeout Clamping**: Calculated timeout clamped to 30-600 second range for safety
+
+### Configuration
+
+- 5 new tasks available in Stash plugin menu:
+  - View Queue Status
+  - Clear Pending Queue
+  - Clear Dead Letter Queue
+  - Purge Old DLQ Entries
+  - Process Queue
+
 ## [1.1.6] - 2026-02-03
 
 ### Fixed
@@ -104,6 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `connect_timeout` - Plex connection timeout
 - `read_timeout` - Plex read timeout
 
+[1.2.0]: https://github.com/trek-e/Stash2Plex/compare/v1.1.6...v1.2.0
 [1.1.6]: https://github.com/trek-e/Stash2Plex/compare/v1.1.5...v1.1.6
 [1.1.5]: https://github.com/trek-e/Stash2Plex/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/trek-e/Stash2Plex/compare/v1.1.3...v1.1.4
