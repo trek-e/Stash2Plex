@@ -13,7 +13,7 @@ Focus: User-facing queue management improvements. Allow users to manage stuck/de
 ## Phases
 
 ### Phase 11: Queue Management UI
-**Goal:** Add button to delete queue in plugin menu to clear out dead items
+**Goal:** Add queue management tasks to Stash plugin menu for viewing status and clearing stuck/dead items
 
 - Add task in plugin menu to clear/delete queue items
 - Allow users to purge dead letter queue entries
@@ -24,8 +24,10 @@ Focus: User-facing queue management improvements. Allow users to manage stuck/de
 
 **Depends on:** Phase 10
 
+**Plans:** 1 plan
+
 Plans:
-- [ ] TBD (run /gsd:plan-phase 11 to break down)
+- [ ] 11-01-PLAN.md — Add queue management tasks (status, clear queue, clear/purge DLQ)
 
 ---
 
@@ -78,11 +80,11 @@ Phase 13 (Dynamic Timeout)
 
 | Phase | Complexity | Plans |
 |-------|------------|-------|
-| 11. Queue Management UI | Low | 1-2 |
+| 11. Queue Management UI | Low | 1 |
 | 12. Process Queue Button | Low | 1-2 |
 | 13. Dynamic Queue Timeout | Medium | 1-2 |
 
-**Total:** ~3-6 plans across 3 phases
+**Total:** ~3-5 plans across 3 phases
 
 ---
 *Created: 2026-02-03*
