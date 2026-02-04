@@ -192,6 +192,44 @@ def get_stats(queue_path: str) -> dict:
         conn.close()
 
 
+def clear_pending_items(queue_path: str) -> int:
+    """
+    Clear all pending items from queue.
+
+    Deletes items with status 0 (inited) or 1 (ready).
+    Does NOT delete in-progress (2), completed (5), or failed (9) items.
+
+    Args:
+        queue_path: Path to queue directory (contains data.db)
+
+    Returns:
+        Number of items deleted
+    """
+    db_path = os.path.join(queue_path, 'data.db')
+
+    if not os.path.exists(db_path):
+        return 0
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ack_queue%'"
+        )
+        table = cursor.fetchone()
+        if not table:
+            return 0
+
+        table_name = table[0]
+        cursor = conn.execute(
+            f"DELETE FROM {table_name} WHERE status IN (0, 1)"
+        )
+        deleted = cursor.rowcount
+        conn.commit()
+        return deleted
+    finally:
+        conn.close()
+
+
 def _get_sync_timestamps_path(data_dir: str) -> str:
     """Get path to sync timestamps JSON file."""
     return os.path.join(data_dir, 'sync_timestamps.json')
