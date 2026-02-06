@@ -96,6 +96,7 @@ class PlexClient:
         self._connect_timeout = connect_timeout
         self._read_timeout = read_timeout
         self._server: Optional["PlexServer"] = None
+        self._session = None
 
     @classmethod
     def _get_retriable_exceptions(cls) -> Tuple[Type[Exception], ...]:
@@ -135,9 +136,14 @@ class PlexClient:
         def connect():
             try:
                 logger.debug(f"Connecting to Plex server at {self._url}")
+                # Reuse a requests.Session for connection pooling and keep-alive
+                if self._session is None:
+                    import requests
+                    self._session = requests.Session()
                 server = PlexServer(
                     baseurl=self._url,
                     token=self._token,
+                    session=self._session,
                     timeout=self._read_timeout,
                 )
                 logger.debug(f"Connected to Plex server: {server.friendlyName}")

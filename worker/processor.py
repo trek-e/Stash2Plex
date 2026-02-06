@@ -327,6 +327,9 @@ class SyncWorker:
                     self.circuit_breaker.record_success()
                     log_info(f"Job {pqid} completed")
 
+                    # Brief pause between jobs to avoid overwhelming Plex
+                    time.sleep(0.15)
+
                     # Periodic batch summary and cache status logging
                     self._jobs_since_dlq_log += 1
                     if self._jobs_since_dlq_log >= self._dlq_log_interval:
@@ -791,15 +794,12 @@ class SyncWorker:
                             edits['originallyAvailableAt.value'] = date_value
 
         # Apply core metadata edits (CRITICAL - failure propagates)
+        # Note: reload() is deferred to end of method to reduce HTTP roundtrips
+        _needs_reload = False
         if edits:
             log_debug(f"Updating fields: {list(edits.keys())}")
             plex_item.edit(**edits)
-            plex_item.reload()
-
-            # Validate that edits were actually applied
-            validation_issues = self._validate_edit_result(plex_item, edits)
-            if validation_issues:
-                log_debug(f"Edit validation issues (may be expected): {validation_issues}")
+            _needs_reload = True
 
             mode = "preserved" if self.config.preserve_plex_edits else "overwrite"
             log_info(f"Updated metadata ({mode} mode): {plex_item.title}")
@@ -815,7 +815,7 @@ class SyncWorker:
                 # LOCKED: Clear all existing performers
                 try:
                     plex_item.edit(**{'actor.locked': 1})  # Lock to clear
-                    plex_item.reload()
+                    _needs_reload = True
                     log_debug("Clearing performers (Stash value is empty)")
                     result.add_success('performers')
                 except Exception as e:
@@ -850,7 +850,7 @@ class SyncWorker:
                             actor_edits[f'actor[{i}].tag.tag'] = actor_name
 
                         plex_item.edit(**actor_edits)
-                        plex_item.reload()
+                        _needs_reload = True
                         log_info(f"Added {len(new_performers)} performers: {new_performers}")
                     else:
                         log_trace(f"Performers already in Plex: {sanitized_performers}")
@@ -915,7 +915,7 @@ class SyncWorker:
                 # LOCKED: Clear all existing tags/genres
                 try:
                     plex_item.edit(**{'genre.locked': 1})  # Lock to clear
-                    plex_item.reload()
+                    _needs_reload = True
                     log_debug("Clearing tags (Stash value is empty)")
                     result.add_success('tags')
                 except Exception as e:
@@ -949,7 +949,7 @@ class SyncWorker:
                             genre_edits[f'genre[{i}].tag.tag'] = genre_name
 
                         plex_item.edit(**genre_edits)
-                        plex_item.reload()
+                        _needs_reload = True
                         log_info(f"Added {len(new_tags)} tags as genres: {new_tags}")
                     else:
                         log_trace(f"Tags already in Plex: {sanitized_tags}")
@@ -971,7 +971,7 @@ class SyncWorker:
                         collection_edits[f'collection[{i}].tag.tag'] = coll_name
 
                     plex_item.edit(**collection_edits)
-                    plex_item.reload()
+                    _needs_reload = True
                     log_debug(f"Added to collection: {studio}")
                 else:
                     log_trace(f"Already in collection: {studio}")
@@ -979,6 +979,18 @@ class SyncWorker:
             except Exception as e:
                 log_warn(f" Failed to add to collection: {e}")
                 result.add_warning('collection', e)
+
+        # Single deferred reload after all edits (reduces HTTP roundtrips from up to 6 to 1)
+        if _needs_reload:
+            try:
+                plex_item.reload()
+                # Validate core metadata edits were applied (debug-level check)
+                if edits:
+                    validation_issues = self._validate_edit_result(plex_item, edits)
+                    if validation_issues:
+                        log_debug(f"Edit validation issues (may be expected): {validation_issues}")
+            except Exception as e:
+                log_debug(f"Post-edit reload failed (edits already applied): {e}")
 
         # Log aggregated warnings at end
         if result.has_warnings:

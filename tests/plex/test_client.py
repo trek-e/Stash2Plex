@@ -138,11 +138,11 @@ class TestPlexClientLazyConnection:
 
         _ = client.server
 
-        mock_plex_server_class.assert_called_once_with(
-            baseurl="http://localhost:32400",
-            token="test-token",
-            timeout=45.0,
-        )
+        call_kwargs = mock_plex_server_class.call_args[1]
+        assert call_kwargs['baseurl'] == "http://localhost:32400"
+        assert call_kwargs['token'] == "test-token"
+        assert call_kwargs['timeout'] == 45.0
+        assert 'session' in call_kwargs  # Connection pooling session
 
 
 # =============================================================================
