@@ -30,21 +30,111 @@ if PLUGIN_DIR not in sys.path:
 
 log_trace(f"PLUGIN_DIR: {PLUGIN_DIR}")
 
-# Install dependencies via PythonDepManager (if available)
+# --- Dependency installation (driven by requirements.txt) ---
+# Override map for packages where names don't follow standard conventions.
+# Standard convention: import name = pip name with hyphens replaced by underscores.
+# Format: requirements.txt name → (import_name, pip_install_name)
+_PKG_NAMES = {
+    "persist-queue": ("persistqueue", "persist-queue"),
+    "stashapi": ("stashapi", "stashapp-tools"),
+}
+
+
+def _parse_requirements():
+    """Parse requirements.txt → [(import_name, pip_spec), ...]"""
+    path = os.path.join(PLUGIN_DIR, "requirements.txt")
+    deps = []
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                # Split "package>=1.0.0" → base name + version specifier
+                for i, ch in enumerate(line):
+                    if ch in ">=<!~":
+                        req_name, ver_spec = line[:i], line[i:]
+                        break
+                else:
+                    req_name, ver_spec = line, ""
+                import_name, pip_name = _PKG_NAMES.get(
+                    req_name, (req_name.replace("-", "_"), req_name)
+                )
+                deps.append((import_name, pip_name + ver_spec))
+    except FileNotFoundError:
+        log_warn(f"requirements.txt not found at {path}")
+    return deps
+
+
+def _check_missing(deps):
+    """Return deps where the module can't be imported."""
+    missing = []
+    for import_name, pip_spec in deps:
+        try:
+            __import__(import_name)
+        except ImportError:
+            missing.append((import_name, pip_spec))
+    return missing
+
+
+_required_deps = _parse_requirements()
+
+# Step 1: Try PythonDepManager (Stash's built-in package manager)
 try:
     from PythonDepManager import ensure_import
     log_trace("Installing dependencies via PythonDepManager...")
-    ensure_import(
-        "pydantic>=2.0.0",
-        "plexapi>=4.17.0",
-        "tenacity>=9.0.0",
-        "persistqueue:persist-queue>=1.1.0",
-        "diskcache>=5.6.0",
-        "stashapi:stashapp-tools",
-    )
-    log_trace("Dependencies installed")
+    # Build ensure_import args: "import_name:pip_spec" when names differ
+    _ei_args = []
+    for _imp, _pip in _required_deps:
+        _pip_base = _pip
+        for _ch in ">=<!~":
+            _idx = _pip_base.find(_ch)
+            if _idx >= 0:
+                _pip_base = _pip_base[:_idx]
+                break
+        if _imp == _pip_base or _imp == _pip_base.replace("-", "_"):
+            _ei_args.append(_pip)
+        else:
+            _ei_args.append(f"{_imp}:{_pip}")
+    ensure_import(*_ei_args)
+    log_trace("Dependencies installed via PythonDepManager")
 except ImportError:
-    log_trace("PythonDepManager not available, assuming dependencies are pre-installed")
+    log_trace("PythonDepManager not available")
+except Exception as e:
+    log_warn(f"PythonDepManager failed: {e}")
+
+# Step 2: Verify deps and fallback to pip if any are missing
+_missing = _check_missing(_required_deps)
+if _missing:
+    log_trace(f"Missing after PythonDepManager: {[m for m, _ in _missing]}")
+    log_trace(f"Attempting pip install with: {sys.executable}")
+    import subprocess
+    for _mod, _pkg in _missing:
+        try:
+            _result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", _pkg],
+                capture_output=True, text=True, timeout=120,
+            )
+            if _result.returncode == 0:
+                log_trace(f"Installed {_pkg}")
+            else:
+                log_warn(f"pip install {_pkg} failed: {_result.stderr.strip()}")
+        except Exception as e:
+            log_warn(f"pip install {_pkg} failed: {e}")
+
+# Step 3: Final verification — actionable error if still missing
+_still_missing = _check_missing(_required_deps)
+if _still_missing:
+    _names = [m for m, _ in _still_missing]
+    _pkgs = [p for _, p in _still_missing]
+    log_error(f"Missing required dependencies: {_names}")
+    log_error(f"Stash is using Python: {sys.executable}")
+    log_error(f"To fix, run:  {sys.executable} -m pip install {' '.join(_pkgs)}")
+    print(json.dumps({
+        "error": f"Missing dependencies: {', '.join(_names)}. "
+                 f"Install with: {sys.executable} -m pip install {' '.join(_pkgs)}"
+    }))
+    sys.exit(1)
 
 try:
     from sync_queue.manager import QueueManager
