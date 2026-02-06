@@ -4,11 +4,15 @@ Queue operations for job lifecycle management.
 Stateless operations that work on queue instance passed in.
 """
 
+import itertools
 import json
 import os
 import sqlite3
 import time
 from typing import Optional
+
+# Simple counter for job IDs (resets on restart, used for log correlation only)
+_job_counter = itertools.count(1)
 
 try:
     import persistqueue
@@ -38,6 +42,7 @@ def enqueue(queue: 'persistqueue.SQLiteAckQueue', scene_id: int, update_type: st
         123
     """
     job = {
+        'pqid': next(_job_counter),
         'scene_id': scene_id,
         'update_type': update_type,
         'data': data,
