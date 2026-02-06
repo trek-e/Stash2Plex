@@ -5,6 +5,14 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.5] - 2026-02-05
+
+### Fixed
+
+- **Plex Read Timeouts During Bulk Sync**: Consolidated up to 6 `plex_item.reload()` calls per job into a single deferred reload, reducing HTTP roundtrips by ~5 per scene. Added `requests.Session` for connection pooling/keep-alive and a 150ms inter-job pause to prevent overwhelming Plex with rapid-fire requests.
+- **Job ID Logging**: Fixed `Job None completed` in worker logs. Jobs now get monotonically increasing IDs for log correlation.
+- **Redundant Metadata Updates**: Core metadata fields (title, studio, summary, tagline, date) are now compared against current Plex values before writing. Skips the Plex API call entirely when nothing changed.
+
 ## [1.2.4] - 2026-02-05
 
 ### Improved
@@ -158,6 +166,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `connect_timeout` - Plex connection timeout
 - `read_timeout` - Plex read timeout
 
+[1.2.5]: https://github.com/trek-e/Stash2Plex/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/trek-e/Stash2Plex/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/trek-e/Stash2Plex/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/trek-e/Stash2Plex/compare/v1.2.1...v1.2.2
