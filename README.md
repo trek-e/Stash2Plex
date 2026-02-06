@@ -2,7 +2,7 @@
 
 Sync metadata from Stash to Plex with queue-based reliability.
 
-[![Tests](https://img.shields.io/badge/tests-500%2B-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-880%2B-brightgreen)](tests/)
 [![Coverage](https://img.shields.io/badge/coverage-%3E80%25-brightgreen)](pytest.ini)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
@@ -16,9 +16,14 @@ Stash2Plex is a Stash plugin that automatically syncs scene metadata from Stash 
 - **Automatic retry** - Failed syncs retry with exponential backoff
 - **Circuit breaker** - Protects Plex from being hammered when it's down
 - **Crash recovery** - In-progress jobs automatically resume after restart
+- **Queue management** - View status, clear queue, and manage failed jobs from Stash UI
+- **Process Queue** - Foreground processing that runs until the queue is empty
 - **Performance caching** - Reduces Plex API calls with disk-backed caching
 - **Selective sync** - Toggle which metadata fields sync to Plex
+- **Dynamic timeouts** - Processing timeout scales with queue size automatically
+- **Plex scan trigger** - Optionally trigger Plex library scan when Stash discovers new scenes
 - **Sync statistics** - Track success rates and timing with batch summaries
+- **Automatic dependency installation** - Dependencies install via PythonDepManager or pip fallback
 
 **Use Stash2Plex if you:**
 
@@ -30,7 +35,7 @@ Stash2Plex is a Stash plugin that automatically syncs scene metadata from Stash 
 
 **Prerequisites:**
 
-- Stash running with [PythonDepManager](https://github.com/stashapp/CommunityScripts/tree/main/plugins/PythonDepManager) plugin installed
+- Stash running (any recent version)
 - Plex Media Server running and accessible from Stash
 - Your Plex authentication token
 
@@ -46,7 +51,13 @@ Alternatively, see [Plex's official guide](https://support.plex.tv/articles/2040
 
 ### Installation
 
-1. **Download Stash2Plex** to your Stash plugins directory:
+1. **Install PythonDepManager** (recommended):
+
+   Settings > Plugins > Available Plugins > search "PythonDepManager" > Install
+
+   > PythonDepManager is recommended but not strictly required. Stash2Plex can install dependencies via pip as a fallback.
+
+2. **Download Stash2Plex** to your Stash plugins directory:
 
    ```bash
    cd ~/.stash/plugins
@@ -55,11 +66,11 @@ Alternatively, see [Plex's official guide](https://support.plex.tv/articles/2040
 
    Or download and extract the ZIP from the [releases page](https://github.com/trek-e/Stash2Plex/releases).
 
-2. **Reload plugins** in Stash:
+3. **Reload plugins** in Stash:
 
    Settings > Plugins > Reload Plugins
 
-3. **Configure required settings** in Stash:
+4. **Configure required settings** in Stash:
 
    Settings > Plugins > Stash2Plex
 
@@ -69,7 +80,7 @@ Alternatively, see [Plex's official guide](https://support.plex.tv/articles/2040
    | Plex Token | Your X-Plex-Token from above |
    | Plex Library | Name of your Plex library (e.g., `Movies`) |
 
-4. **Test the sync:**
+5. **Test the sync:**
 
    - Edit any scene in Stash (change the title slightly)
    - Check Plex within 30 seconds - the title should update
@@ -84,6 +95,20 @@ That's it! Stash2Plex is now syncing metadata from Stash to Plex.
 4. **Retry on failure** - If Plex is down, the job retries with exponential backoff
 5. **Dead letter queue** - Permanently failed jobs (e.g., no Plex match) go to a DLQ for review
 
+## Plugin Tasks
+
+Stash2Plex provides 7 tasks accessible from **Settings > Plugins > Stash2Plex**:
+
+| Task | Description |
+|------|-------------|
+| **Sync All Scenes** | Force sync all scenes to Plex (use sparingly) |
+| **Sync Recent Scenes** | Sync scenes updated in the last 24 hours |
+| **View Queue Status** | Show pending queue and DLQ counts in logs |
+| **Clear Pending Queue** | Remove all pending queue items |
+| **Clear Dead Letter Queue** | Remove all DLQ entries |
+| **Purge Old DLQ Entries** | Remove DLQ entries older than 30 days |
+| **Process Queue** | Process all pending items until empty (foreground, no timeout) |
+
 ## Documentation
 
 - [Installation Guide](docs/install.md) - Full setup instructions including Docker
@@ -96,13 +121,16 @@ That's it! Stash2Plex is now syncing metadata from Stash to Plex.
 
 - **Stash** - Any recent version
 - **Plex Media Server** - Any recent version
-- **PythonDepManager** - Stash plugin for managing Python dependencies
-- **Python dependencies** - Installed automatically by PythonDepManager:
+- **Python 3.9+** - Required by Stash
+- **Python dependencies** - Installed automatically via PythonDepManager or pip:
   - `plexapi` - Plex API client
   - `pydantic` - Data validation
   - `tenacity` - Retry logic
-  - `persistqueue` - SQLite-backed queue
+  - `persist-queue` - SQLite-backed queue
   - `diskcache` - Performance caching
+  - `stashapp-tools` - Stash API client
+
+> **Note:** PythonDepManager is recommended for automatic dependency management. If unavailable, Stash2Plex falls back to installing dependencies via pip using Stash's Python interpreter. If both methods fail, the error message shows the exact pip command to run manually.
 
 ## Settings Reference
 
@@ -125,6 +153,7 @@ That's it! Stash2Plex is now syncing metadata from Stash to Plex.
 | `preserve_plex_edits` | boolean | `false` | Don't overwrite existing Plex values |
 | `connect_timeout` | number | `5` | Plex connection timeout (seconds) |
 | `read_timeout` | number | `30` | Plex read timeout (seconds) |
+| `trigger_plex_scan` | boolean | `false` | Trigger Plex library scan on new scenes |
 
 ### Field Sync Toggles
 

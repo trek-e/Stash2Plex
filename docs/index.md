@@ -15,3 +15,4 @@ See the [Installation Guide](install.md) to set up Stash2Plex.
 - **[Troubleshooting](troubleshoot.md)** - Common issues and solutions
 - **[Architecture](ARCHITECTURE.md)** - System design for developers
 - **[API Reference](api/index.md)** - Auto-generated module documentation
+- **[Changelog](../CHANGELOG.md)** - Version history and release notes

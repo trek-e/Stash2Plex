@@ -11,16 +11,18 @@ Before installing Stash2Plex, ensure you have:
 - Access to your Stash plugins folder
 - A Plex authentication token (see [Getting Your Plex Token](#getting-your-plex-token) below)
 
-## Step 1: Install PythonDepManager
+## Step 1: Install PythonDepManager (Recommended)
 
-Stash2Plex requires Python dependencies that are automatically installed by the **PythonDepManager** Stash plugin. This is a one-time setup.
+PythonDepManager is a Stash plugin that automatically manages Python dependencies for other plugins. While not strictly required (Stash2Plex can install dependencies via pip as a fallback), it is the recommended approach.
 
 1. In Stash, go to **Settings > Plugins > Available Plugins**
 2. Search for "PythonDepManager" or "py_common"
 3. Click **Install**
 4. Reload plugins
 
-PythonDepManager will automatically install Stash2Plex's Python dependencies (plexapi, tenacity, pydantic, persist-queue) when the plugin loads.
+PythonDepManager will automatically install Stash2Plex's Python dependencies (plexapi, pydantic, tenacity, persist-queue, diskcache, stashapp-tools) when the plugin loads.
+
+> **Without PythonDepManager:** Stash2Plex will attempt to install dependencies via pip using Stash's Python interpreter. If that also fails, the error message will show the exact pip command to run manually.
 
 ## Step 2: Install Stash2Plex
 
@@ -37,7 +39,7 @@ If Stash2Plex is available in the Stash community plugin repository:
 
 1. Clone or download the Stash2Plex repository:
    ```bash
-   git clone https://github.com/your-repo/Stash2Plex.git
+   git clone https://github.com/trek-e/Stash2Plex.git
    ```
 
 2. Copy the Stash2Plex folder to your Stash plugins directory:
@@ -186,11 +188,25 @@ The data directory can be overridden via the `STASH_PLUGIN_DATA` environment var
 
 ## Troubleshooting Installation
 
-### PythonDepManager Not Installed
+### Missing Dependencies (ModuleNotFoundError)
 
-**Symptom:** Error about missing modules (`ModuleNotFoundError: No module named 'plexapi'`)
+**Symptom:** Error about missing modules (e.g., `ModuleNotFoundError: No module named 'pydantic'`)
 
-**Solution:** Install PythonDepManager plugin first (see [Step 1](#step-1-install-pythondepmanager))
+**How Stash2Plex installs dependencies (in order):**
+
+1. **PythonDepManager** - Stash's built-in package manager (recommended)
+2. **pip fallback** - Installs via `sys.executable -m pip install` using Stash's Python
+3. **Error with instructions** - Shows the exact Python path and pip command to run
+
+**If you see a `ModuleNotFoundError`**, both automatic methods failed. The error message includes the fix:
+
+```
+Missing dependencies: ['pydantic']. Install with: /usr/bin/python3 -m pip install pydantic>=2.0.0
+```
+
+Run the command shown in the error. The key is using **the same Python that Stash uses** — running `pip install` from your terminal may install to a different Python.
+
+**Common cause in Docker:** The `pip` command in your shell uses a different Python interpreter than Stash. Always use the Python path shown in the error message.
 
 ### Plugin Not Appearing
 

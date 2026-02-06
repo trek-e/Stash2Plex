@@ -77,7 +77,38 @@ Here's what a successful sync looks like in the logs:
 
 ## Common Issues
 
-### Issue 1: Plex Token Invalid/Expired
+### Issue 1: Missing Dependencies (ModuleNotFoundError)
+
+**Symptom:**
+```
+[Plugin / Stash2Plex] ModuleNotFoundError: No module named 'pydantic'
+```
+
+**Cause:** Python dependencies aren't installed for the Python interpreter that Stash uses.
+
+**How Stash2Plex installs dependencies:**
+
+1. **PythonDepManager** (Stash's built-in package manager)
+2. **pip fallback** (uses Stash's own Python: `sys.executable -m pip install`)
+3. **Actionable error** (shows exact pip command with the correct Python path)
+
+**Solutions:**
+
+1. **Install PythonDepManager** (recommended): Settings > Plugins > Available Plugins > search "PythonDepManager" > Install, then reload plugins.
+
+2. **Run the pip command from the error message.** The error shows the exact Python path Stash uses:
+   ```
+   Missing dependencies: ['pydantic']. Install with: /usr/bin/python3 -m pip install pydantic>=2.0.0
+   ```
+   Use that exact command — running `pip install` from your terminal may install to a different Python.
+
+3. **Docker users:** `docker exec` into the container and run the pip command shown in the error. Running pip from outside the container installs to the host Python, not the container's.
+
+**Why `pip install` from my terminal doesn't work:** Your terminal's `pip` may use a different Python interpreter than Stash. For example, your terminal might use `/usr/local/bin/python3` while Stash uses `/usr/bin/python3`. Each Python has its own separate package directory.
+
+---
+
+### Issue 2: Plex Token Invalid/Expired
 
 **Symptom:**
 ```
@@ -95,7 +126,7 @@ Here's what a successful sync looks like in the logs:
 
 ---
 
-### Issue 2: No Plex Match Found
+### Issue 3: No Plex Match Found
 
 **Symptom:**
 ```
@@ -121,7 +152,7 @@ Here's what a successful sync looks like in the logs:
 
 ---
 
-### Issue 3: Multiple Plex Matches (Strict Mode)
+### Issue 4: Multiple Plex Matches (Strict Mode)
 
 **Symptom:**
 ```
@@ -142,7 +173,7 @@ Here's what a successful sync looks like in the logs:
 
 ---
 
-### Issue 4: Queue Processing Timeout
+### Issue 5: Queue Processing Timeout
 
 **Symptom:**
 ```
@@ -153,15 +184,17 @@ Or processing appears to stop mid-queue.
 
 **Cause:** Stash plugins have execution time limits. Large queues may not finish in one cycle.
 
+**How Stash2Plex handles this:** Dynamic timeouts scale with queue size (~2 seconds per item, minimum 30s, maximum 600s). Progress is logged every 5 items or 10 seconds. Scene data is fetched in a single batch query to minimize timeout risk.
+
 **Solutions:**
 
-1. **Wait:** Processing resumes automatically on the next cycle
-2. **Use smaller batches:** Run "Sync Recent Scenes" task instead of "Sync All Scenes"
-3. **Manual processing:** For large backlogs, run `process_queue.py` manually (see [Manual Queue Processing](#manual-queue-processing))
+1. **Use "Process Queue" task** - Run from Settings > Plugins > Stash2Plex > Process Queue. This runs in the foreground until the queue is empty with no timeout limits.
+2. **Wait** - Processing resumes automatically on the next hook trigger or task run.
+3. **Use smaller batches** - Run "Sync Recent Scenes" instead of "Sync All Scenes".
 
 ---
 
-### Issue 5: Scene Has No File Path
+### Issue 6: Scene Has No File Path
 
 **Symptom:**
 ```
@@ -176,7 +209,7 @@ Or processing appears to stop mid-queue.
 
 ---
 
-### Issue 6: Hook Handler Slow
+### Issue 7: Hook Handler Slow
 
 **Symptom:**
 ```
@@ -193,7 +226,7 @@ Or processing appears to stop mid-queue.
 
 ---
 
-### Issue 7: Circuit Breaker Opened
+### Issue 8: Circuit Breaker Opened
 
 **Symptom:**
 ```
@@ -210,7 +243,7 @@ Or processing appears to stop mid-queue.
 
 ---
 
-### Issue 8: DLQ Has Failed Jobs
+### Issue 9: DLQ Has Failed Jobs
 
 **Symptom:**
 ```
@@ -220,9 +253,18 @@ Or processing appears to stop mid-queue.
 **Meaning:** Some jobs failed permanently and will not retry automatically.
 
 **Action:**
-1. Check logs for specific error messages on each failed job
-2. Address the root cause (invalid token, missing file, etc.)
-3. Re-trigger sync by editing affected scenes in Stash
+1. **View status** - Run "View Queue Status" task to see DLQ count and error summary
+2. Check logs for specific error messages on each failed job
+3. Address the root cause (invalid token, missing file, etc.)
+4. Re-trigger sync by editing affected scenes in Stash
+
+**Managing the DLQ from Stash UI:**
+
+| Task | What it does |
+|------|-------------|
+| **View Queue Status** | Shows pending + DLQ counts in logs |
+| **Clear Dead Letter Queue** | Remove all DLQ entries |
+| **Purge Old DLQ Entries** | Remove entries older than 30 days |
 
 **Common causes of permanent failure:**
 - Authentication failure (401) - token invalid
@@ -268,21 +310,29 @@ services:
 
 ---
 
-## Manual Queue Processing
+## Queue Management
 
-For stuck queues or large backlogs, Stash2Plex includes a standalone queue processor.
+### From Stash UI (Recommended)
 
-### Check Queue Status
+Stash2Plex provides built-in tasks for queue management. Go to **Settings > Plugins > Stash2Plex** and run:
+
+| Task | Use when... |
+|------|-------------|
+| **View Queue Status** | You want to check how many items are pending or failed |
+| **Process Queue** | Queue is stuck or you want to process all items immediately (runs until empty, no timeout) |
+| **Clear Pending Queue** | You want to discard all pending items and start fresh |
+| **Clear Dead Letter Queue** | You want to clear all permanently failed items |
+| **Purge Old DLQ Entries** | You want to clean up old failures (removes entries >30 days) |
+
+### From Command Line
+
+For advanced debugging, Stash2Plex includes a standalone queue processor:
 
 ```bash
+# Check queue status
 python process_queue.py --stats-only
-```
 
-This shows queue size and DLQ status without processing anything.
-
-### Process Queue Manually
-
-```bash
+# Process queue manually
 python process_queue.py \
   --data-dir /path/to/Stash2Plex/data \
   --plex-url http://plex:32400 \
@@ -291,11 +341,6 @@ python process_queue.py \
 ```
 
 **Location:** `process_queue.py` in the Stash2Plex plugin folder.
-
-**When to use:**
-- Queue is stuck due to Stash plugin timeout
-- Large backlog from initial import
-- Testing/debugging sync issues
 
 ---
 

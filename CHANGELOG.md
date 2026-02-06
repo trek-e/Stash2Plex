@@ -5,6 +5,15 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-02-05
+
+### Fixed
+
+- **Robust Dependency Installation**: Replaced fragile dependency loading with three-step approach: PythonDepManager → pip fallback → actionable error message. Fixes `ModuleNotFoundError` when PythonDepManager fails or dependencies are installed to the wrong Python.
+- **requirements.txt as Source of Truth**: Dependencies are now parsed from `requirements.txt` instead of being hardcoded in three separate places. Adding a dependency only requires updating `requirements.txt`.
+- **Broader Exception Handling**: `ensure_import()` errors (network failures, permission issues) are now caught properly instead of only catching `ImportError`.
+- **Actionable Error Messages**: When dependencies can't be installed, the error now shows the exact Python path Stash is using and the exact `pip install` command to run.
+
 ## [1.2.1] - 2026-02-04
 
 ### Fixed
@@ -137,6 +146,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `connect_timeout` - Plex connection timeout
 - `read_timeout` - Plex read timeout
 
+[1.2.2]: https://github.com/trek-e/Stash2Plex/compare/v1.2.1...v1.2.2
+[1.2.1]: https://github.com/trek-e/Stash2Plex/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/trek-e/Stash2Plex/compare/v1.1.6...v1.2.0
 [1.1.6]: https://github.com/trek-e/Stash2Plex/compare/v1.1.5...v1.1.6
 [1.1.5]: https://github.com/trek-e/Stash2Plex/compare/v1.1.4...v1.1.5

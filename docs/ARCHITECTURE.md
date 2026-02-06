@@ -18,6 +18,9 @@ graph TB
     end
 
     subgraph Stash2Plex["Stash2Plex Plugin"]
+        ENTRY["Stash2Plex.py<br/>Entry Point + Task Dispatch"]
+        DEPS["Dependency Installer<br/>PythonDepManager → pip → error"]
+
         subgraph hooks["hooks/"]
             HANDLER["handlers.py<br/>on_scene_update()"]
         end
@@ -46,6 +49,12 @@ graph TB
             ERRORS["exceptions.py"]
         end
     end
+
+    %% Startup flow
+    ENTRY -->|startup| DEPS
+    STASH -->|"hook/task JSON"| ENTRY
+    ENTRY -->|hooks| HANDLER
+    ENTRY -->|tasks| WORKER
 
     %% Event capture flow
     STASH -->|"Scene.Update.Post"| HANDLER
@@ -76,6 +85,27 @@ graph TB
 ---
 
 ## Module Overview
+
+### Stash2Plex.py - Entry Point
+
+**Purpose:** Plugin entry point, dependency installation, infrastructure initialization, and task/hook dispatch.
+
+**Responsibilities:**
+- Install dependencies via three-step fallback: PythonDepManager → pip subprocess → actionable error
+- Parse `requirements.txt` as the single source of truth for dependencies
+- Read JSON input from stdin (Stash plugin protocol)
+- Initialize queue infrastructure, worker, and configuration on first call
+- Route to hook handlers (Scene.Update.Post, Scene.Create.Post) or task handlers (sync all, queue status, process queue, etc.)
+
+**Tasks handled:**
+- `all` / `recent` - Bulk sync scenes to Plex
+- `queue_status` - View pending and DLQ counts
+- `clear_queue` / `clear_dlq` / `purge_dlq` - Queue management
+- `process_queue` - Foreground processing until empty (no timeout)
+
+**Design Note:** Dependencies are parsed from `requirements.txt` with a small override map for packages where import names differ from pip names. This avoids hardcoding the dependency list in multiple places.
+
+---
 
 ### hooks/ - Event Capture Layer
 
@@ -174,9 +204,13 @@ graph TB
 
 ## Data Flow
 
+### 0. Startup and Dependency Installation
+
+On each invocation, `Stash2Plex.py` ensures all Python dependencies are available. It parses `requirements.txt`, tries PythonDepManager first, falls back to pip subprocess (using `sys.executable` to target Stash's own Python), and exits with an actionable error if both fail. This three-step approach handles Docker environments where `pip install` from a terminal targets a different Python.
+
 ### 1. Event Capture
 
-When a scene is updated in Stash, it fires a `Scene.Update.Post` hook. Stash2Plex receives the hook payload via stdin JSON and routes it to `on_scene_update()`.
+When a scene is updated in Stash, it fires a `Scene.Update.Post` hook (or `Scene.Create.Post` for new scenes). Stash2Plex receives the hook payload via stdin JSON and routes it to `on_scene_update()`. For `Scene.Create.Post` events with `trigger_plex_scan` enabled, a Plex library scan is triggered first to ensure Plex discovers the new file.
 
 ### 2. Event Filtering
 
@@ -188,11 +222,15 @@ Before processing, multiple filters apply:
 
 ### 3. Metadata Fetch and Validation
 
-The hook payload contains minimal data, so full scene metadata is fetched via GraphQL. Fields are extracted (title, details, date, studio, performers, tags, poster) and passed through Pydantic validation. Sanitizers clean text fields before the job is enqueued.
+The hook payload contains minimal data, so full scene metadata is fetched via GraphQL. When processing multiple scenes (e.g., during "Sync All"), scene data is fetched in a single batch query rather than individual calls per scene, preventing Stash from killing the plugin due to timeout.
+
+Fields are extracted (title, details, date, studio, performers, tags, poster) and passed through Pydantic validation. Sanitizers clean text fields (removing control characters, normalizing quotes) and log at debug level to avoid false warning noise. The job is then enqueued with all required fields including path, poster_url, and background_url.
 
 ### 4. Background Processing
 
 SyncWorker runs in a daemon thread, polling for pending jobs. Before processing, it checks the circuit breaker state. If OPEN (Plex outage detected), processing pauses until recovery timeout elapses. For ready jobs, it also checks if backoff delay has passed.
+
+Queue processing uses a dynamic timeout that scales with queue size based on measured average processing time per item (with conservative estimates for cold starts). Progress is reported every 5 items or 10 seconds. The "Process Queue" task bypasses timeout limits entirely, running until the queue is empty.
 
 ### 5. Plex Matching
 
@@ -274,4 +312,4 @@ On permanent error: job goes directly to dead letter queue without retry.
 
 ---
 
-*Document: Architecture overview for Stash2Plex plugin developers*
+*Architecture overview for Stash2Plex plugin developers — v1.2*

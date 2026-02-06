@@ -203,6 +203,26 @@ These settings have no usable defaults and must be configured before Stash2Plex 
 
 ---
 
+### trigger_plex_scan
+
+| Property | Value |
+|----------|-------|
+| Type | BOOLEAN |
+| Required | No |
+| Default | `false` |
+
+**Description:** Trigger a Plex library scan when Stash identifies a new scene.
+
+**Behavior:**
+- **When true:** Stash2Plex tells Plex to scan the library when a `Scene.Create.Post` event fires, ensuring Plex discovers newly added files before metadata sync occurs.
+- **When false:** Plex must discover files through its own scan schedule.
+
+**Use case:** Enable if you add media files via Stash and want Plex to pick them up immediately without waiting for Plex's scheduled scan.
+
+**Note:** This only triggers on new scene creation, not on scene updates. The scan is non-blocking and does not delay metadata syncing.
+
+---
+
 ## Internal Settings
 
 These settings are not exposed in the Stash UI but are recognized by the code. Advanced users can set them by modifying the plugin configuration directly.
@@ -220,6 +240,8 @@ These settings are not exposed in the Stash UI but are recognized by the code. A
 - **When false:** Sanitize invalid metadata (remove control characters, truncate long strings)
 
 **Default behavior:** Stash2Plex sanitizes metadata automatically, so most users never need this.
+
+**Note:** As of v1.1.2, sanitization messages (for cleaning invisible characters) log at debug level instead of warning level, reducing false error noise in Stash logs.
 
 ---
 
