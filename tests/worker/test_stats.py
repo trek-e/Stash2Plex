@@ -314,22 +314,22 @@ class TestSyncStatsSaveToFile:
 
         assert os.path.exists(nested_path)
 
-    def test_save_to_file_merges_with_existing(self, stats, stats_file):
-        """save_to_file merges cumulative totals with existing file."""
-        # First save
+    def test_save_to_file_accumulates_across_sessions(self, stats, stats_file):
+        """save_to_file preserves cumulative totals when loaded between saves."""
+        # First session: record and save
         stats.record_success(1.0)
         stats.record_failure('Error1', 0.5)
         stats.save_to_file(stats_file)
 
-        # Second save with new stats
+        # Second session: load, record more, save
         from worker.stats import SyncStats
 
-        stats2 = SyncStats()
+        stats2 = SyncStats.load_from_file(stats_file)
         stats2.record_success(2.0)
         stats2.record_failure('Error2', 0.3)
         stats2.save_to_file(stats_file)
 
-        # Load and verify merged
+        # Verify cumulative totals
         with open(stats_file, 'r') as f:
             data = json.load(f)
 
@@ -339,17 +339,17 @@ class TestSyncStatsSaveToFile:
         assert data['total_processing_time'] == pytest.approx(3.8, rel=1e-6)
         assert data['errors_by_type'] == {'Error1': 1, 'Error2': 1}
 
-    def test_save_to_file_merges_error_types(self, stats, stats_file):
-        """save_to_file correctly merges error type counts."""
-        # First save
+    def test_save_to_file_accumulates_error_types(self, stats, stats_file):
+        """save_to_file preserves error type counts across sessions."""
+        # First session
         stats.record_failure('PlexNotFound', 0.1)
         stats.record_failure('PlexNotFound', 0.2)
         stats.save_to_file(stats_file)
 
-        # Second save with same and new error types
+        # Second session: load, record more, save
         from worker.stats import SyncStats
 
-        stats2 = SyncStats()
+        stats2 = SyncStats.load_from_file(stats_file)
         stats2.record_failure('PlexNotFound', 0.3)
         stats2.record_failure('PermanentError', 0.4)
         stats2.save_to_file(stats_file)
@@ -359,16 +359,16 @@ class TestSyncStatsSaveToFile:
 
         assert data['errors_by_type'] == {'PlexNotFound': 3, 'PermanentError': 1}
 
-    def test_save_to_file_preserves_original_session_start(self, stats, stats_file):
-        """save_to_file preserves original session_start from first save."""
+    def test_save_to_file_preserves_session_start_across_sessions(self, stats, stats_file):
+        """save_to_file preserves session_start when loaded between saves."""
         original_start = stats.session_start
         stats.record_success(0.5)
         stats.save_to_file(stats_file)
 
-        # Wait and save again
+        # Second session: load preserves original session_start
         from worker.stats import SyncStats
 
-        stats2 = SyncStats()  # Will have new session_start
+        stats2 = SyncStats.load_from_file(stats_file)
         stats2.record_success(0.5)
         stats2.save_to_file(stats_file)
 
@@ -376,6 +376,50 @@ class TestSyncStatsSaveToFile:
             data = json.load(f)
 
         assert data['session_start'] == original_start
+
+    def test_save_to_file_no_double_counting_on_repeated_saves(self, stats, stats_file):
+        """Repeated saves within a session don't double-count."""
+        from worker.stats import SyncStats
+
+        loaded = SyncStats.load_from_file(stats_file)  # Empty (no file)
+        loaded.record_success(0.5)
+        loaded.save_to_file(stats_file)
+
+        # Save again without new jobs (simulates periodic save)
+        loaded.save_to_file(stats_file)
+
+        with open(stats_file, 'r') as f:
+            data = json.load(f)
+
+        assert data['jobs_processed'] == 1  # Not 2
+
+    def test_save_to_file_no_double_counting_across_sessions(self, stats, stats_file):
+        """Load-increment-save cycle doesn't inflate stats."""
+        from worker.stats import SyncStats
+
+        # Session 1: process 5 jobs
+        s1 = SyncStats()
+        for _ in range(5):
+            s1.record_success(0.1)
+        s1.save_to_file(stats_file)
+
+        # Session 2: load, process 3 more, save
+        s2 = SyncStats.load_from_file(stats_file)
+        for _ in range(3):
+            s2.record_success(0.1)
+        s2.save_to_file(stats_file)
+
+        # Session 3: load, process 2 more, save
+        s3 = SyncStats.load_from_file(stats_file)
+        for _ in range(2):
+            s3.record_success(0.1)
+        s3.save_to_file(stats_file)
+
+        with open(stats_file, 'r') as f:
+            data = json.load(f)
+
+        assert data['jobs_processed'] == 10  # 5 + 3 + 2, not inflated
+        assert data['jobs_succeeded'] == 10
 
     def test_save_to_file_handles_corrupted_existing_file(self, stats, stats_file):
         """save_to_file handles corrupted existing file gracefully."""

@@ -174,50 +174,22 @@ class SyncStats:
 
     def save_to_file(self, filepath: str) -> None:
         """
-        Save stats to JSON file with cumulative merge.
+        Save stats to JSON file.
 
-        If the file already exists, loads existing stats and merges
-        cumulative totals before saving. Creates parent directories
-        if needed.
+        Overwrites the file with current cumulative state. Since stats
+        are loaded from disk at init via load_from_file, self already
+        contains the full cumulative totals.
 
         Args:
             filepath: Path to JSON file for persistence
         """
-        # Load existing stats if file exists
-        existing = {}
-        if os.path.exists(filepath):
-            try:
-                with open(filepath, 'r') as f:
-                    existing = json.load(f)
-            except (json.JSONDecodeError, IOError):
-                existing = {}
-
-        # Merge cumulative totals
-        merged = {
-            'jobs_processed': existing.get('jobs_processed', 0) + self.jobs_processed,
-            'jobs_succeeded': existing.get('jobs_succeeded', 0) + self.jobs_succeeded,
-            'jobs_failed': existing.get('jobs_failed', 0) + self.jobs_failed,
-            'jobs_to_dlq': existing.get('jobs_to_dlq', 0) + self.jobs_to_dlq,
-            'total_processing_time': existing.get('total_processing_time', 0.0) + self.total_processing_time,
-            'session_start': existing.get('session_start', self.session_start),
-            'high_confidence_matches': existing.get('high_confidence_matches', 0) + self.high_confidence_matches,
-            'low_confidence_matches': existing.get('low_confidence_matches', 0) + self.low_confidence_matches,
-        }
-
-        # Merge error type counts
-        merged_errors = dict(existing.get('errors_by_type', {}))
-        for error_type, count in self.errors_by_type.items():
-            merged_errors[error_type] = merged_errors.get(error_type, 0) + count
-        merged['errors_by_type'] = merged_errors
-
         # Ensure parent directory exists
         parent_dir = os.path.dirname(filepath)
         if parent_dir:
             os.makedirs(parent_dir, exist_ok=True)
 
-        # Write merged stats
         with open(filepath, 'w') as f:
-            json.dump(merged, f, indent=2)
+            json.dump(self.to_dict(), f, indent=2)
 
     @classmethod
     def load_from_file(cls, filepath: str) -> 'SyncStats':
