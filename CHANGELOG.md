@@ -5,6 +5,12 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] - 2026-02-05
+
+### Fixed
+
+- **Stash-box Identification Race Condition**: Prevented empty metadata from being synced to Plex when `Scene.Update.Post` fires before stash-box identification completes. A metadata quality gate now defers sync when no meaningful metadata (studio, performers, tags, details, date) is present, allowing the post-identification update to carry the real data.
+
 ## [1.2.2] - 2026-02-05
 
 ### Fixed
@@ -146,6 +152,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `connect_timeout` - Plex connection timeout
 - `read_timeout` - Plex read timeout
 
+[1.2.3]: https://github.com/trek-e/Stash2Plex/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/trek-e/Stash2Plex/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/trek-e/Stash2Plex/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/trek-e/Stash2Plex/compare/v1.1.6...v1.2.0
