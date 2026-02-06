@@ -2,7 +2,7 @@
 
 Sync metadata from Stash to Plex with queue-based reliability.
 
-[![Tests](https://img.shields.io/badge/tests-880%2B-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-885%2B-brightgreen)](tests/)
 [![Coverage](https://img.shields.io/badge/coverage-%3E80%25-brightgreen)](pytest.ini)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
@@ -23,6 +23,8 @@ Stash2Plex is a Stash plugin that automatically syncs scene metadata from Stash 
 - **Dynamic timeouts** - Processing timeout scales with queue size automatically
 - **Plex scan trigger** - Optionally trigger Plex library scan when Stash discovers new scenes
 - **Sync statistics** - Track success rates and timing with batch summaries
+- **Connection pooling** - HTTP keep-alive reduces connection overhead during bulk sync
+- **Smart skip** - Bulk sync skips already-synced scenes and unchanged metadata fields
 - **Automatic dependency installation** - Dependencies install via PythonDepManager or pip fallback
 
 **Use Stash2Plex if you:**

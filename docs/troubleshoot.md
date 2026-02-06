@@ -194,7 +194,31 @@ Or processing appears to stop mid-queue.
 
 ---
 
-### Issue 6: Scene Has No File Path
+### Issue 6: Plex Read Timeout During Bulk Sync
+
+**Symptom:**
+```
+[Stash2Plex Worker] Partial sync for Scene Name: 1 warnings: tags: HTTPConnectionPool(...): Read timed out. (read timeout=30.0)
+```
+
+**Cause:** Plex is overwhelmed by rapid-fire API requests during bulk sync.
+
+**Resolution (v1.2.5+):** This issue is significantly reduced in v1.2.5 and later through:
+- Connection pooling (HTTP keep-alive reduces connection overhead)
+- Deferred reload (single HTTP roundtrip per job instead of up to 6)
+- Inter-job throttle (150ms pause between jobs)
+- Metadata comparison (skips API calls when values haven't changed)
+
+**If still occurring:**
+1. Increase `read_timeout` to 60 or higher
+2. Use "Process Queue" task which runs without timeout limits
+3. Check Plex server load (other clients streaming, library scanning)
+
+**Related setting:** [`read_timeout`](config.md#read_timeout)
+
+---
+
+### Issue 7: Scene Has No File Path
 
 **Symptom:**
 ```
@@ -209,7 +233,7 @@ Or processing appears to stop mid-queue.
 
 ---
 
-### Issue 7: Hook Handler Slow
+### Issue 8: Hook Handler Slow
 
 **Symptom:**
 ```
@@ -226,7 +250,7 @@ Or processing appears to stop mid-queue.
 
 ---
 
-### Issue 8: Circuit Breaker Opened
+### Issue 9: Circuit Breaker Opened
 
 **Symptom:**
 ```
@@ -243,7 +267,7 @@ Or processing appears to stop mid-queue.
 
 ---
 
-### Issue 9: DLQ Has Failed Jobs
+### Issue 10: DLQ Has Failed Jobs
 
 **Symptom:**
 ```

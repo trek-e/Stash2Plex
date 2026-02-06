@@ -98,7 +98,7 @@ graph TB
 - Route to hook handlers (Scene.Update.Post, Scene.Create.Post) or task handlers (sync all, queue status, process queue, etc.)
 
 **Tasks handled:**
-- `all` / `recent` - Bulk sync scenes to Plex
+- `all` / `recent` - Bulk sync scenes to Plex (skips scenes already synced since last update)
 - `queue_status` - View pending and DLQ counts
 - `clear_queue` / `clear_dlq` / `purge_dlq` - Queue management
 - `process_queue` - Foreground processing until empty (no timeout)
@@ -156,10 +156,12 @@ graph TB
 **Responsibilities:**
 - Poll queue for pending jobs in daemon thread
 - Check circuit breaker before processing (pause during Plex outages)
-- Execute sync to Plex and handle success/failure outcomes
+- Compare metadata against current Plex values before writing (skip no-op updates)
+- Execute sync to Plex with deferred reload (single HTTP roundtrip instead of per-field)
 - Calculate retry delays and requeue failed jobs with backoff metadata
+- Track cumulative sync statistics to disk
 
-**Design Note:** Retry state (count, next_retry_at) stored in job dict, not worker state. This makes retries crash-safe - unacknowledged jobs resume with correct backoff after restart.
+**Design Note:** Retry state (count, next_retry_at) stored in job dict, not worker state. This makes retries crash-safe - unacknowledged jobs resume with correct backoff after restart. A 150ms inter-job pause prevents overwhelming Plex during bulk sync.
 
 ---
 
@@ -174,12 +176,12 @@ graph TB
 - `device_identity.py` - Persistent device ID for Plex
 
 **Responsibilities:**
-- Initialize PlexServer connection with configurable timeouts
+- Initialize PlexServer connection with configurable timeouts and connection pooling
 - Find Plex items by filename matching (fast title search, slow fallback)
 - Return match confidence (HIGH/LOW) for caller decision
 - Translate plexapi/requests exceptions to Stash2Plex error types
 
-**Design Note:** Two-phase matching strategy - fast path searches by title derived from filename, slow fallback scans all items. Most syncs hit fast path; fallback handles edge cases.
+**Design Note:** Two-phase matching strategy - fast path searches by title derived from filename, slow fallback scans all items. Most syncs hit fast path; fallback handles edge cases. A shared `requests.Session` provides HTTP connection pooling/keep-alive across all Plex API calls.
 
 ---
 
@@ -238,7 +240,7 @@ The worker calls PlexClient to find the matching Plex item. The matcher derives 
 
 ### 6. Metadata Update
 
-For matched items, metadata is applied: title, studio, summary (from details), date. If `preserve_plex_edits` is enabled, only empty fields are updated. Performers sync as actors, tags as genres, and studio triggers collection membership. Poster/background images are fetched from Stash and uploaded.
+For matched items, each core metadata field (title, studio, summary, tagline, date) is compared against the current Plex value before writing. Fields that already match are skipped, avoiding unnecessary API calls. If `preserve_plex_edits` is enabled, only empty fields are updated. Performers sync as actors, tags as genres, and studio triggers collection membership. Poster/background images are fetched from Stash and uploaded. All edits use a single deferred `reload()` call at the end rather than per-field reloads.
 
 ### 7. Job Completion
 
@@ -312,4 +314,4 @@ On permanent error: job goes directly to dead letter queue without retry.
 
 ---
 
-*Architecture overview for Stash2Plex plugin developers — v1.2*
+*Architecture overview for Stash2Plex plugin developers — v1.2.6*
