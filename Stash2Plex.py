@@ -112,7 +112,8 @@ if _missing:
     for _mod, _pkg in _missing:
         try:
             _result = subprocess.run(
-                [sys.executable, "-m", "pip", "install", _pkg],
+                [sys.executable, "-m", "pip", "install",
+                 "--break-system-packages", _pkg],
                 capture_output=True, text=True, timeout=120,
             )
             if _result.returncode == 0:
@@ -127,12 +128,13 @@ _still_missing = _check_missing(_required_deps)
 if _still_missing:
     _names = [m for m, _ in _still_missing]
     _pkgs = [p for _, p in _still_missing]
+    _pip_cmd = f"{sys.executable} -m pip install --break-system-packages {' '.join(_pkgs)}"
     log_error(f"Missing required dependencies: {_names}")
     log_error(f"Stash is using Python: {sys.executable}")
-    log_error(f"To fix, run:  {sys.executable} -m pip install {' '.join(_pkgs)}")
+    log_error(f"To fix, run: {_pip_cmd}")
     print(json.dumps({
         "error": f"Missing dependencies: {', '.join(_names)}. "
-                 f"Install with: {sys.executable} -m pip install {' '.join(_pkgs)}"
+                 f"Install with: {_pip_cmd}"
     }))
     sys.exit(1)
 

@@ -5,6 +5,12 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.7] - 2026-02-06
+
+### Fixed
+
+- **PEP 668 Externally Managed Environment**: pip fallback now passes `--break-system-packages` to handle Python 3.12+ on Alpine/Debian/Ubuntu containers that block system-wide pip installs. Also updated the actionable error message to include the flag so manual installs work on first try.
+
 ## [1.2.6] - 2026-02-05
 
 ### Fixed
@@ -172,6 +178,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `connect_timeout` - Plex connection timeout
 - `read_timeout` - Plex read timeout
 
+[1.2.7]: https://github.com/trek-e/Stash2Plex/compare/v1.2.6...v1.2.7
 [1.2.6]: https://github.com/trek-e/Stash2Plex/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/trek-e/Stash2Plex/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/trek-e/Stash2Plex/compare/v1.2.3...v1.2.4
