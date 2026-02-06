@@ -195,18 +195,20 @@ The data directory can be overridden via the `STASH_PLUGIN_DATA` environment var
 **How Stash2Plex installs dependencies (in order):**
 
 1. **PythonDepManager** - Stash's built-in package manager (recommended)
-2. **pip fallback** - Installs via `sys.executable -m pip install` using Stash's Python
+2. **pip fallback** - Installs via `sys.executable -m pip install --break-system-packages` using Stash's Python
 3. **Error with instructions** - Shows the exact Python path and pip command to run
 
 **If you see a `ModuleNotFoundError`**, both automatic methods failed. The error message includes the fix:
 
 ```
-Missing dependencies: ['pydantic']. Install with: /usr/bin/python3 -m pip install pydantic>=2.0.0
+Missing dependencies: ['pydantic']. Install with: /usr/bin/python3 -m pip install --break-system-packages pydantic>=2.0.0
 ```
 
 Run the command shown in the error. The key is using **the same Python that Stash uses** — running `pip install` from your terminal may install to a different Python.
 
 **Common cause in Docker:** The `pip` command in your shell uses a different Python interpreter than Stash. Always use the Python path shown in the error message.
+
+**PEP 668 "externally managed environment":** If you see this error when manually running pip, add `--break-system-packages` to the command. This is standard for Docker containers running Alpine, Debian 12+, or Ubuntu 23.04+ with Python 3.12+. Stash2Plex v1.2.7+ includes this flag automatically.
 
 ### Plugin Not Appearing
 

@@ -132,7 +132,7 @@ Stash2Plex provides 7 tasks accessible from **Settings > Plugins > Stash2Plex**:
   - `diskcache` - Performance caching
   - `stashapp-tools` - Stash API client
 
-> **Note:** PythonDepManager is recommended for automatic dependency management. If unavailable, Stash2Plex falls back to installing dependencies via pip using Stash's Python interpreter. If both methods fail, the error message shows the exact pip command to run manually.
+> **Note:** PythonDepManager is recommended for automatic dependency management. If unavailable, Stash2Plex falls back to installing dependencies via pip using Stash's Python interpreter (with `--break-system-packages` for PEP 668 compatibility on modern Linux distros). If both methods fail, the error message shows the exact pip command to run manually.
 
 ## Settings Reference
 

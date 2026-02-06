@@ -91,7 +91,7 @@ graph TB
 **Purpose:** Plugin entry point, dependency installation, infrastructure initialization, and task/hook dispatch.
 
 **Responsibilities:**
-- Install dependencies via three-step fallback: PythonDepManager → pip subprocess → actionable error
+- Install dependencies via three-step fallback: PythonDepManager → pip subprocess (with `--break-system-packages` for PEP 668) → actionable error
 - Parse `requirements.txt` as the single source of truth for dependencies
 - Read JSON input from stdin (Stash plugin protocol)
 - Initialize queue infrastructure, worker, and configuration on first call
@@ -208,7 +208,7 @@ graph TB
 
 ### 0. Startup and Dependency Installation
 
-On each invocation, `Stash2Plex.py` ensures all Python dependencies are available. It parses `requirements.txt`, tries PythonDepManager first, falls back to pip subprocess (using `sys.executable` to target Stash's own Python), and exits with an actionable error if both fail. This three-step approach handles Docker environments where `pip install` from a terminal targets a different Python.
+On each invocation, `Stash2Plex.py` ensures all Python dependencies are available. It parses `requirements.txt`, tries PythonDepManager first, falls back to pip subprocess (using `sys.executable` to target Stash's own Python, with `--break-system-packages` for PEP 668 compatibility on Alpine/Debian 12+/Ubuntu 23.04+), and exits with an actionable error if both fail. This three-step approach handles Docker environments where `pip install` from a terminal targets a different Python.
 
 ### 1. Event Capture
 
@@ -314,4 +314,4 @@ On permanent error: job goes directly to dead letter queue without retry.
 
 ---
 
-*Architecture overview for Stash2Plex plugin developers — v1.2.6*
+*Architecture overview for Stash2Plex plugin developers — v1.2.7*

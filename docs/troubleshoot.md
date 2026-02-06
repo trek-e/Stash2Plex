@@ -89,7 +89,7 @@ Here's what a successful sync looks like in the logs:
 **How Stash2Plex installs dependencies:**
 
 1. **PythonDepManager** (Stash's built-in package manager)
-2. **pip fallback** (uses Stash's own Python: `sys.executable -m pip install`)
+2. **pip fallback** (uses Stash's own Python with `--break-system-packages` for PEP 668 compatibility)
 3. **Actionable error** (shows exact pip command with the correct Python path)
 
 **Solutions:**
@@ -98,13 +98,15 @@ Here's what a successful sync looks like in the logs:
 
 2. **Run the pip command from the error message.** The error shows the exact Python path Stash uses:
    ```
-   Missing dependencies: ['pydantic']. Install with: /usr/bin/python3 -m pip install pydantic>=2.0.0
+   Missing dependencies: ['pydantic']. Install with: /usr/bin/python3 -m pip install --break-system-packages pydantic>=2.0.0
    ```
    Use that exact command — running `pip install` from your terminal may install to a different Python.
 
 3. **Docker users:** `docker exec` into the container and run the pip command shown in the error. Running pip from outside the container installs to the host Python, not the container's.
 
 **Why `pip install` from my terminal doesn't work:** Your terminal's `pip` may use a different Python interpreter than Stash. For example, your terminal might use `/usr/local/bin/python3` while Stash uses `/usr/bin/python3`. Each Python has its own separate package directory.
+
+**"Externally managed environment" error (PEP 668):** Python 3.12+ on Alpine, Debian 12+, and Ubuntu 23.04+ blocks system-wide pip installs. Stash2Plex v1.2.7+ handles this automatically with `--break-system-packages`. If running an older version, add the flag manually to the pip command.
 
 ---
 
