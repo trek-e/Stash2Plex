@@ -676,12 +676,12 @@ class TestOnSceneUpdate:
     # -------------------------------------------------------------------------
 
     def test_handles_missing_studio(self, mock_queue, mocker):
-        """Scene without studio should be handled gracefully."""
+        """Scene without studio should be handled gracefully (syncs if other metadata present)."""
         mocker.patch('hooks.handlers.is_scan_running', return_value=False)
         mock_enqueue = mocker.patch('hooks.handlers.enqueue')
         mocker.patch('hooks.handlers.validate_metadata', return_value=(MagicMock(
             title="Test Scene", scene_id=123, details=None, rating100=None,
-            date=None, studio=None, performers=None, tags=None
+            date=None, studio=None, performers=["Performer A"], tags=None
         ), None))
 
         mock_stash = MagicMock()
@@ -691,7 +691,7 @@ class TestOnSceneUpdate:
                 "title": "Test Scene",
                 "files": [{"path": "/media/test.mp4"}],
                 "studio": None,  # No studio
-                "performers": [],
+                "performers": [{"id": "1", "name": "Performer A"}],
                 "tags": [],
                 "paths": {}
             }
@@ -706,6 +706,34 @@ class TestOnSceneUpdate:
 
         assert result is True
         mock_enqueue.assert_called_once()
+
+    def test_defers_sync_when_no_metadata(self, mock_queue, mocker):
+        """Scene with no metadata beyond title/path should defer sync (may still be identifying)."""
+        mocker.patch('hooks.handlers.is_scan_running', return_value=False)
+        mock_enqueue = mocker.patch('hooks.handlers.enqueue')
+
+        mock_stash = MagicMock()
+        mock_stash.call_GQL.return_value = {
+            "findScene": {
+                "id": "123",
+                "title": "Test Scene",
+                "files": [{"path": "/media/test.mp4"}],
+                "studio": None,
+                "performers": [],
+                "tags": [],
+                "paths": {}
+            }
+        }
+
+        result = on_scene_update(
+            scene_id=123,
+            update_data={"title": "Test"},
+            queue=mock_queue,
+            stash=mock_stash
+        )
+
+        assert result is False
+        mock_enqueue.assert_not_called()
 
     def test_handles_missing_performers(self, mock_queue, mocker):
         """Scene without performers should be handled gracefully."""
@@ -834,9 +862,9 @@ class TestOnSceneUpdate:
                 "id": "123",
                 "title": "Test Scene",
                 "files": [{"path": "/media/test.mp4"}],
-                "studio": None,
-                "performers": [],
-                "tags": [],
+                "studio": {"name": "Test Studio"},
+                "performers": [{"name": "Actor One"}],
+                "tags": [{"name": "Tag One"}],
                 "paths": {}
             }
         }
@@ -866,9 +894,9 @@ class TestOnSceneUpdate:
             "id": "123",
             "title": "Test Scene",
             "files": [{"path": "/media/test.mp4"}],
-            "studio": None,
-            "performers": [],
-            "tags": [],
+            "studio": {"name": "Test Studio"},
+            "performers": [{"name": "Actor One"}],
+            "tags": [{"name": "Tag One"}],
             "paths": {}
         }
 
@@ -908,8 +936,8 @@ class TestOnSceneUpdate:
                 "id": "123",
                 "title": None,  # No title in scene
                 "files": [{"path": "/media/test.mp4"}],
-                "studio": None,
-                "performers": [],
+                "studio": {"name": "Test Studio"},
+                "performers": [{"name": "Actor One"}],
                 "tags": [],
                 "paths": {}
             }
@@ -1019,9 +1047,9 @@ class TestOnSceneUpdate:
                     "id": "123",
                     "title": "Test Scene",
                     "files": [{"path": "/media/test.mp4"}],
-                    "studio": None,
-                    "performers": [],
-                    "tags": [],
+                    "studio": {"name": "Test Studio"},
+                    "performers": [{"name": "Actor One"}],
+                    "tags": [{"name": "Tag One"}],
                     "paths": {}
                 }
 

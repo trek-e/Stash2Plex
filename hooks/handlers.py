@@ -289,6 +289,22 @@ def on_scene_update(
     merged_data['path'] = file_path
     update_data = merged_data
 
+    # Don't sync if scene has no meaningful metadata to push.
+    # This prevents a race condition where Scene.Update.Post fires after file scan
+    # but before stash-box identification completes — syncing empty metadata would
+    # clear existing Plex values. The post-identification Scene.Update.Post will
+    # have the real metadata and sync correctly.
+    _has_metadata = any([
+        update_data.get('studio'),
+        update_data.get('performers'),
+        update_data.get('tags'),
+        update_data.get('details'),
+        update_data.get('date'),
+    ])
+    if not _has_metadata:
+        log_debug(f"Scene {scene_id} has no metadata beyond title/path, deferring sync (may still be identifying)")
+        return False
+
     # Build validation data from update_data
     # Title is required - if missing from update, we need to get it
     # For now, if title is missing, we skip validation
