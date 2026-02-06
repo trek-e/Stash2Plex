@@ -773,12 +773,14 @@ def handle_task(task_args: dict, stash=None):
 
     try:
         # Batch query fragment - get all needed data in one call
+        # updated_at included for sync timestamp comparison (skip already-synced scenes)
         batch_fragment = """
             id
             title
             details
             date
             rating100
+            updated_at
             files { path }
             studio { name }
             performers { name }
@@ -805,10 +807,15 @@ def handle_task(task_args: dict, stash=None):
 
         log_info(f"Found {len(scenes)} scenes to sync")
 
+        # Load fresh sync timestamps (worker may have updated since init)
+        data_dir = get_plugin_data_dir()
+        current_timestamps = load_sync_timestamps(data_dir)
+
         # Queue each scene directly (data already fetched in batch)
         queue = queue_manager.get_queue()
         queued = 0
         skipped = 0
+        already_synced = 0
 
         for scene in scenes:
             scene_id = scene.get('id')
@@ -824,6 +831,21 @@ def handle_task(task_args: dict, stash=None):
             if not file_path:
                 skipped += 1
                 continue
+
+            # Skip scenes already synced since their last Stash update
+            scene_updated_at = scene.get('updated_at')
+            if scene_updated_at and current_timestamps:
+                last_synced = current_timestamps.get(int(scene_id))
+                if last_synced:
+                    try:
+                        from datetime import datetime, timezone
+                        dt = datetime.fromisoformat(scene_updated_at.replace('Z', '+00:00'))
+                        updated_ts = dt.timestamp()
+                        if updated_ts <= last_synced:
+                            already_synced += 1
+                            continue
+                    except (ValueError, AttributeError):
+                        pass  # Can't parse date, sync anyway
 
             # Build job data from batch-fetched scene
             job_data = {
@@ -861,7 +883,12 @@ def handle_task(task_args: dict, stash=None):
             except Exception as e:
                 log_warn(f"Failed to queue scene {scene_id}: {e}")
 
-        log_info(f"Queued {queued} scenes for sync" + (f" (skipped {skipped} without files)" if skipped else ""))
+        parts = [f"Queued {queued} scenes for sync"]
+        if already_synced:
+            parts.append(f"{already_synced} already synced")
+        if skipped:
+            parts.append(f"{skipped} without files")
+        log_info(parts[0] + (" (" + ", ".join(parts[1:]) + ")" if len(parts) > 1 else ""))
 
     except Exception as e:
         log_error(f"Task error: {e}")
