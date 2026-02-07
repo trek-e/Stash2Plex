@@ -1,0 +1,115 @@
+name: Issue Auto-Responder
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  respond:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Triage and respond
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = context.payload.issue.title.toLowerCase();
+            const body = (context.payload.issue.body || '').toLowerCase();
+            const text = title + ' ' + body;
+            const issueNumber = context.payload.issue.number;
+
+            // Detect issue category from keywords
+            const isPython = /python.*(not found|missing)|modulenotfounderror|no module named|pip install|pythondepmgr|import error|importerror|dependency|dependencies/.test(text);
+            const isAuth = /unauthorized|401|auth|token.*invalid|token.*expired|authentication failed|plex_token|x-plex-token/.test(text);
+            const isConnection = /connect|connection.*refused|timeout|unreachable|cannot reach|can't reach|plex.*down|502|503|circuit.?breaker/.test(text);
+            const isMatching = /no.*match|not found|plexnotfound|multiple match|strict.?match|low confidence|wrong (item|scene|movie)|path.?mismatch/.test(text);
+            const isDocker = /docker|container|compose|volume|mount|path.?map/.test(text);
+            const isQueue = /queue|dlq|dead.?letter|stuck|not processing|job.*fail|timeout.*queue|process.*queue/.test(text);
+            const isNewDevice = /new device|device notification|plex.*notification/.test(text);
+
+            let response = `Thanks for opening this issue! :wave:\n\n`;
+            let matched = false;
+
+            if (isPython) {
+              matched = true;
+              response += `This looks like a **Python or dependency issue**. Here are the most common causes and fixes:\n\n`;
+              response += `1. **Install PythonDepManager** (recommended): Settings > Plugins > Available Plugins > search "PythonDepManager" > Install, then reload plugins\n`;
+              response += `2. **Python path mismatch** — Your terminal's \`pip\` may install to a different Python than Stash uses. Check the error message for the exact pip command with the correct Python path\n`;
+              response += `3. **Windows "Python not found"** — Disable the Microsoft Store alias: Settings > Apps > Advanced app settings > App execution aliases > turn off "python.exe" and "python3.exe"\n`;
+              response += `4. **PEP 668 / "externally managed"** — Stash2Plex v1.2.7+ handles this automatically. If on an older version, add \`--break-system-packages\` to the pip command\n\n`;
+              response += `See the [Troubleshooting Guide](https://github.com/trek-e/Stash2Plex/blob/main/docs/troubleshoot.md#issue-1-missing-dependencies-modulenotfounderror) for full details.\n`;
+            }
+
+            if (isAuth) {
+              matched = true;
+              response += `This looks like a **Plex authentication issue**. Quick checks:\n\n`;
+              response += `1. **Get a fresh token** — Open Plex Web > any item > three-dot menu > Get Info > View XML > copy \`X-Plex-Token\` from the URL\n`;
+              response += `2. **Update the token** in Settings > Plugins > Stash2Plex > \`plex_token\`\n`;
+              response += `3. **Reload plugins** after updating\n\n`;
+              response += `See [Plex's official guide](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/) for finding your token.\n`;
+            }
+
+            if (isConnection && !isAuth) {
+              matched = true;
+              response += `This looks like a **connection issue**. Common causes:\n\n`;
+              response += `1. **Verify Plex URL** — Default is \`http://localhost:32400\`. If Stash runs in Docker, use \`http://host.docker.internal:32400\` or the container name\n`;
+              response += `2. **Check Plex is running** — Can you access Plex Web at the same URL from the machine running Stash?\n`;
+              response += `3. **Circuit breaker** — If you see "circuit breaker OPENED", Stash2Plex detected 5+ consecutive failures and paused automatically. It recovers after 60 seconds once Plex is reachable again\n\n`;
+              response += `See the [Troubleshooting Guide](https://github.com/trek-e/Stash2Plex/blob/main/docs/troubleshoot.md#issue-9-circuit-breaker-opened) for details.\n`;
+            }
+
+            if (isMatching) {
+              matched = true;
+              response += `This looks like a **Plex matching issue**. A few things to check:\n\n`;
+              response += `1. **Scan your Plex library first** — Library > ... > Scan Library Files. Stash2Plex retries "not found" errors up to 12 times (~2 hours) to allow Plex to finish scanning\n`;
+              response += `2. **Set \`plex_library\`** — Specify the exact Plex library name to search (e.g., \`Movies\`)\n`;
+              response += `3. **Path mismatch** — Stash and Plex must see files at the same path. In Docker, mount media to the **same internal path** in both containers\n`;
+              response += `4. **Multiple matches** — If \`strict_matching\` is enabled (default), ambiguous filenames are skipped. Set to \`false\` to use first match, or rename files to be unique\n\n`;
+              response += `See the [Troubleshooting Guide](https://github.com/trek-e/Stash2Plex/blob/main/docs/troubleshoot.md#issue-3-no-plex-match-found) for details.\n`;
+            }
+
+            if (isDocker && !isMatching) {
+              matched = true;
+              response += `This looks **Docker-related**. Common Docker pitfalls:\n\n`;
+              response += `1. **Path mapping** — Both Stash and Plex containers must mount media at the **same internal path** (e.g., both use \`/media\`)\n`;
+              response += `2. **Plex URL** — Use the container name (e.g., \`http://plex:32400\`) or \`http://host.docker.internal:32400\`, not \`localhost\`\n`;
+              response += `3. **Dependencies** — Run pip commands **inside** the Stash container: \`docker exec -it stash /bin/sh\`, then run the pip command from the error message\n\n`;
+              response += `See the [Docker Path Mapping](https://github.com/trek-e/Stash2Plex/blob/main/docs/troubleshoot.md#docker-path-mapping-issues) guide.\n`;
+            }
+
+            if (isQueue) {
+              matched = true;
+              response += `This looks like a **queue or processing issue**. Here's what to check:\n\n`;
+              response += `1. **View queue status** — Run "View Queue Status" task in Settings > Plugins > Stash2Plex\n`;
+              response += `2. **Stuck queue** — Run "Process Queue" task, which processes all items until empty with no timeout\n`;
+              response += `3. **Failed jobs in DLQ** — Check logs for specific error messages. Fix the root cause, then re-edit the affected scenes in Stash to re-trigger sync\n`;
+              response += `4. **Timeouts during bulk sync** — Try "Sync Recent Scenes" instead of "Sync All Scenes" for smaller batches. Increase \`read_timeout\` if Plex is slow\n\n`;
+              response += `See the [Queue Management](https://github.com/trek-e/Stash2Plex/blob/main/docs/troubleshoot.md#queue-management) section for details.\n`;
+            }
+
+            if (isNewDevice) {
+              matched = true;
+              response += `This is a **known Plex behavior** where metadata updates can trigger "new device" notifications. `;
+              response += `This is tracked in [issue #1](https://github.com/trek-e/Stash2Plex/issues/1).\n`;
+            }
+
+            if (!matched) {
+              response += `We'll take a look as soon as we can.\n\n`;
+              response += `In the meantime, the following info helps us diagnose issues faster:\n\n`;
+              response += `- **Stash version** and **Plex version**\n`;
+              response += `- **Stash2Plex version** (check Settings > Plugins)\n`;
+              response += `- **Deployment type** (Docker or bare metal)\n`;
+              response += `- **Relevant log lines** filtered to \`[Stash2Plex]\`\n\n`;
+              response += `See our [Troubleshooting Guide](https://github.com/trek-e/Stash2Plex/blob/main/docs/troubleshoot.md) for common issues and solutions.\n`;
+            }
+
+            response += `\n---\n*This is an automated response to help with common issues. A maintainer will follow up shortly.*`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: response,
+            });
