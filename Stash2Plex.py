@@ -625,11 +625,15 @@ def handle_process_queue():
     Reports progress via log_progress() for Stash UI visibility.
     Respects circuit breaker - stops if Plex becomes unavailable.
     """
-    global config
+    global config, worker, queue_manager, dlq
 
     try:
         data_dir = get_plugin_data_dir()
         queue_path = os.path.join(data_dir, 'queue')
+
+        # Stop global background worker to avoid competing for queue items
+        if worker:
+            worker.stop()
 
         # Check initial queue state
         from sync_queue.operations import get_stats, get_pending, ack_job, fail_job
@@ -643,20 +647,17 @@ def handle_process_queue():
         log_info(f"Starting batch processing of {total} items...")
         log_progress(0)
 
-        # Initialize infrastructure
-        from sync_queue.manager import QueueManager
-        from sync_queue.dlq import DeadLetterQueue
         from worker.processor import SyncWorker, TransientError, PermanentError
 
         # Configure device identity before Plex operations
         configure_plex_device_identity(data_dir)
 
-        queue_manager_local = QueueManager(data_dir)
-        queue = queue_manager_local.get_queue()
-        dlq_local = DeadLetterQueue(data_dir)
+        # Use global queue (don't create a second QueueManager — auto_resume
+        # on a second instance can steal in-flight items from the first)
+        queue = queue_manager.get_queue()
 
-        # Create worker instance (handles Plex client, caches, circuit breaker)
-        worker_local = SyncWorker(queue, dlq_local, config, data_dir=data_dir)
+        # Create worker instance for processing (NOT started as background thread)
+        worker_local = SyncWorker(queue, dlq, config, data_dir=data_dir)
 
         processed = 0
         failed = 0
@@ -692,7 +693,7 @@ def handle_process_queue():
                 if job.get('retry_count', 0) >= max_retries:
                     log_warn(f"Scene {scene_id}: max retries exceeded, moving to DLQ")
                     fail_job(queue, job)
-                    dlq_local.add(job, e, job.get('retry_count', 0))
+                    dlq.add(job, e, job.get('retry_count', 0))
                     failed += 1
                 else:
                     # Re-queue for retry
@@ -702,13 +703,13 @@ def handle_process_queue():
             except PermanentError as e:
                 log_warn(f"Scene {scene_id}: permanent error: {e}")
                 fail_job(queue, job)
-                dlq_local.add(job, e, retry_count)
+                dlq.add(job, e, retry_count)
                 failed += 1
 
             except Exception as e:
                 log_error(f"Scene {scene_id}: unexpected error: {e}")
                 fail_job(queue, job)
-                dlq_local.add(job, e, retry_count)
+                dlq.add(job, e, retry_count)
                 failed += 1
 
             # Report progress every 5 items or every 10 seconds
@@ -730,7 +731,7 @@ def handle_process_queue():
 
         # Show DLQ count if items were added
         if failed > 0:
-            dlq_count = dlq_local.get_count()
+            dlq_count = dlq.get_count()
             log_warn(f"DLQ contains {dlq_count} items requiring review")
 
     except Exception as e:
@@ -769,7 +770,7 @@ def handle_task(task_args: dict, stash=None):
         return
 
     # Sync tasks require Stash connection
-    from sync_queue.operations import enqueue
+    from sync_queue.operations import enqueue, get_queued_scene_ids
 
     if not stash:
         log_error("No Stash connection available")
@@ -815,11 +816,18 @@ def handle_task(task_args: dict, stash=None):
         data_dir = get_plugin_data_dir()
         current_timestamps = load_sync_timestamps(data_dir)
 
+        # Load scene_ids already in queue to prevent duplicates
+        queue_path = os.path.join(data_dir, 'queue')
+        existing_in_queue = get_queued_scene_ids(queue_path)
+        if existing_in_queue:
+            log_debug(f"{len(existing_in_queue)} scenes already in queue, will skip duplicates")
+
         # Queue each scene directly (data already fetched in batch)
         queue = queue_manager.get_queue()
         queued = 0
         skipped = 0
         already_synced = 0
+        already_queued = 0
 
         for scene in scenes:
             scene_id = scene.get('id')
@@ -850,6 +858,11 @@ def handle_task(task_args: dict, stash=None):
                             continue
                     except (ValueError, AttributeError):
                         pass  # Can't parse date, sync anyway
+
+            # Skip scenes already in queue (prevents duplicates from re-runs)
+            if int(scene_id) in existing_in_queue:
+                already_queued += 1
+                continue
 
             # Build job data from batch-fetched scene
             job_data = {
@@ -890,6 +903,8 @@ def handle_task(task_args: dict, stash=None):
         parts = [f"Queued {queued} scenes for sync"]
         if already_synced:
             parts.append(f"{already_synced} already synced")
+        if already_queued:
+            parts.append(f"{already_queued} already in queue")
         if skipped:
             parts.append(f"{skipped} without files")
         log_info(parts[0] + (" (" + ", ".join(parts[1:]) + ")" if len(parts) > 1 else ""))
@@ -981,7 +996,7 @@ def main():
     # Give worker time to process pending jobs before exiting
     # Worker thread is daemon, so it dies when main process exits
     # Skip for management tasks that don't enqueue work
-    management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status'}
+    management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status', 'process_queue'}
     task_mode = args.get("mode", "") if not is_hook else ""
     if worker and queue_manager and task_mode not in management_modes:
         import time
@@ -1032,6 +1047,10 @@ def main():
                 f"(est. {estimated_remaining_time:.0f}s more needed). "
                 f"Run 'Process Queue' task to continue without timeout limits."
             )
+
+    # Graceful shutdown: stop worker so in-flight items are acked/nacked
+    # (prevents auto_resume from re-processing them in next invocation)
+    shutdown()
 
     # Return empty response (success)
     print(json.dumps({"output": "ok"}))

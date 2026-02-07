@@ -7,6 +7,7 @@ Stateless operations that work on queue instance passed in.
 import itertools
 import json
 import os
+import pickle
 import sqlite3
 import time
 from typing import Optional
@@ -204,10 +205,12 @@ def get_stats(queue_path: str) -> dict:
 
 def clear_pending_items(queue_path: str) -> int:
     """
-    Clear all pending items from queue.
+    Clear all pending and stale in-progress items from queue.
 
-    Deletes items with status 0 (inited) or 1 (ready).
-    Does NOT delete in-progress (2), completed (5), or failed (9) items.
+    Deletes items with status 0 (inited), 1 (ready), or 2 (unack/in-progress).
+    Status 2 items are from previous sessions where the worker was killed
+    mid-processing — they would be auto-resumed and reprocessed otherwise.
+    Does NOT delete completed (5) or failed (9) items.
 
     Args:
         queue_path: Path to queue directory (contains data.db)
@@ -231,11 +234,56 @@ def clear_pending_items(queue_path: str) -> int:
 
         table_name = table[0]
         cursor = conn.execute(
-            f"DELETE FROM {table_name} WHERE status IN (0, 1)"
+            f"DELETE FROM {table_name} WHERE status IN (0, 1, 2)"
         )
         deleted = cursor.rowcount
         conn.commit()
         return deleted
+    finally:
+        conn.close()
+
+
+def get_queued_scene_ids(queue_path: str) -> set:
+    """
+    Get scene_ids for all items currently in queue (pending or in-progress).
+
+    Queries SQLite directly and deserializes job data to extract scene_ids.
+    Used for deduplication before batch enqueue operations.
+
+    Args:
+        queue_path: Path to queue directory (contains data.db)
+
+    Returns:
+        Set of scene_id integers currently in queue
+    """
+    db_path = os.path.join(queue_path, 'data.db')
+    if not os.path.exists(db_path):
+        return set()
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ack_queue%'"
+        )
+        table = cursor.fetchone()
+        if not table:
+            return set()
+
+        table_name = table[0]
+        cursor = conn.execute(
+            f"SELECT data FROM {table_name} WHERE status IN (0, 1, 2)"
+        )
+
+        scene_ids = set()
+        for row in cursor:
+            try:
+                job = pickle.loads(row[0])
+                sid = job.get('scene_id')
+                if sid is not None:
+                    scene_ids.add(int(sid))
+            except Exception:
+                continue
+        return scene_ids
     finally:
         conn.close()
 

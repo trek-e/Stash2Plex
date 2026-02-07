@@ -175,19 +175,20 @@ class SyncWorker:
             log_warn(f"DLQ contains {total} items: {breakdown}")
 
     def stop(self):
-        """Stop the background worker thread"""
+        """Stop the background worker thread, letting current job finish."""
         if not self.running:
             return
 
-        log_trace("Stopping...")
+        log_trace("Stopping worker...")
         self.running = False
 
         if self.thread:
-            self.thread.join(timeout=5)
+            # Give current job time to finish (get timeout=2s + processing)
+            self.thread.join(timeout=10)
             if self.thread.is_alive():
-                log_warn("Thread did not stop cleanly")
+                log_warn("Worker thread did not stop within 10s — current job may be reprocessed")
 
-        log_trace("Stopped")
+        log_trace("Worker stopped")
 
     def _prepare_for_retry(self, job: dict, error: Exception) -> dict:
         """
@@ -293,11 +294,15 @@ class SyncWorker:
                 # Check circuit breaker first - pause if Plex is down
                 if not self.circuit_breaker.can_execute():
                     log_debug(f"Circuit OPEN, sleeping {self.config.poll_interval}s")
-                    time.sleep(self.config.poll_interval)
+                    # Sleep in small increments so stop() can interrupt quickly
+                    for _ in range(int(self.config.poll_interval * 2)):
+                        if not self.running:
+                            return
+                        time.sleep(0.5)
                     continue
 
-                # Get next pending job (10 second timeout)
-                item = get_pending(self.queue, timeout=10)
+                # Get next pending job (2 second timeout — short so stop() isn't blocked)
+                item = get_pending(self.queue, timeout=2)
                 if item is None:
                     # Timeout, continue loop
                     continue
