@@ -40,6 +40,18 @@ class PlexPermanentError(PermanentError):
     pass
 
 
+class PlexServerDown(PlexTemporaryError):
+    """
+    Plex server is unreachable (connection refused, DNS failure, etc.).
+
+    Distinct from PlexTemporaryError to allow special handling:
+    - Never counts against job retry limit
+    - Triggers circuit breaker immediately
+    - Logs a clean "server is down" message instead of full traceback
+    """
+    pass
+
+
 class PlexNotFound(TransientError):
     """
     Item not found in Plex library.
@@ -52,6 +64,20 @@ class PlexNotFound(TransientError):
     filesystem but Plex hasn't indexed it yet.
     """
     pass
+
+
+def _is_server_unreachable(exc_str: str) -> bool:
+    """Check if an exception string indicates the server is unreachable."""
+    indicators = (
+        'Connection refused',
+        'NewConnectionError',
+        'Failed to establish a new connection',
+        'Name or service not known',
+        'No route to host',
+        'Network is unreachable',
+        'Max retries exceeded',
+    )
+    return any(indicator in exc_str for indicator in indicators)
 
 
 def translate_plex_exception(exc: Exception) -> Exception:
@@ -97,12 +123,19 @@ def translate_plex_exception(exc: Exception) -> Exception:
     # Handle requests/network exceptions
     if has_requests:
         if isinstance(exc, requests.exceptions.ConnectionError):
+            # Check for "server is down" indicators
+            exc_str = str(exc)
+            if _is_server_unreachable(exc_str):
+                return PlexServerDown(f"Plex server is down")
             return PlexTemporaryError(f"Connection error: {exc}")
         if isinstance(exc, requests.exceptions.Timeout):
             return PlexTemporaryError(f"Timeout error: {exc}")
 
     # Handle base Python network exceptions
     if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
+        exc_str = str(exc)
+        if _is_server_unreachable(exc_str):
+            return PlexServerDown(f"Plex server is down")
         return PlexTemporaryError(f"Connection error: {exc}")
 
     # Handle HTTP errors with response attribute (status codes)

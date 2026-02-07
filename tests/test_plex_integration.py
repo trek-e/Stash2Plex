@@ -175,15 +175,16 @@ class TestExceptionTranslation(unittest.TestCase):
         }
 
     def test_connection_error_becomes_temporary(self):
-        """ConnectionError translates to PlexTemporaryError."""
+        """ConnectionError with server-down indicator -> PlexServerDown."""
         with patch.dict('sys.modules', self._setup_mocks()):
-            from plex.exceptions import translate_plex_exception, PlexTemporaryError
+            from plex.exceptions import translate_plex_exception, PlexTemporaryError, PlexServerDown
 
             exc = ConnectionError("Connection refused")
             result = translate_plex_exception(exc)
 
-            assert isinstance(result, PlexTemporaryError)
-            assert "Connection error" in str(result)
+            assert isinstance(result, PlexServerDown)
+            assert isinstance(result, PlexTemporaryError)  # PlexServerDown is a subclass
+            assert "server is down" in str(result).lower()
 
     def test_timeout_error_becomes_temporary(self):
         """TimeoutError translates to PlexTemporaryError."""

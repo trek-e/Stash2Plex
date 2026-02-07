@@ -422,9 +422,11 @@ def trigger_plex_scan_for_scene(scene_id: int, stash) -> bool:
         return True
 
     except Exception as e:
-        log_error(f"Failed to trigger Plex scan: {e}")
-        import traceback
-        traceback.print_exc()
+        from plex.exceptions import PlexServerDown
+        if isinstance(e, PlexServerDown):
+            log_warn("Plex server is down — scene queued, will sync when Plex is back")
+        else:
+            log_error(f"Failed to trigger Plex scan: {e}")
         return False
 
 

@@ -130,7 +130,7 @@ class PlexClient:
             retry=retry_if_exception_type(retriable),
             wait=wait_exponential_jitter(initial=0.1, max=0.4, jitter=0.1),
             stop=stop_after_attempt(3),
-            before_sleep=before_sleep_log(logger, logging.WARNING),
+            before_sleep=before_sleep_log(logger, logging.DEBUG),
             reraise=True,
         )
         def connect():

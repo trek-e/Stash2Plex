@@ -112,14 +112,16 @@ class TestRequestsExceptionTranslation:
     """Tests for requests library exception translation."""
 
     def test_connection_error_becomes_temporary(self):
-        """requests.ConnectionError -> PlexTemporaryError."""
+        """requests.ConnectionError with server-down indicator -> PlexServerDown."""
         import requests.exceptions
+        from plex.exceptions import PlexServerDown
 
         original = requests.exceptions.ConnectionError("Connection refused")
         result = translate_plex_exception(original)
 
-        assert isinstance(result, PlexTemporaryError)
-        assert "Connection error" in str(result)
+        assert isinstance(result, PlexServerDown)
+        assert isinstance(result, PlexTemporaryError)  # PlexServerDown is a subclass
+        assert "server is down" in str(result).lower()
 
     def test_timeout_becomes_temporary(self):
         """requests.Timeout -> PlexTemporaryError."""

@@ -73,9 +73,13 @@ def get_retry_params(error: Exception) -> Tuple[float, float, int]:
         - Other errors: (5.0, 80.0, 5) for standard backoff
     """
     # Import lazily to avoid circular imports
-    from plex.exceptions import PlexNotFound
+    from plex.exceptions import PlexNotFound, PlexServerDown
 
-    if isinstance(error, PlexNotFound):
+    if isinstance(error, PlexServerDown):
+        # Server is down: circuit breaker handles pausing, not retries
+        # Large max_retries so jobs are never DLQ'd for being unreachable
+        return (30.0, 300.0, 999)
+    elif isinstance(error, PlexNotFound):
         # Library scanning: longer delays, more retries
         # 30s base -> 60 -> 120 -> 240 -> 480 -> capped at 600 (10 min)
         # 12 retries gives ~2 hour total retry window

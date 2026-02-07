@@ -284,6 +284,7 @@ class SyncWorker:
     def _worker_loop(self):
         """Main worker loop - runs in background thread"""
         from worker.circuit_breaker import CircuitState
+        from plex.exceptions import PlexServerDown
         # Lazy imports to avoid module-level pollution in tests
         from sync_queue.operations import get_pending, ack_job, nack_job, fail_job
 
@@ -341,6 +342,15 @@ class SyncWorker:
                         if self.data_dir is not None:
                             stats_path = os.path.join(self.data_dir, 'stats.json')
                             self._stats.save_to_file(stats_path)
+
+                except PlexServerDown:
+                    # Server unreachable: don't count against retry limit
+                    # Nack job back to queue, circuit breaker pauses processing
+                    nack_job(self.queue, item)
+                    self.circuit_breaker.record_failure()
+                    if self.circuit_breaker.state == CircuitState.OPEN:
+                        pending = self.queue.size
+                        log_warn(f"Plex server is down — pausing, {pending} job(s) waiting")
 
                 except TransientError as e:
                     _job_elapsed = time.perf_counter() - _job_start
