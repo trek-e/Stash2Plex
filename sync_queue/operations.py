@@ -9,7 +9,6 @@ import json
 import os
 import sqlite3
 import time
-from queue import Empty
 from typing import Optional
 
 # Simple counter for job IDs (resets on restart, used for log correlation only)
@@ -17,8 +16,10 @@ _job_counter = itertools.count(1)
 
 try:
     import persistqueue
+    from persistqueue.exceptions import Empty
 except ImportError:
     persistqueue = None
+    from queue import Empty  # fallback for tests
 
 
 def enqueue(queue: 'persistqueue.SQLiteAckQueue', scene_id: int, update_type: str, data: dict) -> dict:
