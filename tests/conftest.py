@@ -164,6 +164,7 @@ def mock_config():
     config.plex_url = "http://localhost:32400"
     config.plex_token = "test-token-abc123"
     config.plex_library = "Movies"
+    config.plex_libraries = ["Movies"]
     config.stash_url = "http://localhost:9999"
     config.stash_api_key = "stash-api-key-xyz"
     config.poll_interval = 5

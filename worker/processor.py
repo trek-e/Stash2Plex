@@ -534,13 +534,21 @@ class SyncWorker:
             client = self._get_plex_client()
 
             # Get library section(s) to search
-            if self.config.plex_library:
-                # Search only the configured library
-                try:
-                    sections = [client.server.library.section(self.config.plex_library)]
-                    log_trace(f"Searching library: {self.config.plex_library}")
-                except Exception as e:
-                    raise PermanentError(f"Library '{self.config.plex_library}' not found: {e}")
+            configured_libs = self.config.plex_libraries  # parsed comma-separated list
+            if configured_libs:
+                # Search only the configured libraries
+                sections = []
+                not_found = []
+                for lib_name in configured_libs:
+                    try:
+                        sections.append(client.server.library.section(lib_name))
+                    except Exception:
+                        not_found.append(lib_name)
+                if not_found:
+                    log_warn(f"Libraries not found in Plex: {not_found}")
+                if not sections:
+                    raise PermanentError(f"None of the configured libraries found: {configured_libs}")
+                log_trace(f"Searching {len(sections)} configured library(s): {[s.title for s in sections]}")
             else:
                 # Search all libraries (slow)
                 sections = client.server.library.sections()

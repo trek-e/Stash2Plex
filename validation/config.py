@@ -47,11 +47,24 @@ class Stash2PlexConfig(BaseModel):
     # DLQ settings
     dlq_retention_days: int = Field(default=30, ge=1, le=365)
 
-    # Plex library to sync (required - e.g., "Adult", "Movies")
+    # Plex library to sync (e.g., "Adult", "Movies", or "Adult, Movies, TV Shows")
     plex_library: Optional[str] = Field(
         default=None,
-        description="Name of Plex library section to sync. If not set, searches all libraries (slow)."
+        description="Plex library name(s) to sync. Comma-separated for multiple. If not set, searches all libraries (slow)."
     )
+
+    @property
+    def plex_libraries(self) -> list[str]:
+        """Parse plex_library into a list of library names.
+
+        Returns:
+            List of library names (empty list means "search all").
+            Single name: "Adult" -> ["Adult"]
+            Multiple: "Adult, Movies, TV Shows" -> ["Adult", "Movies", "TV Shows"]
+        """
+        if not self.plex_library:
+            return []
+        return [name.strip() for name in self.plex_library.split(',') if name.strip()]
 
     # Late update detection flags
     strict_matching: bool = Field(
@@ -175,8 +188,11 @@ class Stash2PlexConfig(BaseModel):
             masked = self.plex_token[:4] + '****' + self.plex_token[-4:]
         else:
             masked = '****'
+        libs = self.plex_libraries
+        lib_info = f"libraries={libs}" if libs else "libraries=ALL (none configured)"
         log.info(
             f"Stash2Plex config: url={self.plex_url}, token={masked}, "
+            f"{lib_info}, "
             f"max_retries={self.max_retries}, enabled={self.enabled}, "
             f"strict_mode={self.strict_mode}, "
             f"connect_timeout={self.plex_connect_timeout}s, "

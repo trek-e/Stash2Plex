@@ -1,7 +1,7 @@
 # requires: PythonDepManager
 name: Stash2Plex
 description: Sync metadata from Stash to Plex with queue-based reliability
-version: 1.2.11
+version: 1.3.0
 url: https://github.com/trek-e/Stash2Plex
 
 exec:
@@ -59,7 +59,7 @@ settings:
     type: STRING
   plex_library:
     displayName: Plex Library
-    description: "Name of Plex library to sync (e.g., 'Adult'). Leave empty to search all libraries."
+    description: "Plex library name(s) to sync. Comma-separated for multiple (e.g., 'Adult' or 'Adult, Movies'). Leave empty to search all libraries."
     type: STRING
   enabled:
     displayName: Enabled

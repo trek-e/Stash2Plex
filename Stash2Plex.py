@@ -379,7 +379,8 @@ def trigger_plex_scan_for_scene(scene_id: int, stash) -> bool:
     if not config or not config.trigger_plex_scan:
         return False
 
-    if not config.plex_library:
+    libraries = config.plex_libraries
+    if not libraries:
         log_warn("trigger_plex_scan enabled but plex_library not set")
         return False
 
@@ -417,8 +418,13 @@ def trigger_plex_scan_for_scene(scene_id: int, stash) -> bool:
             read_timeout=config.plex_read_timeout
         )
 
-        plex_client.scan_library(config.plex_library, path=scan_path)
-        log_info(f"Triggered Plex scan for: {scan_path}")
+        # Scan all configured libraries
+        for lib_name in libraries:
+            try:
+                plex_client.scan_library(lib_name, path=scan_path)
+                log_info(f"Triggered Plex scan of '{lib_name}' for: {scan_path}")
+            except Exception as e:
+                log_warn(f"Failed to scan library '{lib_name}': {e}")
         return True
 
     except Exception as e:
