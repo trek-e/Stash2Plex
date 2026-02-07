@@ -85,6 +85,17 @@ class TestGetPending:
 
         assert result is None
 
+    def test_get_pending_returns_none_on_empty_exception(self, mock_queue):
+        """get_pending returns None when queue raises Empty (queue exhausted)."""
+        from queue import Empty
+        from sync_queue.operations import get_pending
+
+        mock_queue.get.side_effect = Empty()
+
+        result = get_pending(mock_queue, timeout=10)
+
+        assert result is None
+
     def test_get_pending_uses_provided_timeout(self, mock_queue):
         """get_pending passes timeout to queue.get()."""
         from sync_queue.operations import get_pending

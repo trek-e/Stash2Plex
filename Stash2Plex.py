@@ -978,7 +978,10 @@ def main():
 
     # Give worker time to process pending jobs before exiting
     # Worker thread is daemon, so it dies when main process exits
-    if worker and queue_manager:
+    # Skip for management tasks that don't enqueue work
+    management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status'}
+    task_mode = args.get("mode", "") if not is_hook else ""
+    if worker and queue_manager and task_mode not in management_modes:
         import time
         from worker.stats import SyncStats
         queue = queue_manager.get_queue()

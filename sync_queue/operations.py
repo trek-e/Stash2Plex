@@ -9,6 +9,7 @@ import json
 import os
 import sqlite3
 import time
+from queue import Empty
 from typing import Optional
 
 # Simple counter for job IDs (resets on restart, used for log correlation only)
@@ -65,10 +66,13 @@ def get_pending(queue: 'persistqueue.SQLiteAckQueue', timeout: float = 0) -> Opt
         timeout: Seconds to wait for job (0 = non-blocking)
 
     Returns:
-        Job dict with 'pqid' field added by persist-queue, or None if timeout
+        Job dict with 'pqid' field added by persist-queue, or None if timeout/empty
     """
-    job = queue.get(timeout=timeout)
-    return job
+    try:
+        job = queue.get(timeout=timeout)
+        return job
+    except Empty:
+        return None
 
 
 def ack_job(queue: 'persistqueue.SQLiteAckQueue', job: dict):
