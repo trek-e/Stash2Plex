@@ -966,8 +966,11 @@ def main():
         temp_stash = get_stash_interface(input_data)
 
         # Allow Scene.Create.Post through - it triggers Plex scan for new files
+        # Allow identification events through - stash_ids in input means user identified a scene
         # Other hooks (Scene.Update.Post) are skipped during scans to avoid noise
-        if hook_type != "Scene.Create.Post" and is_scan_job_running(temp_stash):
+        hook_input = hook_context.get("input") or {}
+        is_identification = 'stash_ids' in hook_input
+        if hook_type != "Scene.Create.Post" and not is_identification and is_scan_job_running(temp_stash):
             # Scan running - exit immediately without initialization
             print(json.dumps({"output": "ok"}))
             return

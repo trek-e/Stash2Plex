@@ -223,6 +223,7 @@ class TestSyncWorkerIntegration(unittest.TestCase):
         self.mock_config.plex_connect_timeout = 5.0
         self.mock_config.plex_read_timeout = 30.0
         self.mock_config.plex_library = None  # Search all libraries
+        self.mock_config.plex_libraries = []  # Parsed empty list
         self.mock_config.strict_matching = False
 
     def test_process_job_missing_path_raises_permanent(self):
