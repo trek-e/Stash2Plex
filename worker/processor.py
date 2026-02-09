@@ -257,7 +257,7 @@ class SyncWorker:
             job: Job dict with retry metadata already added
         """
         # Lazy import to avoid module-level import pollution in tests
-        from sync_queue.operations import ack_job as _ack_job
+        from sync_queue.operations import ack_job as _ack_job, _job_counter
 
         # Extract original job fields for re-enqueue
         scene_id = job.get('scene_id')
@@ -266,6 +266,7 @@ class SyncWorker:
 
         # Create new job with all metadata preserved
         new_job = {
+            'pqid': next(_job_counter),
             'scene_id': scene_id,
             'update_type': update_type,
             'data': data,
@@ -291,9 +292,14 @@ class SyncWorker:
 
         while self.running:
             try:
+                _dbg = getattr(self.config, 'debug_logging', False)
+
                 # Check circuit breaker first - pause if Plex is down
                 if not self.circuit_breaker.can_execute():
-                    log_debug(f"Circuit OPEN, sleeping {self.config.poll_interval}s")
+                    if _dbg:
+                        log_debug(f"[DEBUG] Circuit breaker state={self.circuit_breaker.state.value}, sleeping {self.config.poll_interval}s")
+                    else:
+                        log_debug(f"Circuit OPEN, sleeping {self.config.poll_interval}s")
                     # Sleep in small increments so stop() can interrupt quickly
                     for _ in range(int(self.config.poll_interval * 2)):
                         if not self.running:
@@ -304,12 +310,15 @@ class SyncWorker:
                 # Get next pending job (2 second timeout — short so stop() isn't blocked)
                 item = get_pending(self.queue, timeout=2)
                 if item is None:
-                    # Timeout, continue loop
+                    if _dbg:
+                        log_trace("[DEBUG] Queue poll: timeout, no items")
                     continue
 
                 # Check if backoff delay has elapsed
                 if not self._is_ready_for_retry(item):
-                    # Put back in queue - not ready yet
+                    if _dbg:
+                        remaining = item.get('next_retry_at', 0) - time.time()
+                        log_debug(f"[DEBUG] Job {item.get('pqid')} backoff not elapsed ({remaining:.1f}s remaining)")
                     nack_job(self.queue, item)
                     time.sleep(0.1)  # Small delay to avoid tight loop
                     continue
@@ -362,7 +371,7 @@ class SyncWorker:
                     # Record failure with circuit breaker
                     self.circuit_breaker.record_failure()
                     if self.circuit_breaker.state == CircuitState.OPEN:
-                        log_warn("Circuit breaker OPENED - pausing processing")
+                        log_warn(f"Circuit breaker OPENED after {type(e).__name__}: {e}")
 
                     # Prepare job for retry with backoff metadata
                     job = self._prepare_for_retry(item, e)
@@ -519,9 +528,12 @@ class SyncWorker:
 
         from plex.exceptions import PlexTemporaryError, PlexPermanentError, PlexNotFound, translate_plex_exception
         from plex.matcher import find_plex_items_with_confidence, MatchConfidence
+        from validation.obfuscation import obfuscate_path
         # Lazy imports to avoid module-level pollution in tests
         from sync_queue.operations import save_sync_timestamp
         from hooks.handlers import unmark_scene_pending
+
+        _dbg = getattr(self.config, 'debug_logging', False)
 
         scene_id = job.get('scene_id')
         data = job.get('data', {})
@@ -529,6 +541,9 @@ class SyncWorker:
 
         if not file_path:
             raise PermanentError(f"Job {scene_id} missing file path")
+
+        if _dbg:
+            log_debug(f"[DEBUG] Processing scene {scene_id}, path: {obfuscate_path(file_path)}")
 
         try:
             client = self._get_plex_client()
@@ -554,6 +569,9 @@ class SyncWorker:
                 sections = client.server.library.sections()
                 log_info(f"Searching all {len(sections)} libraries (set plex_library to speed up)")
 
+            if _dbg:
+                log_debug(f"[DEBUG] Searching {len(sections)} section(s): {[s.title for s in sections]}")
+
             # Get caches for optimized matching
             library_cache, match_cache = self._get_caches()
 
@@ -566,9 +584,14 @@ class SyncWorker:
                         file_path,
                         library_cache=library_cache,
                         match_cache=match_cache,
+                        debug_logging=_dbg,
                     )
                     all_candidates.extend(candidates)
+                    if _dbg:
+                        log_debug(f"[DEBUG] Section '{section.title}': {len(candidates)} candidate(s)")
                 except PlexNotFound:
+                    if _dbg:
+                        log_debug(f"[DEBUG] Section '{section.title}': no match")
                     continue  # No match in this section, try next
 
             # Deduplicate candidates (same item might be in multiple sections)
@@ -579,32 +602,38 @@ class SyncWorker:
                     seen_keys.add(c.key)
                     unique_candidates.append(c)
 
+            if _dbg:
+                log_debug(f"[DEBUG] Dedup: {len(all_candidates)} total -> {len(unique_candidates)} unique candidate(s)")
+
             # Apply confidence scoring
             confidence = None
             if len(unique_candidates) == 0:
-                raise PlexNotFound(f"Could not find Plex item for path: {file_path}")
+                raise PlexNotFound(f"Could not find Plex item for path: {obfuscate_path(file_path)}")
             elif len(unique_candidates) == 1:
                 # HIGH confidence - single unique match
                 confidence = 'high'
                 plex_item = unique_candidates[0]
+                if _dbg:
+                    log_debug(f"[DEBUG] HIGH confidence match: {plex_item.title}")
                 self._update_metadata(plex_item, data)
             else:
                 # LOW confidence - multiple matches
                 confidence = 'low'
                 paths = [c.media[0].parts[0].file if c.media and c.media[0].parts else c.key for c in unique_candidates]
+                obfuscated_paths = [obfuscate_path(p) for p in paths]
                 if self.config.strict_matching:
                     logger.warning(
                         f"[Stash2Plex] LOW CONFIDENCE SKIPPED: scene {scene_id}\n"
-                        f"  Stash path: {file_path}\n"
-                        f"  Plex candidates ({len(unique_candidates)}): {paths}"
+                        f"  Stash path: {obfuscate_path(file_path)}\n"
+                        f"  Plex candidates ({len(unique_candidates)}): {obfuscated_paths}"
                     )
                     raise PermanentError(f"Low confidence match skipped (strict_matching=true)")
                 else:
                     plex_item = unique_candidates[0]
                     logger.warning(
                         f"[Stash2Plex] LOW CONFIDENCE SYNCED: scene {scene_id}\n"
-                        f"  Chosen: {paths[0]}\n"
-                        f"  Other candidates: {paths[1:]}"
+                        f"  Chosen: {obfuscated_paths[0]}\n"
+                        f"  Other candidates: {obfuscated_paths[1:]}"
                     )
                     self._update_metadata(plex_item, data)
 
@@ -723,6 +752,8 @@ class SyncWorker:
         from validation.sanitizers import sanitize_for_plex
         from validation.errors import PartialSyncResult
 
+        _dbg = getattr(self.config, 'debug_logging', False)
+
         result = PartialSyncResult()
         edits = {}
 
@@ -820,7 +851,10 @@ class SyncWorker:
         # Note: reload() is deferred to end of method to reduce HTTP roundtrips
         _needs_reload = False
         if edits:
-            log_debug(f"Updating fields: {list(edits.keys())}")
+            if _dbg:
+                log_debug(f"[DEBUG] Metadata edits: {edits}")
+            else:
+                log_debug(f"Updating fields: {list(edits.keys())}")
             plex_item.edit(**edits)
             _needs_reload = True
 
@@ -861,6 +895,9 @@ class SyncWorker:
                     current_actors = [actor.tag for actor in getattr(plex_item, 'actors', [])]
                     new_performers = [p for p in sanitized_performers if p not in current_actors]
 
+                    if _dbg:
+                        log_debug(f"[DEBUG] Performers: current={current_actors}, new={new_performers}")
+
                     if new_performers:
                         # Build actor edit params - each actor needs actor[N].tag.tag format
                         actor_edits = {}
@@ -887,6 +924,8 @@ class SyncWorker:
         if getattr(self.config, 'sync_poster', True) and data.get('poster_url'):
             poster_url = data.get('poster_url')
             try:
+                if _dbg:
+                    log_debug(f"[DEBUG] Fetching poster image from Stash")
                 image_data = self._fetch_stash_image(poster_url)
                 if image_data:
                     import tempfile
@@ -958,6 +997,8 @@ class SyncWorker:
                         sanitized_tags = sanitized_tags[:MAX_TAGS]
 
                     current_genres = [g.tag for g in getattr(plex_item, 'genres', [])]
+                    if _dbg:
+                        log_debug(f"[DEBUG] Tags: current={current_genres}, new_from_stash={sanitized_tags}")
                     new_tags = [t for t in sanitized_tags if t not in current_genres]
 
                     if new_tags:

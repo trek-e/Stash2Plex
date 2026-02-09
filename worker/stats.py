@@ -174,11 +174,10 @@ class SyncStats:
 
     def save_to_file(self, filepath: str) -> None:
         """
-        Save stats to JSON file.
+        Save stats to JSON file atomically.
 
-        Overwrites the file with current cumulative state. Since stats
-        are loaded from disk at init via load_from_file, self already
-        contains the full cumulative totals.
+        Uses temp file + os.replace to prevent corruption from
+        concurrent plugin invocations writing simultaneously.
 
         Args:
             filepath: Path to JSON file for persistence
@@ -188,22 +187,27 @@ class SyncStats:
         if parent_dir:
             os.makedirs(parent_dir, exist_ok=True)
 
-        with open(filepath, 'w') as f:
+        temp_path = filepath + '.tmp'
+        with open(temp_path, 'w') as f:
             json.dump(self.to_dict(), f, indent=2)
+        os.replace(temp_path, filepath)
+
+    # Sanity ceiling: if any counter exceeds this, file is corrupted
+    _MAX_SANE_VALUE = 10_000_000
 
     @classmethod
     def load_from_file(cls, filepath: str) -> 'SyncStats':
         """
         Load stats from JSON file.
 
-        If the file doesn't exist or is invalid, returns a new empty
-        SyncStats instance.
+        If the file doesn't exist, is invalid, or contains corrupted
+        values (e.g., from non-atomic writes), returns fresh stats.
 
         Args:
             filepath: Path to JSON file to load
 
         Returns:
-            SyncStats instance with loaded data, or empty stats if file missing
+            SyncStats instance with loaded data, or empty stats if file missing/corrupt
         """
         if not os.path.exists(filepath):
             return cls()
@@ -213,6 +217,15 @@ class SyncStats:
                 data = json.load(f)
         except (json.JSONDecodeError, IOError):
             return cls()
+
+        # Sanity check: detect corrupted stats from non-atomic writes
+        counter_keys = ['jobs_processed', 'jobs_succeeded', 'jobs_failed',
+                        'jobs_to_dlq', 'high_confidence_matches', 'low_confidence_matches']
+        for key in counter_keys:
+            val = data.get(key, 0)
+            if not isinstance(val, (int, float)) or val > cls._MAX_SANE_VALUE or val < 0:
+                # File is corrupted — start fresh
+                return cls()
 
         return cls(
             jobs_processed=data.get('jobs_processed', 0),

@@ -127,6 +127,16 @@ class Stash2PlexConfig(BaseModel):
         description="Trigger Plex library scan when Stash identifies a new scene"
     )
 
+    # Debug / privacy settings
+    debug_logging: bool = Field(
+        default=False,
+        description="Enable verbose step-by-step debug logging (intensive, for troubleshooting only)"
+    )
+    obfuscate_paths: bool = Field(
+        default=False,
+        description="Replace file paths in logs with deterministic word substitutions for privacy"
+    )
+
     # Stash connection (for fetching images)
     stash_url: Optional[str] = Field(
         default=None,
@@ -166,6 +176,7 @@ class Stash2PlexConfig(BaseModel):
         'sync_master', 'sync_studio', 'sync_summary', 'sync_tagline',
         'sync_date', 'sync_performers', 'sync_tags', 'sync_poster',
         'sync_background', 'sync_collection', 'trigger_plex_scan',
+        'debug_logging', 'obfuscate_paths',
         mode='before'
     )
     @classmethod
@@ -201,6 +212,16 @@ class Stash2PlexConfig(BaseModel):
             f"strict_matching={self.strict_matching}, "
             f"preserve_plex_edits={self.preserve_plex_edits}"
         )
+        # Debug/privacy settings
+        if self.debug_logging:
+            log.warning(
+                "DEBUG LOGGING ENABLED — this is very intensive and will produce "
+                "large volumes of output. Use only when providing a log to "
+                "troubleshoot a problem. Run for a few sequences only, then disable."
+            )
+        if self.obfuscate_paths:
+            log.info("Path obfuscation enabled — file paths will be replaced with word substitutions in logs")
+
         # Log field sync toggle summary
         toggles_off = [k.replace('sync_', '') for k in [
             'sync_studio', 'sync_summary', 'sync_tagline', 'sync_date',

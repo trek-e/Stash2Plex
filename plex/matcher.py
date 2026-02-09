@@ -178,6 +178,7 @@ def find_plex_items_with_confidence(
     stash_path_prefix: Optional[str] = None,
     library_cache: Optional["PlexCache"] = None,
     match_cache: Optional["MatchCache"] = None,
+    debug_logging: bool = False,
 ) -> tuple[MatchConfidence, Optional["Video"], list["Video"]]:
     """
     Find Plex item with confidence scoring and optional caching.
@@ -219,6 +220,7 @@ def find_plex_items_with_confidence(
         ... )
     """
     from plex.exceptions import PlexNotFound
+    from validation.obfuscation import obfuscate_path
 
     path = Path(stash_path)
     filename = path.name
@@ -229,7 +231,7 @@ def find_plex_items_with_confidence(
     if match_cache is not None:
         cached_key = match_cache.get_match(library_name, stash_path)
         if cached_key is not None:
-            log_debug(f"Match cache hit: {stash_path} -> {cached_key}")
+            log_debug(f"Match cache hit: {obfuscate_path(stash_path)} -> {cached_key}")
             try:
                 # Fetch item directly by key (1 API call vs search)
                 item = library.fetchItem(cached_key)
@@ -240,6 +242,8 @@ def find_plex_items_with_confidence(
                 # Item not found at cached key - cache is stale
                 log_debug(f"Cached key stale, invalidating: {e}")
                 match_cache.invalidate(library_name, stash_path)
+        elif debug_logging:
+            log_debug(f"[DEBUG] Match cache MISS for: {obfuscate_path(stash_path)}")
 
     # Derive title variants from filename
     title_search = path.stem
@@ -248,8 +252,9 @@ def find_plex_items_with_confidence(
     # Remove date suffix like "- 2026-01-30" or "2026-01-30"
     title_base = re.sub(r'\s*[-_]?\s*\d{4}-\d{2}-\d{2}\s*$', '', title_search)
 
-    log_debug(f"Searching '{library_name}' for: {filename}")
-    log_debug(f"Title variants: '{title_search}' / '{title_base}'")
+    log_debug(f"Searching '{library_name}' for: {obfuscate_path(filename)}")
+    if debug_logging:
+        log_debug(f"[DEBUG] Title variants: '{title_search}' / '{title_base}'")
 
     candidates = []
 
@@ -258,7 +263,8 @@ def find_plex_items_with_confidence(
         for title in [title_search, title_base]:
             if candidates:
                 break
-            log_debug(f"Title search: '{title}'")
+            if debug_logging:
+                log_debug(f"[DEBUG] Title search query: '{title}'")
 
             # Check library_cache for search results
             cached_results = None
@@ -281,7 +287,8 @@ def find_plex_items_with_confidence(
             else:
                 # Cache miss - do actual search
                 results = library.search(title=title)
-                log_debug(f"Got {len(results)} title matches")
+                if debug_logging:
+                    log_debug(f"[DEBUG] Search returned {len(results)} title match(es)")
 
                 # Cache the results for next time
                 if library_cache is not None:
@@ -297,7 +304,10 @@ def find_plex_items_with_confidence(
     # Slow fallback: scan all items if title search found nothing
     if not candidates:
         try:
-            log_debug(f"Fallback: scanning all items...")
+            if debug_logging:
+                log_debug("[DEBUG] No title matches, falling back to full library scan")
+            else:
+                log_debug(f"Fallback: scanning all items...")
 
             # Check library_cache for all items
             cached_items = None
@@ -335,9 +345,12 @@ def find_plex_items_with_confidence(
 
     # Scoring logic
     if len(candidates) == 0:
-        raise PlexNotFound(f"No Plex item found for filename: {filename}")
+        raise PlexNotFound(f"No Plex item found for filename: {obfuscate_path(filename)}")
     elif len(candidates) == 1:
-        logger.debug(f"HIGH confidence match for {filename}")
+        if debug_logging:
+            log_debug(f"[DEBUG] HIGH confidence match: {candidates[0].title}")
+        else:
+            logger.debug(f"HIGH confidence match for {obfuscate_path(filename)}")
         # Store in match_cache for next time
         if match_cache is not None:
             item = candidates[0]
@@ -356,8 +369,9 @@ def find_plex_items_with_confidence(
             except (IndexError, AttributeError):
                 candidate_paths.append("<path unavailable>")
 
+        obfuscated_paths = [obfuscate_path(p) for p in candidate_paths]
         logger.warning(
-            f"LOW confidence match for '{filename}': "
-            f"{len(candidates)} candidates found - {candidate_paths}"
+            f"LOW confidence match for '{obfuscate_path(filename)}': "
+            f"{len(candidates)} candidates found - {obfuscated_paths}"
         )
         return (MatchConfidence.LOW, None, candidates)

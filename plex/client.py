@@ -207,7 +207,8 @@ class PlexClient:
         try:
             section = self.server.library.section(section_name)
             if path:
-                logger.debug(f"Triggering partial scan of '{section_name}' for path: {path}")
+                from validation.obfuscation import obfuscate_path
+                logger.debug(f"Triggering partial scan of '{section_name}' for path: {obfuscate_path(path)}")
                 section.update(path=path)
             else:
                 logger.debug(f"Triggering full scan of '{section_name}'")

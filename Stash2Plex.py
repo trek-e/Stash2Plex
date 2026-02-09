@@ -320,6 +320,13 @@ def initialize(config_dict: dict = None):
 
     config = validated_config
 
+    # Configure path obfuscation (must be before any logging that includes paths)
+    from validation.obfuscation import configure_obfuscation
+    configure_obfuscation(getattr(config, 'obfuscate_paths', False))
+
+    # Log configuration summary (includes debug_logging startup warning)
+    config.log_config()
+
     # Check if plugin is disabled
     if not config.enabled:
         log_info("Plugin is disabled via configuration")

@@ -173,6 +173,8 @@ def mock_config():
     config.max_backoff = 300.0
     config.circuit_breaker_threshold = 5
     config.circuit_breaker_timeout = 60
+    config.debug_logging = False
+    config.obfuscate_paths = False
 
     return config
 

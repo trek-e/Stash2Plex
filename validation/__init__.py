@@ -9,6 +9,7 @@ from validation.sanitizers import sanitize_for_plex
 from validation.errors import classify_exception, classify_http_error
 from validation.metadata import SyncMetadata, validate_metadata
 from validation.config import Stash2PlexConfig, validate_config
+from validation.obfuscation import obfuscate_path, configure_obfuscation
 
 __all__ = [
     'sanitize_for_plex',
@@ -18,4 +19,6 @@ __all__ = [
     'validate_metadata',
     'Stash2PlexConfig',
     'validate_config',
+    'obfuscate_path',
+    'configure_obfuscation',
 ]

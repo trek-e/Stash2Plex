@@ -497,6 +497,32 @@ class TestSyncStatsLoadFromFile:
         assert loaded.jobs_processed == 0
         assert loaded.errors_by_type == {}
 
+    def test_load_from_file_insane_values_returns_empty_stats(self, tmp_path):
+        """load_from_file resets stats when values are impossibly large (file corruption)."""
+        from worker.stats import SyncStats
+
+        corrupted_path = str(tmp_path / "insane.json")
+        with open(corrupted_path, 'w') as f:
+            json.dump({'jobs_processed': 18716292317328674598528195362573230,
+                        'jobs_succeeded': 18716292317328674598528195362573230}, f)
+
+        loaded = SyncStats.load_from_file(corrupted_path)
+
+        assert loaded.jobs_processed == 0
+        assert loaded.jobs_succeeded == 0
+
+    def test_load_from_file_negative_values_returns_empty_stats(self, tmp_path):
+        """load_from_file resets stats when values are negative (file corruption)."""
+        from worker.stats import SyncStats
+
+        corrupted_path = str(tmp_path / "negative.json")
+        with open(corrupted_path, 'w') as f:
+            json.dump({'jobs_processed': -5}, f)
+
+        loaded = SyncStats.load_from_file(corrupted_path)
+
+        assert loaded.jobs_processed == 0
+
     def test_load_from_file_partial_data_uses_defaults(self, tmp_path):
         """load_from_file uses defaults for missing fields."""
         from worker.stats import SyncStats
