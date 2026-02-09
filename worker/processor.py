@@ -297,7 +297,7 @@ class SyncWorker:
                 # Check circuit breaker first - pause if Plex is down
                 if not self.circuit_breaker.can_execute():
                     if _dbg:
-                        log_debug(f"[DEBUG] Circuit breaker state={self.circuit_breaker.state.value}, sleeping {self.config.poll_interval}s")
+                        log_info(f"[DEBUG] Circuit breaker state={self.circuit_breaker.state.value}, sleeping {self.config.poll_interval}s")
                     else:
                         log_debug(f"Circuit OPEN, sleeping {self.config.poll_interval}s")
                     # Sleep in small increments so stop() can interrupt quickly
@@ -311,14 +311,14 @@ class SyncWorker:
                 item = get_pending(self.queue, timeout=2)
                 if item is None:
                     if _dbg:
-                        log_trace("[DEBUG] Queue poll: timeout, no items")
+                        log_info("[DEBUG] Queue poll: timeout, no items")
                     continue
 
                 # Check if backoff delay has elapsed
                 if not self._is_ready_for_retry(item):
                     if _dbg:
                         remaining = item.get('next_retry_at', 0) - time.time()
-                        log_debug(f"[DEBUG] Job {item.get('pqid')} backoff not elapsed ({remaining:.1f}s remaining)")
+                        log_info(f"[DEBUG] Job {item.get('pqid')} backoff not elapsed ({remaining:.1f}s remaining)")
                     nack_job(self.queue, item)
                     time.sleep(0.1)  # Small delay to avoid tight loop
                     continue
@@ -543,7 +543,7 @@ class SyncWorker:
             raise PermanentError(f"Job {scene_id} missing file path")
 
         if _dbg:
-            log_debug(f"[DEBUG] Processing scene {scene_id}, path: {obfuscate_path(file_path)}")
+            log_info(f"[DEBUG] Processing scene {scene_id}, path: {obfuscate_path(file_path)}")
 
         try:
             client = self._get_plex_client()
@@ -570,7 +570,7 @@ class SyncWorker:
                 log_info(f"Searching all {len(sections)} libraries (set plex_library to speed up)")
 
             if _dbg:
-                log_debug(f"[DEBUG] Searching {len(sections)} section(s): {[s.title for s in sections]}")
+                log_info(f"[DEBUG] Searching {len(sections)} section(s): {[s.title for s in sections]}")
 
             # Get caches for optimized matching
             library_cache, match_cache = self._get_caches()
@@ -588,10 +588,10 @@ class SyncWorker:
                     )
                     all_candidates.extend(candidates)
                     if _dbg:
-                        log_debug(f"[DEBUG] Section '{section.title}': {len(candidates)} candidate(s)")
+                        log_info(f"[DEBUG] Section '{section.title}': {len(candidates)} candidate(s)")
                 except PlexNotFound:
                     if _dbg:
-                        log_debug(f"[DEBUG] Section '{section.title}': no match")
+                        log_info(f"[DEBUG] Section '{section.title}': no match")
                     continue  # No match in this section, try next
 
             # Deduplicate candidates (same item might be in multiple sections)
@@ -603,7 +603,7 @@ class SyncWorker:
                     unique_candidates.append(c)
 
             if _dbg:
-                log_debug(f"[DEBUG] Dedup: {len(all_candidates)} total -> {len(unique_candidates)} unique candidate(s)")
+                log_info(f"[DEBUG] Dedup: {len(all_candidates)} total -> {len(unique_candidates)} unique candidate(s)")
 
             # Apply confidence scoring
             confidence = None
@@ -614,7 +614,7 @@ class SyncWorker:
                 confidence = 'high'
                 plex_item = unique_candidates[0]
                 if _dbg:
-                    log_debug(f"[DEBUG] HIGH confidence match: {plex_item.title}")
+                    log_info(f"[DEBUG] HIGH confidence match: {plex_item.title}")
                 self._update_metadata(plex_item, data)
             else:
                 # LOW confidence - multiple matches
@@ -753,6 +753,8 @@ class SyncWorker:
         from validation.errors import PartialSyncResult
 
         _dbg = getattr(self.config, 'debug_logging', False)
+        # Use configurable max_tags (falls back to hardcoded MAX_TAGS default)
+        max_tags = getattr(self.config, 'max_tags', MAX_TAGS)
 
         result = PartialSyncResult()
         edits = {}
@@ -852,7 +854,7 @@ class SyncWorker:
         _needs_reload = False
         if edits:
             if _dbg:
-                log_debug(f"[DEBUG] Metadata edits: {edits}")
+                log_info(f"[DEBUG] Metadata edits: {edits}")
             else:
                 log_debug(f"Updating fields: {list(edits.keys())}")
             plex_item.edit(**edits)
@@ -896,7 +898,7 @@ class SyncWorker:
                     new_performers = [p for p in sanitized_performers if p not in current_actors]
 
                     if _dbg:
-                        log_debug(f"[DEBUG] Performers: current={current_actors}, new={new_performers}")
+                        log_info(f"[DEBUG] Performers: current={current_actors}, new={new_performers}")
 
                     if new_performers:
                         # Build actor edit params - each actor needs actor[N].tag.tag format
@@ -925,7 +927,7 @@ class SyncWorker:
             poster_url = data.get('poster_url')
             try:
                 if _dbg:
-                    log_debug(f"[DEBUG] Fetching poster image from Stash")
+                    log_info(f"[DEBUG] Fetching poster image from Stash")
                 image_data = self._fetch_stash_image(poster_url)
                 if image_data:
                     import tempfile
@@ -991,14 +993,14 @@ class SyncWorker:
                         for t in tags
                     ]
 
-                    # Apply MAX_TAGS limit
-                    if len(sanitized_tags) > MAX_TAGS:
-                        log_warn(f"Truncating tags list from {len(sanitized_tags)} to {MAX_TAGS}")
-                        sanitized_tags = sanitized_tags[:MAX_TAGS]
+                    # Apply max_tags limit (configurable, default 100)
+                    if len(sanitized_tags) > max_tags:
+                        log_warn(f"Truncating tags list from {len(sanitized_tags)} to {max_tags}")
+                        sanitized_tags = sanitized_tags[:max_tags]
 
                     current_genres = [g.tag for g in getattr(plex_item, 'genres', [])]
                     if _dbg:
-                        log_debug(f"[DEBUG] Tags: current={current_genres}, new_from_stash={sanitized_tags}")
+                        log_info(f"[DEBUG] Tags: current={current_genres}, new_from_stash={sanitized_tags}")
                     new_tags = [t for t in sanitized_tags if t not in current_genres]
 
                     if new_tags:
@@ -1006,9 +1008,9 @@ class SyncWorker:
                         genre_edits = {}
                         all_genres = current_genres + new_tags
                         # Apply limit to combined list too
-                        if len(all_genres) > MAX_TAGS:
-                            log_warn(f"Truncating combined tags list from {len(all_genres)} to {MAX_TAGS}")
-                            all_genres = all_genres[:MAX_TAGS]
+                        if len(all_genres) > max_tags:
+                            log_warn(f"Truncating combined tags list from {len(all_genres)} to {max_tags}")
+                            all_genres = all_genres[:max_tags]
                         for i, genre_name in enumerate(all_genres):
                             genre_edits[f'genre[{i}].tag.tag'] = genre_name
 

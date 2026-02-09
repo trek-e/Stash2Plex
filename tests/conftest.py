@@ -175,6 +175,7 @@ def mock_config():
     config.circuit_breaker_timeout = 60
     config.debug_logging = False
     config.obfuscate_paths = False
+    config.max_tags = 100
 
     return config
 

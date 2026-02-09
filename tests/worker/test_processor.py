@@ -637,8 +637,11 @@ class TestListFieldLimits:
         assert str(MAX_PERFORMERS) in captured.err
 
     def test_tags_truncated_at_max(self, limits_worker, capsys):
-        """More than MAX_TAGS tags are truncated with warning."""
+        """More than max_tags tags are truncated with warning."""
         from validation.limits import MAX_TAGS
+
+        # Use configurable max_tags from worker config (default: 100)
+        max_tags = getattr(limits_worker.config, 'max_tags', MAX_TAGS)
 
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -648,8 +651,9 @@ class TestListFieldLimits:
         mock_plex_item.genres = []
         mock_plex_item.collections = []
 
-        # Create more tags than MAX_TAGS
-        tags = [f"Tag {i}" for i in range(MAX_TAGS + 10)]
+        # Create more tags than configured max_tags
+        excess_count = 10
+        tags = [f"Tag {i}" for i in range(max_tags + excess_count)]
         data = {'path': '/test.mp4', 'tags': tags}
 
         limits_worker._update_metadata(mock_plex_item, data)
@@ -657,8 +661,8 @@ class TestListFieldLimits:
         # Verify warning was logged
         captured = capsys.readouterr()
         assert "Truncating tags list" in captured.err
-        assert str(MAX_TAGS + 10) in captured.err
-        assert str(MAX_TAGS) in captured.err
+        assert str(max_tags + excess_count) in captured.err
+        assert str(max_tags) in captured.err
 
     def test_performers_under_limit_not_truncated(self, limits_worker, capsys):
         """Performers under MAX_PERFORMERS are not truncated."""

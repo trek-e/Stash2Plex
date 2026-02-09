@@ -127,6 +127,14 @@ class Stash2PlexConfig(BaseModel):
         description="Trigger Plex library scan when Stash identifies a new scene"
     )
 
+    # Plex list limits
+    max_tags: int = Field(
+        default=100,
+        ge=10,
+        le=500,
+        description="Maximum number of tags/genres to sync per item (Plex has no documented limit; default: 100)"
+    )
+
     # Debug / privacy settings
     debug_logging: bool = Field(
         default=False,

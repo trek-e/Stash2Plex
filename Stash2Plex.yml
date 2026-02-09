@@ -1,7 +1,7 @@
 # requires: PythonDepManager
 name: Stash2Plex
 description: Sync metadata from Stash to Plex with queue-based reliability
-version: 1.3.2
+version: 1.3.3
 url: https://github.com/trek-e/Stash2Plex
 
 exec:
@@ -88,6 +88,10 @@ settings:
   read_timeout:
     displayName: Read Timeout
     description: "Plex read timeout in seconds (default: 30)"
+    type: NUMBER
+  max_tags:
+    displayName: "Max Tags"
+    description: "Maximum number of tags/genres to sync per Plex item (default: 100). Plex has no documented limit."
     type: NUMBER
   # ----- Field Sync Settings -----
   sync_master:

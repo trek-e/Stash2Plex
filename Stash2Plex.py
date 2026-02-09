@@ -674,13 +674,15 @@ def handle_process_queue():
 
         processed = 0
         failed = 0
+        last_error = None
         start_time = time.time()
         last_progress_time = start_time
 
         while True:
             # Check circuit breaker before processing
             if not worker_local.circuit_breaker.can_execute():
-                log_warn("Circuit breaker OPEN - Plex may be unavailable")
+                cause = f" (last error: {type(last_error).__name__}: {last_error})" if last_error else ""
+                log_warn(f"Circuit breaker OPEN — Plex may be unavailable{cause}")
                 log_info(f"Processed {processed} items before circuit break")
                 break
 
@@ -698,8 +700,13 @@ def handle_process_queue():
                 worker_local.circuit_breaker.record_success()
                 processed += 1
 
+                # Brief pause between jobs to avoid overwhelming Plex
+                time.sleep(0.15)
+
             except TransientError as e:
+                last_error = e
                 worker_local.circuit_breaker.record_failure()
+                log_warn(f"Scene {scene_id}: {type(e).__name__}: {e}")
                 job = worker_local._prepare_for_retry(job, e)
                 max_retries = worker_local._get_max_retries_for_error(e)
 
@@ -711,7 +718,6 @@ def handle_process_queue():
                 else:
                     # Re-queue for retry
                     worker_local._requeue_with_metadata(job)
-                    log_debug(f"Scene {scene_id}: transient error, will retry")
 
             except PermanentError as e:
                 log_warn(f"Scene {scene_id}: permanent error: {e}")
@@ -720,6 +726,7 @@ def handle_process_queue():
                 failed += 1
 
             except Exception as e:
+                last_error = e
                 log_error(f"Scene {scene_id}: unexpected error: {e}")
                 fail_job(queue, job)
                 dlq.add(job, e, retry_count)

@@ -207,7 +207,7 @@ class TestFieldLimits:
         assert str(MAX_PERFORMERS) in captured.err
 
     def test_tags_truncated_at_max(self, limits_worker, capsys):
-        """More than MAX_TAGS tags are truncated with warning."""
+        """More than max_tags tags are truncated with warning."""
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
         mock_plex_item.title = "Test"
@@ -216,9 +216,10 @@ class TestFieldLimits:
         mock_plex_item.genres = []
         mock_plex_item.collections = []
 
-        # Create more tags than MAX_TAGS
+        # Use the worker's configured max_tags (default 100)
+        max_tags = getattr(limits_worker.config, 'max_tags', MAX_TAGS)
         excess_count = 15
-        tags = [f"Tag {i}" for i in range(MAX_TAGS + excess_count)]
+        tags = [f"Tag {i}" for i in range(max_tags + excess_count)]
         data = {'path': '/test.mp4', 'tags': tags}
 
         limits_worker._update_metadata(mock_plex_item, data)

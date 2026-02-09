@@ -243,7 +243,7 @@ def find_plex_items_with_confidence(
                 log_debug(f"Cached key stale, invalidating: {e}")
                 match_cache.invalidate(library_name, stash_path)
         elif debug_logging:
-            log_debug(f"[DEBUG] Match cache MISS for: {obfuscate_path(stash_path)}")
+            log_info(f"[DEBUG] Match cache MISS for: {obfuscate_path(stash_path)}")
 
     # Derive title variants from filename
     title_search = path.stem
@@ -254,7 +254,7 @@ def find_plex_items_with_confidence(
 
     log_debug(f"Searching '{library_name}' for: {obfuscate_path(filename)}")
     if debug_logging:
-        log_debug(f"[DEBUG] Title variants: '{title_search}' / '{title_base}'")
+        log_info(f"[DEBUG] Title variants: '{title_search}' / '{title_base}'")
 
     candidates = []
 
@@ -264,7 +264,7 @@ def find_plex_items_with_confidence(
             if candidates:
                 break
             if debug_logging:
-                log_debug(f"[DEBUG] Title search query: '{title}'")
+                log_info(f"[DEBUG] Title search query: '{title}'")
 
             # Check library_cache for search results
             cached_results = None
@@ -288,7 +288,7 @@ def find_plex_items_with_confidence(
                 # Cache miss - do actual search
                 results = library.search(title=title)
                 if debug_logging:
-                    log_debug(f"[DEBUG] Search returned {len(results)} title match(es)")
+                    log_info(f"[DEBUG] Search returned {len(results)} title match(es)")
 
                 # Cache the results for next time
                 if library_cache is not None:
@@ -305,7 +305,7 @@ def find_plex_items_with_confidence(
     if not candidates:
         try:
             if debug_logging:
-                log_debug("[DEBUG] No title matches, falling back to full library scan")
+                log_info("[DEBUG] No title matches, falling back to full library scan")
             else:
                 log_debug(f"Fallback: scanning all items...")
 
@@ -348,7 +348,7 @@ def find_plex_items_with_confidence(
         raise PlexNotFound(f"No Plex item found for filename: {obfuscate_path(filename)}")
     elif len(candidates) == 1:
         if debug_logging:
-            log_debug(f"[DEBUG] HIGH confidence match: {candidates[0].title}")
+            log_info(f"[DEBUG] HIGH confidence match: {candidates[0].title}")
         else:
             logger.debug(f"HIGH confidence match for {obfuscate_path(filename)}")
         # Store in match_cache for next time
