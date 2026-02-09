@@ -256,16 +256,16 @@ Or processing appears to stop mid-queue.
 
 **Symptom:**
 ```
-[Stash2Plex] Circuit breaker OPENED - pausing processing
+[Stash2Plex] Circuit breaker OPEN — Plex may be unavailable (last error: ReadTimeout: read timed out)
 ```
 
-**Cause:** 5+ consecutive Plex failures (server down, network issues).
+**Cause:** 5+ consecutive Plex failures (server down, network issues, read timeouts).
 
-**Meaning:** Stash2Plex paused processing to avoid hammering a failing Plex server.
+**Meaning:** Stash2Plex paused processing to avoid hammering a failing Plex server. The log message includes the last error that triggered the circuit breaker.
 
 **Resolution:** Automatic. The circuit breaker recovers after 60 seconds and retries.
 
-**If persistent:** Verify Plex server is running and accessible from Stash.
+**If persistent:** Verify Plex server is running and accessible from Stash. Check the error type in the log message for clues (e.g., `ReadTimeout` suggests Plex is overloaded, `ConnectionRefused` suggests Plex is down).
 
 ---
 
@@ -296,6 +296,29 @@ Or processing appears to stop mid-queue.
 - Authentication failure (401) - token invalid
 - Bad request (400) - malformed data
 - Low confidence match with strict mode enabled
+
+---
+
+### Issue 11: Using Debug Logging
+
+**When to use:** When you need detailed diagnostics for a specific sync issue and the normal logs don't provide enough information.
+
+**Steps:**
+
+1. Enable `debug_logging` in Settings > Plugins > Stash2Plex
+2. Optionally enable `obfuscate_paths` if you plan to share logs publicly
+3. Trigger the sync you want to debug (edit a scene, or run "Process Queue")
+4. Check Stash logs — look for `[DEBUG]` prefixed messages
+5. **Disable `debug_logging` when done** (it produces large volumes of output)
+
+**What debug logging shows:**
+- Queue polling activity and circuit breaker state
+- Title search queries and how many results each returns
+- File matching decisions (cache hits/misses, confidence scoring)
+- Metadata field-by-field comparisons (current Plex value vs new Stash value)
+- API call details for Plex updates
+
+**Note:** Debug messages appear at INFO level in Stash logs (not DEBUG level), so they are visible with default Stash log settings.
 
 ---
 
@@ -447,6 +470,8 @@ When reporting issues on GitHub, include the following information to help diagn
 
 ### Tips for Effective Bug Reports
 
+- **Enable `debug_logging`** to capture detailed diagnostics, then reproduce the issue
+- **Enable `obfuscate_paths`** to automatically redact file paths before sharing logs
 - **Filter logs** to `[Stash2Plex]` entries only
 - **Include the full error message**, not just a summary
 - **Redact tokens and personal info** before sharing

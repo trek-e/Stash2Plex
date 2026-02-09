@@ -63,15 +63,16 @@ These settings have no usable defaults and must be configured before Stash2Plex 
 | Required | No |
 | Default | (empty) |
 
-**Description:** Name of the Plex library to search for matches.
+**Description:** Name of the Plex library (or libraries) to search for matches.
 
-**Examples:** `Adult`, `Movies`, `Home Videos`
+**Examples:** `Adult`, `Movies`, `Adult, Movies, TV Shows`
 
 **Behavior:**
-- **When set:** Stash2Plex only searches the specified library (faster)
-- **When empty:** Stash2Plex searches ALL libraries (slower, may find wrong matches)
+- **Single library:** `Adult` — searches only that library (fastest)
+- **Multiple libraries:** `Adult, Movies` — searches each listed library in order
+- **When empty:** Stash2Plex searches ALL libraries (slowest, may find wrong matches)
 
-**Recommendation:** Always set this to your target library name for faster and more accurate matching.
+**Recommendation:** Always set this to your target library name(s) for faster and more accurate matching.
 
 ---
 
@@ -203,6 +204,25 @@ These settings have no usable defaults and must be configured before Stash2Plex 
 
 ---
 
+### max_tags
+
+| Property | Value |
+|----------|-------|
+| Type | NUMBER |
+| Required | No |
+| Default | `100` |
+| Range | 10-500 |
+
+**Description:** Maximum number of tags/genres to sync per Plex item.
+
+**Behavior:** When a scene has more tags than this limit, the list is truncated and a warning is logged. Plex has no documented limit on genres.
+
+**When to change:**
+- **Increase** if you have scenes with very many tags and want them all synced
+- **Decrease** if you want cleaner genre lists in Plex
+
+---
+
 ### trigger_plex_scan
 
 | Property | Value |
@@ -253,6 +273,45 @@ These settings are not exposed in the Stash UI but are recognized by the code. A
 | Default | `30` |
 
 **Description:** Days to keep failed jobs in the dead letter queue before automatic cleanup.
+
+---
+
+## Debug & Privacy Settings
+
+### debug_logging
+
+| Property | Value |
+|----------|-------|
+| Type | BOOLEAN |
+| Required | No |
+| Default | `false` |
+
+**Description:** Enable verbose step-by-step debug logging.
+
+**Behavior:** When enabled, Stash2Plex logs detailed information about:
+- Queue polling and circuit breaker state
+- Title search queries and result counts
+- File matching decisions and confidence scoring
+- Metadata field comparisons (current vs new values)
+- Cache hits and misses
+
+**Warning:** This produces large volumes of log output. Enable only when troubleshooting a specific problem, run for a few sync cycles, then disable.
+
+---
+
+### obfuscate_paths
+
+| Property | Value |
+|----------|-------|
+| Type | BOOLEAN |
+| Required | No |
+| Default | `false` |
+
+**Description:** Replace file paths in logs with deterministic word substitutions for privacy.
+
+**Behavior:** When enabled, file paths like `/media/videos/scene.mp4` are replaced with random word combinations in log output. The substitutions are deterministic within a session (same path always maps to same words), so you can still correlate log entries.
+
+**Use case:** Enable when sharing logs publicly (e.g., GitHub issues) to avoid exposing your file structure.
 
 ---
 
@@ -385,6 +444,7 @@ Stash2Plex validates your configuration on startup. Invalid settings log errors 
 | poll_interval | Must be 0.1-60 |
 | connect_timeout | Must be 1-30 |
 | read_timeout | Must be 5-120 |
+| max_tags | Must be 10-500 |
 
 ---
 

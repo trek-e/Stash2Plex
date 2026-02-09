@@ -29,6 +29,7 @@ graph TB
             META["metadata.py<br/>SyncMetadata"]
             SANITIZE["sanitizers.py"]
             CONFIG["config.py<br/>Stash2PlexConfig"]
+            OBFUSCATE["obfuscation.py"]
         end
 
         subgraph sync_queue["sync_queue/"]
@@ -161,7 +162,7 @@ graph TB
 - Calculate retry delays and requeue failed jobs with backoff metadata
 - Track cumulative sync statistics to disk
 
-**Design Note:** Retry state (count, next_retry_at) stored in job dict, not worker state. This makes retries crash-safe - unacknowledged jobs resume with correct backoff after restart. A 150ms inter-job pause prevents overwhelming Plex during bulk sync.
+**Design Note:** Retry state (count, next_retry_at) stored in job dict, not worker state. This makes retries crash-safe - unacknowledged jobs resume with correct backoff after restart. A 150ms inter-job pause prevents overwhelming Plex during bulk sync (applies to both background worker and batch processor). Debug logging (`debug_logging=true`) provides step-by-step visibility into queue polling, matching, and metadata decisions.
 
 ---
 
@@ -171,7 +172,8 @@ graph TB
 
 **Key Files:**
 - `client.py` - PlexClient wrapper (lazy initialization, timeouts)
-- `matcher.py` - Item lookup with confidence scoring
+- `matcher.py` - Item lookup with confidence scoring and caching
+- `cache.py` - Library and match result caching (disk-backed)
 - `exceptions.py` - Exception hierarchy and translation
 - `device_identity.py` - Persistent device ID for Plex
 
@@ -193,12 +195,14 @@ graph TB
 - `metadata.py` - SyncMetadata Pydantic model
 - `sanitizers.py` - Text cleaning functions
 - `config.py` - Stash2PlexConfig model with validation
+- `obfuscation.py` - Path obfuscation for privacy-safe logging
 
 **Responsibilities:**
 - Enforce required fields (scene_id, title) via Pydantic
 - Sanitize text: remove control characters, normalize quotes, truncate
 - Validate plugin configuration at startup
 - Fail fast on invalid data before queue ingress
+- Obfuscate file paths in logs when `obfuscate_paths` is enabled
 
 **Design Note:** Validation at queue ingress prevents bad data from causing repeated processing failures. Invalid metadata is logged and rejected immediately.
 
@@ -236,7 +240,7 @@ Queue processing uses a dynamic timeout that scales with queue size based on mea
 
 ### 5. Plex Matching
 
-The worker calls PlexClient to find the matching Plex item. The matcher derives a search title from the scene's filename and queries Plex. If no match found via title search, it falls back to scanning all library items. Results return with confidence scoring - HIGH (single match) or LOW (multiple candidates).
+The worker calls PlexClient to find the matching Plex item. When `plex_library` is configured (supports comma-separated multiple libraries), only those sections are searched. The matcher derives a search title from the scene's filename and queries Plex. If no match found via title search, it falls back to scanning all library items. Results return with confidence scoring - HIGH (single match) or LOW (multiple candidates). Library search results and path-to-item mappings are cached to disk to reduce API calls on subsequent syncs.
 
 ### 6. Metadata Update
 
@@ -314,4 +318,4 @@ On permanent error: job goes directly to dead letter queue without retry.
 
 ---
 
-*Architecture overview for Stash2Plex plugin developers — v1.2.7*
+*Architecture overview for Stash2Plex plugin developers — v1.3.3*

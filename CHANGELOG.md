@@ -5,6 +5,65 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.3] - 2026-02-08
+
+### Fixed
+
+- **Batch Processor Backpressure**: Added 0.15s pause between jobs in the batch processor (`Process Queue` task) to prevent overwhelming Plex with rapid API calls. Previously had no throttle, causing circuit breaker trips around item 160+ during large batch syncs.
+- **Debug Logging Visibility**: Debug-gated log messages (`debug_logging=true`) now appear in Stash UI. Previously used `log_debug()` which Stash filters out, making the debug logging feature effectively broken. All 19 instances across processor and matcher promoted to `log_info()` with `[DEBUG]` prefix.
+- **Silent Batch Errors**: TransientError in batch processor now logs at WARN level with error details. Previously logged at DEBUG level, making circuit breaker failures invisible.
+- **Circuit Breaker Cause**: Circuit breaker OPEN message now includes the last error type and message (e.g., "Circuit breaker OPEN — Plex may be unavailable (last error: ReadTimeout: read timed out)").
+
+### Added
+
+- **Configurable Max Tags**: New `max_tags` setting (default: 100, range: 10-500) replaces the hardcoded limit of 50 tags per Plex item. Scenes with many tags (50-89 was common) no longer trigger excessive truncation warnings.
+
+### Configuration
+
+- `max_tags` - Maximum number of tags/genres to sync per Plex item (default: 100)
+
+## [1.3.2] - 2026-02-08
+
+### Added
+
+- **Debug Logging Mode**: New `debug_logging` setting enables verbose step-by-step logging for troubleshooting. Logs detailed information about queue polling, circuit breaker state, matching decisions, metadata comparisons, and API calls.
+- **Path Obfuscation**: New `obfuscate_paths` setting replaces file paths in logs with deterministic word substitutions for privacy when sharing logs.
+
+### Fixed
+
+- **Background Image Sync**: Fixed background/fanart images not syncing to Plex.
+- **Poster Upload Reliability**: Improved image fetching from Stash with proper authentication headers.
+
+### Configuration
+
+- `debug_logging` - Enable verbose debug logging (default: false)
+- `obfuscate_paths` - Obfuscate file paths in logs for privacy (default: false)
+
+## [1.3.1] - 2026-02-07
+
+### Fixed
+
+- **Identification Events Blocked**: Fixed `Scene.Update.Post` events from stash-box identification being blocked by the scan-running gate. Identification events now pass through correctly even during library scans.
+
+## [1.3.0] - 2026-02-07
+
+### Added
+
+- **Multi-Library Support**: New comma-separated `plex_library` format (e.g., `"Adult, Movies, TV Shows"`). Stash2Plex searches only configured libraries instead of all.
+
+### Fixed
+
+- **O(n²) Reprocessing**: Fixed queue items being reprocessed exponentially due to nack-without-ack cycle. Items now properly acknowledge before requeue.
+- **Queue Doubling**: Fixed duplicate jobs created when items were nacked and re-enqueued simultaneously.
+- **Stuck Queue Items**: Fixed items stuck in "active" state after worker restart, blocking queue processing.
+- **Server-Down Handling**: Clean handling when Plex is unreachable — no DLQ entries, no traceback spam. Transient connection errors now retry gracefully.
+- **Queue Empty Exception**: Fixed catching wrong `Empty` exception (`queue.Empty` vs `persistqueue.exceptions.Empty`).
+- **Clear Queue Errors**: Fixed clear queue task causing worker errors and stale processing loop.
+
+### Configuration
+
+- `plex_library` now accepts comma-separated values for multiple libraries
+
 ## [1.2.7] - 2026-02-06
 
 ### Fixed
@@ -178,6 +237,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `connect_timeout` - Plex connection timeout
 - `read_timeout` - Plex read timeout
 
+[1.3.3]: https://github.com/trek-e/Stash2Plex/compare/v1.3.2...v1.3.3
+[1.3.2]: https://github.com/trek-e/Stash2Plex/compare/v1.3.1...v1.3.2
+[1.3.1]: https://github.com/trek-e/Stash2Plex/compare/v1.3.0...v1.3.1
+[1.3.0]: https://github.com/trek-e/Stash2Plex/compare/v1.2.7...v1.3.0
 [1.2.7]: https://github.com/trek-e/Stash2Plex/compare/v1.2.6...v1.2.7
 [1.2.6]: https://github.com/trek-e/Stash2Plex/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/trek-e/Stash2Plex/compare/v1.2.4...v1.2.5
