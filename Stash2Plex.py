@@ -475,13 +475,9 @@ def handle_hook(hook_context: dict, stash=None):
             return
 
         # Check if this is an identification event (stash_ids added)
-        # If so, trigger Plex library scan so Plex discovers the new file
-        if 'stash_ids' in input_data and scene_id:
+        is_identification = 'stash_ids' in input_data
+        if is_identification and scene_id:
             log_debug(f"Scene {scene_id} identified via stash-box")
-            if trigger_plex_scan_for_scene(scene_id, stash):
-                # After triggering scan, also queue the metadata sync
-                # The worker will retry if Plex hasn't found the file yet
-                pass
 
         if scene_id:
             data_dir = get_plugin_data_dir()
@@ -492,7 +488,8 @@ def handle_hook(hook_context: dict, stash=None):
                     queue_manager.get_queue(),
                     data_dir=data_dir,
                     sync_timestamps=sync_timestamps,
-                    stash=stash
+                    stash=stash,
+                    is_identification=is_identification
                 )
                 log_trace(f"on_scene_update completed for scene {scene_id}")
             except Exception as e:

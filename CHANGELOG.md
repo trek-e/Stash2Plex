@@ -5,6 +5,13 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.4] - 2026-02-09
+
+### Fixed
+
+- **Identification Events Blocked by Scan Gate**: Fixed metadata sync never firing after stash-box identification. The entry point correctly bypassed the scan-running gate for identification events, but `on_scene_update()` had its own scan-running check without the same bypass — causing the identify job (still in Stash's job queue) to block the very metadata sync it should trigger. Now passes `is_identification` flag through to skip the redundant gate.
+- **Redundant Plex Scan on Identification**: Removed duplicate `trigger_plex_scan_for_scene()` call during identification events. `Scene.Create.Post` already triggers the Plex scan when the file is first discovered; the identification path no longer triggers a second scan.
+
 ## [1.3.3] - 2026-02-08
 
 ### Fixed

@@ -405,6 +405,21 @@ class TestOnSceneUpdate:
         assert result is False
         mock_queue.put.assert_not_called()
 
+    def test_identification_bypasses_scan_gate(self, mock_queue, mocker, mock_stash_gql):
+        """Identification events should bypass scan-running gate."""
+        mocker.patch('hooks.handlers.is_scan_running', return_value=True)
+        mocker.patch('hooks.handlers.enqueue', return_value=True)
+
+        result = on_scene_update(
+            scene_id=123,
+            update_data={"title": "Test", "studio_id": "1", "performer_ids": ["1"]},
+            queue=mock_queue,
+            stash=mock_stash_gql,
+            is_identification=True
+        )
+
+        assert result is True
+
     def test_filters_already_pending(self, mock_queue, mocker, mock_stash_gql):
         """Scene already pending should return False."""
         mocker.patch('hooks.handlers.is_scan_running', return_value=False)
