@@ -5,6 +5,12 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.3] - 2026-02-14
+
+### Fixed
+
+- **Reconciliation Broken on First Use**: Fixed `'PlexClient' object has no attribute 'connect'` error when running any reconciliation task. The reconciliation engine was calling `client.connect()` which doesn't exist on PlexClient — the correct API is the `.server` property which lazily initializes the connection.
+
 ## [1.4.2] - 2026-02-14
 
 ### Added
