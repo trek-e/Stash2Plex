@@ -8,20 +8,36 @@ Improvements to the PlexSync plugin for Stash, which syncs metadata from Stash t
 
 Reliable sync: when metadata changes in Stash, it eventually reaches Plex — even if Plex was temporarily unavailable or Stash hadn't finished indexing yet.
 
-## Current State (v1.2)
+## Current Milestone: v1.4 Metadata Reconciliation
 
-**Shipped:** 2026-02-04
+**Goal:** Detect and repair metadata gaps between Stash and Plex — covering items with empty Plex fields, stale syncs, and scenes missing from Plex entirely.
 
-PlexSync v1.2 adds user-facing queue management:
-- Queue status viewing and clearing from Stash UI
-- Dead letter queue management (clear, purge old entries)
-- Process Queue button for foreground processing without timeout limits
+**Target features:**
+- Gap detection (empty fields, stale timestamps, missing items)
+- Manual reconciliation task button
+- Auto-reconciliation (startup + configurable interval)
+- All gaps flow through existing queue infrastructure
+
+## Current State (v1.3.4)
+
+**Shipped:** 2026-02-09
+
+PlexSync v1.3.x adds production stability and operational features (28 commits, ad-hoc):
+- Multi-library support (comma-separated `plex_library`)
+- Debug logging mode and path obfuscation for troubleshooting
+- Batch backpressure (0.15s throttle) preventing circuit breaker trips
+- Configurable max_tags (default: 100, replaces hardcoded 50)
+- Identification event pipeline fix (scan gate bypass)
+- Queue stability: O(n²) reprocessing, queue doubling, stuck items, server-down handling
+- Skip-already-synced optimization for bulk sync
+- PEP 668 compatibility for containerized environments
+
+Built on v1.2 foundation:
+- Queue management UI (status, clear, DLQ management, Process Queue button)
 - Dynamic timeout based on measured processing times
-- 5 new plugin tasks (7 total)
-- ~370 lines added
 
 Built on v1.1 foundation:
-- 500+ tests with >80% coverage across all modules
+- 910 tests with >80% coverage across all modules
 - Complete documentation (user guide, architecture, API reference)
 - Disk-backed caching reducing Plex API calls
 - SyncStats with batch summary logging
@@ -62,6 +78,27 @@ Built on v1.1 foundation:
 - [x] Process Queue Button — foreground processing until queue empty
 - [x] Dynamic Queue Timeout — timeout based on item count × avg processing time
 
+### Validated (v1.3)
+
+- [x] Multi-library support — search only configured Plex libraries
+- [x] Debug logging mode — verbose step-by-step logging for troubleshooting
+- [x] Path obfuscation — privacy-safe log sharing
+- [x] Batch backpressure — throttled processing prevents Plex API overload
+- [x] Configurable max_tags — user-tunable tag limit (10-500)
+- [x] Identification sync pipeline — stash-box identification triggers metadata sync correctly
+- [x] Queue stability — O(n²) reprocessing, doubling, stuck items all resolved
+- [x] PEP 668 compatibility — containerized Python environments supported
+
+### Active (v1.4)
+
+- [ ] Reconciliation: detect Plex items with empty metadata that Stash has data for
+- [ ] Reconciliation: detect Stash scenes updated more recently than last sync
+- [ ] Reconciliation: detect Stash scenes not indexed by Plex (trigger Plex scan)
+- [ ] Manual "Reconcile" task button in Stash UI
+- [ ] Auto-reconciliation on Stash startup
+- [ ] Configurable periodic reconciliation interval (default: daily)
+- [ ] Discovered gaps enqueued through existing queue (backpressure/retry/circuit breaker)
+
 ### Out of Scope
 
 - Plex → Stash sync — Stash remains the primary metadata source
@@ -92,6 +129,10 @@ Built on v1.1 foundation:
 | No TTL for match cache | File paths stable, invalidate on failure | v1.1 |
 | LOCKED: Missing fields clear Plex | None/empty in data clears existing Plex value | v1.1 |
 | All sync toggles default True | Backward compatible with existing configs | v1.1 |
+| Debug logs as log_info with prefix | Stash filters out log_debug entirely | v1.3 |
+| Batch backpressure 0.15s | Prevents circuit breaker trips at ~160 items | v1.3 |
+| max_tags default 100 | 50 was too low for real-world tag counts (50-89 common) | v1.3 |
+| is_identification flag passthrough | Scan gate must not block identification sync | v1.3 |
 
 ## Milestones
 
@@ -100,6 +141,7 @@ Built on v1.1 foundation:
 | v1.0 | Complete | 2026-02-03 | 5 phases, 16 plans, 76 commits |
 | v1.1 | Complete | 2026-02-03 | 11 phases, 27 plans, 136 commits |
 | v1.2 | Complete | 2026-02-04 | 3 phases, 3 plans, 15 commits |
+| v1.3 | Complete | 2026-02-09 | Ad-hoc, 28 commits, production-driven |
 
 ---
-*Last updated: 2026-02-04 after v1.2 milestone*
+*Last updated: 2026-02-14 after v1.4 milestone start*
