@@ -5,6 +5,21 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-02-14
+
+### Added
+
+- **Gap Detection Engine**: Detects three types of metadata gaps between Stash and Plex — empty metadata (Plex has no data but Stash does), stale syncs (Stash updated since last sync), and missing items (Stash scenes with no Plex match). Uses batch processing and deduplication for large libraries.
+- **Manual Reconciliation Tasks**: Three new Stash UI tasks — "Reconcile Library (All)", "Reconcile Library (Recent)", and "Reconcile Library (Last 7 Days)" — to detect and queue metadata gaps on demand. Logs progress summary with gap counts by type.
+- **Auto-Reconciliation Scheduler**: Automatic gap detection using check-on-invocation pattern (no threads/timers needed). Triggers on Stash startup (if >1 hour since last run, recent scope) and at configurable intervals.
+- **Enhanced Queue Status**: "View Queue Status" now displays reconciliation history — last run time, scope, scenes checked, gaps found by type (empty/stale/missing), and enqueued count.
+- **Configurable Reconciliation Settings**: `reconcile_interval` (never/hourly/daily/weekly, default: never) and `reconcile_scope` (all/24h/7days, default: 24h) settings in Stash plugin UI.
+
+### Configuration
+
+- `reconcile_interval` - Auto-reconciliation interval (never/hourly/daily/weekly, default: never)
+- `reconcile_scope` - Default scope for auto-reconciliation (all/24h/7days, default: 24h)
+
 ## [1.3.4] - 2026-02-09
 
 ### Fixed
