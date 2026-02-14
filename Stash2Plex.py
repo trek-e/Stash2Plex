@@ -918,9 +918,21 @@ def _run_auto_reconcile(scheduler, scope: str, is_startup: bool):
         log_warn(f"Auto-reconciliation failed: {e}")
 
 
+# Dispatch table for management modes (no Stash connection needed)
+_MANAGEMENT_HANDLERS = {
+    'queue_status': lambda args: handle_queue_status(),
+    'clear_queue': lambda args: handle_clear_queue(),
+    'clear_dlq': lambda args: handle_clear_dlq(),
+    'purge_dlq': lambda args: handle_purge_dlq(args.get('days', 30)),
+    'process_queue': lambda args: handle_process_queue(),
+    'reconcile_all': lambda args: handle_reconcile('all'),
+    'reconcile_recent': lambda args: handle_reconcile('recent'),
+    'reconcile_7days': lambda args: handle_reconcile('recent_7days'),
+}
+
+
 def handle_task(task_args: dict, stash=None):
-    """
-    Handle manual task trigger from Stash UI.
+    """Handle manual task trigger from Stash UI.
 
     Args:
         task_args: Task arguments (mode determines operation)
@@ -929,87 +941,44 @@ def handle_task(task_args: dict, stash=None):
     mode = task_args.get('mode', 'recent')
     log_info(f"Task starting with mode: {mode}")
 
-    # Queue management tasks don't need Stash connection
-    if mode == 'queue_status':
-        handle_queue_status()
-        return
-    elif mode == 'clear_queue':
-        handle_clear_queue()
-        return
-    elif mode == 'clear_dlq':
-        handle_clear_dlq()
-        return
-    elif mode == 'purge_dlq':
-        days = task_args.get('days', 30)
-        handle_purge_dlq(days)
-        return
-    elif mode == 'process_queue':
-        handle_process_queue()
-        return
-    elif mode == 'reconcile_all':
-        handle_reconcile('all')
-        return
-    elif mode == 'reconcile_recent':
-        handle_reconcile('recent')
-        return
-    elif mode == 'reconcile_7days':
-        handle_reconcile('recent_7days')
+    handler = _MANAGEMENT_HANDLERS.get(mode)
+    if handler:
+        handler(task_args)
         return
 
     # Sync tasks require Stash connection
+    handle_bulk_sync(mode, stash)
+
+
+def handle_bulk_sync(mode: str, stash):
+    """Batch-query scenes from Stash and enqueue them for Plex sync.
+
+    Args:
+        mode: 'all' for every scene, 'recent' for last 24 hours.
+        stash: StashInterface for GQL queries.
+    """
     from sync_queue.operations import enqueue, get_queued_scene_ids
+    from validation.scene_extractor import extract_scene_metadata, get_scene_file_path
 
     if not stash:
         log_error("No Stash connection available")
         return
 
     try:
-        # Batch query fragment - get all needed data in one call
-        # updated_at included for sync timestamp comparison (skip already-synced scenes)
-        batch_fragment = """
-            id
-            title
-            details
-            date
-            rating100
-            updated_at
-            files { path }
-            studio { name }
-            performers { name }
-            tags { name }
-            paths { screenshot preview }
-        """
-
-        # Query scenes based on mode
-        if mode == 'all':
-            log_info("Fetching all scenes...")
-            scenes = stash.find_scenes(fragment=batch_fragment)
-        else:  # recent - last 24 hours
-            import datetime
-            yesterday = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
-            log_info(f"Fetching scenes updated since {yesterday}...")
-            scenes = stash.find_scenes(
-                f={"updated_at": {"value": yesterday, "modifier": "GREATER_THAN"}},
-                fragment=batch_fragment
-            )
-
+        scenes = _fetch_scenes_for_sync(mode, stash)
         if not scenes:
             log_info("No scenes found to sync")
             return
 
         log_info(f"Found {len(scenes)} scenes to sync")
 
-        # Load fresh sync timestamps (worker may have updated since init)
         data_dir = get_plugin_data_dir()
         current_timestamps = load_sync_timestamps(data_dir)
-
-        # Load scene_ids already in queue to prevent duplicates
         queue_path = os.path.join(data_dir, 'queue')
         existing_in_queue = get_queued_scene_ids(queue_path)
         if existing_in_queue:
             log_debug(f"{len(existing_in_queue)} scenes already in queue, will skip duplicates")
 
-        # Queue each scene directly (data already fetched in batch)
         queue = queue_manager.get_queue()
         queued = 0
         skipped = 0
@@ -1021,42 +990,22 @@ def handle_task(task_args: dict, stash=None):
             if not scene_id:
                 continue
 
-            # Extract file path
-            files = scene.get('files', [])
-            if not files:
-                skipped += 1
-                continue
-            file_path = files[0].get('path')
+            file_path = get_scene_file_path(scene)
             if not file_path:
                 skipped += 1
                 continue
 
-            # Skip scenes already synced since their last Stash update
-            scene_updated_at = scene.get('updated_at')
-            if scene_updated_at and current_timestamps:
-                last_synced = current_timestamps.get(int(scene_id))
-                if last_synced:
-                    try:
-                        from datetime import datetime, timezone
-                        dt = datetime.fromisoformat(scene_updated_at.replace('Z', '+00:00'))
-                        updated_ts = dt.timestamp()
-                        if updated_ts <= last_synced:
-                            already_synced += 1
-                            continue
-                    except (ValueError, AttributeError):
-                        pass  # Can't parse date, sync anyway
+            if _is_already_synced(scene, int(scene_id), current_timestamps):
+                already_synced += 1
+                continue
 
-            # Skip scenes already in queue (prevents duplicates from re-runs)
             if int(scene_id) in existing_in_queue:
                 already_queued += 1
                 continue
 
-            # Build job data from batch-fetched scene
-            from validation.scene_extractor import extract_scene_metadata
             job_data = extract_scene_metadata(scene)
             job_data['path'] = file_path
 
-            # Enqueue directly (skip on_scene_update to avoid per-scene GraphQL)
             try:
                 enqueue(queue, int(scene_id), "metadata", job_data)
                 queued += 1
@@ -1076,6 +1025,53 @@ def handle_task(task_args: dict, stash=None):
         log_error(f"Task error: {e}")
         import traceback
         traceback.print_exc()
+
+
+# Batch query fragment for bulk sync — all needed fields in one call
+_BATCH_FRAGMENT = """
+    id
+    title
+    details
+    date
+    rating100
+    updated_at
+    files { path }
+    studio { name }
+    performers { name }
+    tags { name }
+    paths { screenshot preview }
+"""
+
+
+def _fetch_scenes_for_sync(mode: str, stash) -> list:
+    """Fetch scenes from Stash based on sync mode."""
+    if mode == 'all':
+        log_info("Fetching all scenes...")
+        return stash.find_scenes(fragment=_BATCH_FRAGMENT) or []
+
+    import datetime
+    yesterday = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    log_info(f"Fetching scenes updated since {yesterday}...")
+    return stash.find_scenes(
+        f={"updated_at": {"value": yesterday, "modifier": "GREATER_THAN"}},
+        fragment=_BATCH_FRAGMENT
+    ) or []
+
+
+def _is_already_synced(scene: dict, scene_id: int, timestamps: dict) -> bool:
+    """Check if a scene was already synced since its last update."""
+    scene_updated_at = scene.get('updated_at')
+    if not scene_updated_at or not timestamps:
+        return False
+    last_synced = timestamps.get(scene_id)
+    if not last_synced:
+        return False
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(scene_updated_at.replace('Z', '+00:00'))
+        return dt.timestamp() <= last_synced
+    except (ValueError, AttributeError):
+        return False
 
 
 def is_scan_job_running(stash) -> bool:
