@@ -100,10 +100,16 @@ class GapDetector:
             if not has_meaningful_metadata(scene):
                 continue
 
+            # Convert scene_id to int
+            try:
+                scene_id_int = int(scene_id)
+            except (ValueError, TypeError):
+                continue
+
             # Check if Plex lacks meaningful metadata
             if not has_meaningful_metadata(plex_metadata):
                 gaps.append(GapResult(
-                    scene_id=scene_id,
+                    scene_id=scene_id_int,
                     gap_type='empty_metadata',
                     scene_data=scene,
                     reason=f'Scene {scene_id} has meaningful metadata in Stash but Plex has no meaningful metadata'
@@ -143,8 +149,14 @@ class GapDetector:
             if not updated_at_str:
                 continue
 
+            # Convert scene_id to int for sync_timestamps lookup
+            try:
+                scene_id_int = int(scene_id)
+            except (ValueError, TypeError):
+                continue
+
             # Skip if scene has no sync timestamp (handled by detect_missing)
-            if scene_id not in sync_timestamps:
+            if scene_id_int not in sync_timestamps:
                 continue
 
             # Parse Stash updated_at to epoch timestamp
@@ -158,13 +170,13 @@ class GapDetector:
                 # Skip if can't parse datetime
                 continue
 
-            sync_timestamp = sync_timestamps[scene_id]
+            sync_timestamp = sync_timestamps[scene_id_int]
 
             # Only detect gap if Stash is newer than sync
             # If sync is newer, skip (intentional empty per LOCKED decision)
             if updated_at_epoch > sync_timestamp:
                 gaps.append(GapResult(
-                    scene_id=scene_id,
+                    scene_id=scene_id_int,
                     gap_type='stale_sync',
                     scene_data=scene,
                     reason=f'Scene {scene_id} was updated in Stash after last sync (stale)'
@@ -207,8 +219,14 @@ class GapDetector:
             if not file_path:
                 continue
 
+            # Convert scene_id to int for sync_timestamps lookup
+            try:
+                scene_id_int = int(scene_id)
+            except (ValueError, TypeError):
+                continue
+
             # Skip if scene has a sync timestamp (was synced before)
-            if scene_id in sync_timestamps:
+            if scene_id_int in sync_timestamps:
                 continue
 
             # Skip if file path has a known Plex match
@@ -217,7 +235,7 @@ class GapDetector:
 
             # This is a missing scene
             gaps.append(GapResult(
-                scene_id=scene_id,
+                scene_id=scene_id_int,
                 gap_type='missing',
                 scene_data=scene,
                 reason=f'Scene {scene_id} has no sync history and no known Plex match (missing)'
