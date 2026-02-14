@@ -6,7 +6,7 @@
 - ✅ **v1.1 Testing & Documentation** - Phases 1-10 + 2.1 (shipped 2026-02-03) → [archived](milestones/v1.1-ROADMAP.md)
 - ✅ **v1.2 Queue Management UI** - Phases 11-13 (shipped 2026-02-04) → [archived](milestones/v1.2-ROADMAP.md)
 - ✅ **v1.3 Production Stability** - Ad-hoc (shipped 2026-02-09)
-- 🚧 **v1.4 Metadata Reconciliation** - Phases 14-16 (in progress)
+- ✅ **v1.4 Metadata Reconciliation** - Phases 14-16 (shipped 2026-02-14)
 
 ## Overview
 
@@ -18,13 +18,13 @@ v1.4 adds metadata reconciliation to detect and repair gaps between Stash and Pl
 - Integer phases (14, 15, 16): Planned milestone work
 - Decimal phases (14.1, 14.2): Urgent insertions (marked with INSERTED)
 
-### 🚧 v1.4 Metadata Reconciliation (In Progress)
+### ✅ v1.4 Metadata Reconciliation (Complete)
 
 **Milestone Goal:** Detect and repair metadata gaps between Stash and Plex — covering items with empty Plex fields, stale syncs, and scenes missing from Plex entirely.
 
 - [x] **Phase 14: Gap Detection Engine** - Core logic to detect empty metadata, stale syncs, and missing Plex items ✓ 2026-02-14
 - [x] **Phase 15: Manual Reconciliation** - User-triggered reconciliation task with scope control ✓ 2026-02-14
-- [ ] **Phase 16: Automated Reconciliation & Reporting** - Periodic scheduling, startup trigger, and enhanced status reporting
+- [x] **Phase 16: Automated Reconciliation & Reporting** - Periodic scheduling, startup trigger, and enhanced status reporting ✓ 2026-02-14
 
 ## Phase Details
 
@@ -70,8 +70,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 16-01-PLAN.md — Config, scheduler state persistence, auto-reconciliation wiring, enhanced queue status
-- [ ] 16-02-PLAN.md — Comprehensive tests for scheduler, auto-reconciliation, and enhanced status
+- [x] 16-01-PLAN.md — Config, scheduler state persistence, auto-reconciliation wiring, enhanced queue status
+- [x] 16-02-PLAN.md — Comprehensive tests for scheduler, auto-reconciliation, and enhanced status
 
 ## Progress
 
@@ -82,8 +82,8 @@ Phases execute in numeric order: 14 → 15 → 16
 |-------|----------------|--------|-----------|
 | 14. Gap Detection Engine | 2/2 | ✓ Complete | 2026-02-14 |
 | 15. Manual Reconciliation | 1/1 | ✓ Complete | 2026-02-14 |
-| 16. Automated Reconciliation & Reporting | 0/2 | In Progress | - |
+| 16. Automated Reconciliation & Reporting | 2/2 | ✓ Complete | 2026-02-14 |
 
 ---
 *Roadmap created: 2026-02-14*
-*Last updated: 2026-02-14 after phase 16 planning*
+*Last updated: 2026-02-14 after phase 16 completion*

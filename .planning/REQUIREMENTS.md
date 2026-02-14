@@ -22,13 +22,13 @@ Requirements for v1.4 release. Each maps to roadmap phases.
 
 ### Automated Reconciliation
 
-- [ ] **AUTO-01**: Plugin can run periodic reconciliation at a configurable interval (never/hourly/daily/weekly)
-- [ ] **AUTO-02**: Plugin can auto-trigger reconciliation on Stash startup (recent scenes only)
-- [ ] **AUTO-03**: User can configure reconciliation scope with date range options (all/24h/7days/custom)
+- [x] **AUTO-01**: Plugin can run periodic reconciliation at a configurable interval (never/hourly/daily/weekly)
+- [x] **AUTO-02**: Plugin can auto-trigger reconciliation on Stash startup (recent scenes only)
+- [x] **AUTO-03**: User can configure reconciliation scope with date range options (all/24h/7days/custom)
 
 ### Reporting
 
-- [ ] **RPT-01**: "View Queue Status" task shows last reconciliation run time, gaps found, and gaps queued by type
+- [x] **RPT-01**: "View Queue Status" task shows last reconciliation run time, gaps found, and gaps queued by type
 
 ## Future Requirements
 
@@ -65,10 +65,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GAP-05 | Phase 15 | Complete |
 | RECON-01 | Phase 15 | Complete |
 | RECON-02 | Phase 15 | Complete |
-| AUTO-01 | Phase 16 | Pending |
-| AUTO-02 | Phase 16 | Pending |
-| AUTO-03 | Phase 16 | Pending |
-| RPT-01 | Phase 16 | Pending |
+| AUTO-01 | Phase 16 | Complete |
+| AUTO-02 | Phase 16 | Complete |
+| AUTO-03 | Phase 16 | Complete |
+| RPT-01 | Phase 16 | Complete |
 
 **Coverage:**
 - v1.4 requirements: 11 total
@@ -79,4 +79,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-14*
-*Last updated: 2026-02-14 after phase 15 completion*
+*Last updated: 2026-02-14 after phase 16 completion*
