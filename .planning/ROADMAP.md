@@ -38,10 +38,11 @@ v1.4 adds metadata reconciliation to detect and repair gaps between Stash and Pl
   3. Plugin can identify Stash scenes that have no matching Plex item (by querying Plex libraries)
   4. Detected gaps are enqueued as sync jobs through the existing persistent queue infrastructure
   5. Gap detection reuses existing Stash GQL client, Plex matcher, and sync timestamp tracking
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] TBD (plans created during /gsd:plan-phase 14)
+- [ ] 14-01-PLAN.md — GapDetector core: TDD for three gap detection methods (empty metadata, stale sync, missing items)
+- [ ] 14-02-PLAN.md — GapDetectionEngine: orchestration layer wiring detector to Stash GQL, Plex matcher, and queue
 
 ### Phase 15: Manual Reconciliation
 **Goal**: User can trigger reconciliation on-demand with configurable scope
@@ -78,7 +79,7 @@ Phases execute in numeric order: 14 → 15 → 16
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 14. Gap Detection Engine | 0/TBD | Not started | - |
+| 14. Gap Detection Engine | 0/2 | Planning complete | - |
 | 15. Manual Reconciliation | 0/TBD | Not started | - |
 | 16. Automated Reconciliation & Reporting | 0/TBD | Not started | - |
 
