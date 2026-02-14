@@ -47,6 +47,14 @@ tasks:
     description: Process all pending queue items until empty (resumes stuck queues)
     defaultArgs:
       mode: process_queue
+  - name: Reconcile Library (All)
+    description: Detect and queue metadata gaps for all scenes (empty metadata, stale syncs, missing from Plex)
+    defaultArgs:
+      mode: reconcile_all
+  - name: Reconcile Library (Recent)
+    description: Detect and queue metadata gaps for scenes updated in the last 24 hours
+    defaultArgs:
+      mode: reconcile_recent
 
 settings:
   plex_url:

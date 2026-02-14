@@ -757,6 +757,66 @@ def handle_process_queue():
         traceback.print_exc()
 
 
+def handle_reconcile(scope: str):
+    """
+    Run gap detection and enqueue discovered gaps for sync.
+
+    Args:
+        scope: "all" (all scenes) or "recent" (last 24 hours)
+    """
+    try:
+        data_dir = get_plugin_data_dir()
+
+        from reconciliation.engine import GapDetectionEngine, GapDetectionResult
+
+        # Need stash and config globals
+        if not stash_interface:
+            log_error("No Stash connection available for reconciliation")
+            return
+        if not config:
+            log_error("No config available for reconciliation")
+            return
+
+        # Get queue for enqueue mode
+        queue = queue_manager.get_queue() if queue_manager else None
+        if not queue:
+            log_warn("No queue available - running in detection-only mode")
+
+        scope_label = "all scenes" if scope == "all" else "recent scenes (last 24 hours)"
+        log_info(f"Starting reconciliation: {scope_label}")
+
+        engine = GapDetectionEngine(
+            stash=stash_interface,
+            config=config,
+            data_dir=data_dir,
+            queue=queue
+        )
+        result = engine.run(scope=scope)
+
+        # Log progress summary (RECON-02: gap counts by type)
+        log_info("=== Reconciliation Summary ===")
+        log_info(f"Scenes checked: {result.scenes_checked}")
+        log_info(f"Gaps found: {result.total_gaps}")
+        log_info(f"  Empty metadata: {result.empty_metadata_count}")
+        log_info(f"  Stale sync: {result.stale_sync_count}")
+        log_info(f"  Missing from Plex: {result.missing_count}")
+        if queue:
+            log_info(f"Enqueued: {result.enqueued_count}")
+            if result.skipped_already_queued:
+                log_info(f"Skipped (already queued): {result.skipped_already_queued}")
+        else:
+            log_info("Detection-only mode (no items enqueued)")
+
+        if result.errors:
+            for err in result.errors:
+                log_warn(f"Error during reconciliation: {err}")
+
+    except Exception as e:
+        log_error(f"Reconciliation failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def handle_task(task_args: dict, stash=None):
     """
     Handle manual task trigger from Stash UI.
@@ -784,6 +844,12 @@ def handle_task(task_args: dict, stash=None):
         return
     elif mode == 'process_queue':
         handle_process_queue()
+        return
+    elif mode == 'reconcile_all':
+        handle_reconcile('all')
+        return
+    elif mode == 'reconcile_recent':
+        handle_reconcile('recent')
         return
 
     # Sync tasks require Stash connection
@@ -1016,7 +1082,7 @@ def main():
     # Give worker time to process pending jobs before exiting
     # Worker thread is daemon, so it dies when main process exits
     # Skip for management tasks that don't enqueue work
-    management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status', 'process_queue'}
+    management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status', 'process_queue', 'reconcile_all', 'reconcile_recent'}
     task_mode = args.get("mode", "") if not is_hook else ""
     if worker and queue_manager and task_mode not in management_modes:
         import time
