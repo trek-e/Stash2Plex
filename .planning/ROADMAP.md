@@ -67,10 +67,11 @@ Plans:
   2. Plugin auto-triggers reconciliation on Stash startup, scoped to recent scenes only (last 24 hours)
   3. User can configure reconciliation scope with date range options (all/24h/7days/custom range)
   4. "View Queue Status" task displays last reconciliation run time, total gaps found, and gaps queued by type
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] TBD (plans created during /gsd:plan-phase 16)
+- [ ] 16-01-PLAN.md — Config, scheduler state persistence, auto-reconciliation wiring, enhanced queue status
+- [ ] 16-02-PLAN.md — Comprehensive tests for scheduler, auto-reconciliation, and enhanced status
 
 ## Progress
 
@@ -81,8 +82,8 @@ Phases execute in numeric order: 14 → 15 → 16
 |-------|----------------|--------|-----------|
 | 14. Gap Detection Engine | 2/2 | ✓ Complete | 2026-02-14 |
 | 15. Manual Reconciliation | 1/1 | ✓ Complete | 2026-02-14 |
-| 16. Automated Reconciliation & Reporting | 0/TBD | Not started | - |
+| 16. Automated Reconciliation & Reporting | 0/2 | In Progress | - |
 
 ---
 *Roadmap created: 2026-02-14*
-*Last updated: 2026-02-14 after phase 15 completion*
+*Last updated: 2026-02-14 after phase 16 planning*
