@@ -3,7 +3,7 @@
 import os
 import tempfile
 from datetime import datetime, timedelta
-from unittest.mock import Mock, MagicMock, patch, call
+from unittest.mock import Mock, MagicMock, patch, call, PropertyMock
 
 import pytest
 
@@ -318,7 +318,9 @@ def test_run_handles_plex_server_down(mock_stash, mock_config, tmp_data_dir, sam
 
     with patch('plex.client.PlexClient') as MockPlexClient:
         from plex.exceptions import PlexServerDown
-        MockPlexClient.return_value.connect.side_effect = PlexServerDown("Server down")
+        # Mock the .server property to raise PlexServerDown
+        mock_client = MockPlexClient.return_value
+        type(mock_client).server = PropertyMock(side_effect=PlexServerDown("Server down"))
 
         engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=None)
         result = engine.run(scope="all")

@@ -220,7 +220,7 @@ class GapDetectionEngine:
                 url=self.config.plex_url,
                 token=self.config.plex_token
             )
-            plex = client.connect()
+            plex = client.server
             log_debug(f"Connected to Plex server: {plex.friendlyName}")
             return plex
         except Exception as e:
