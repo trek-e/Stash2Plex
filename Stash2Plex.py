@@ -1052,33 +1052,9 @@ def handle_task(task_args: dict, stash=None):
                 continue
 
             # Build job data from batch-fetched scene
-            job_data = {
-                'path': file_path,
-                'title': scene.get('title'),
-                'details': scene.get('details'),
-                'date': scene.get('date'),
-                'rating100': scene.get('rating100'),
-            }
-
-            # Extract nested fields
-            studio = scene.get('studio')
-            if studio:
-                job_data['studio'] = studio.get('name')
-
-            performers = scene.get('performers', [])
-            if performers:
-                job_data['performers'] = [p.get('name') for p in performers if p.get('name')]
-
-            tags = scene.get('tags', [])
-            if tags:
-                job_data['tags'] = [t.get('name') for t in tags if t.get('name')]
-
-            paths = scene.get('paths', {})
-            if paths:
-                if paths.get('screenshot'):
-                    job_data['poster_url'] = paths['screenshot']
-                if paths.get('preview'):
-                    job_data['background_url'] = paths['preview']
+            from validation.scene_extractor import extract_scene_metadata
+            job_data = extract_scene_metadata(scene)
+            job_data['path'] = file_path
 
             # Enqueue directly (skip on_scene_update to avoid per-scene GraphQL)
             try:

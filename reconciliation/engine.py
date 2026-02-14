@@ -492,49 +492,18 @@ class GapDetectionEngine:
     def _build_job_data(self, scene: dict[str, Any]) -> Optional[dict[str, Any]]:
         """Build job data dict from Stash scene.
 
-        Matches the extraction logic from Stash2Plex.py handle_task (lines 885-911).
-
         Args:
             scene: Stash scene dict from GQL
 
         Returns:
             Job data dict, or None if scene has no files
         """
-        # Extract file path
-        files = scene.get('files', [])
-        if not files:
-            return None
-        file_path = files[0].get('path')
+        from validation.scene_extractor import extract_scene_metadata, get_scene_file_path
+
+        file_path = get_scene_file_path(scene)
         if not file_path:
             return None
 
-        # Build base job data
-        job_data = {
-            'path': file_path,
-            'title': scene.get('title'),
-            'details': scene.get('details'),
-            'date': scene.get('date'),
-            'rating100': scene.get('rating100'),
-        }
-
-        # Extract nested fields
-        studio = scene.get('studio')
-        if studio:
-            job_data['studio'] = studio.get('name')
-
-        performers = scene.get('performers', [])
-        if performers:
-            job_data['performers'] = [p.get('name') for p in performers if p.get('name')]
-
-        tags = scene.get('tags', [])
-        if tags:
-            job_data['tags'] = [t.get('name') for t in tags if t.get('name')]
-
-        paths = scene.get('paths', {})
-        if paths:
-            if paths.get('screenshot'):
-                job_data['poster_url'] = paths['screenshot']
-            if paths.get('preview'):
-                job_data['background_url'] = paths['preview']
-
+        job_data = extract_scene_metadata(scene)
+        job_data['path'] = file_path
         return job_data

@@ -238,39 +238,9 @@ def on_scene_update(
                 scene = stash.find_scene(scene_id)
 
             if scene:
-                # Get file path
-                files = scene.get('files', [])
-                if files:
-                    file_path = files[0].get('path')
-
-                # Extract full metadata from scene
-                scene_data['title'] = scene.get('title')
-                scene_data['details'] = scene.get('details')
-                scene_data['date'] = scene.get('date')
-                scene_data['rating100'] = scene.get('rating100')
-
-                # Get studio name
-                studio = scene.get('studio')
-                if studio:
-                    scene_data['studio'] = studio.get('name')
-
-                # Get performer names
-                performers = scene.get('performers', [])
-                if performers:
-                    scene_data['performers'] = [p.get('name') for p in performers if p.get('name')]
-
-                # Get tag names
-                tags = scene.get('tags', [])
-                if tags:
-                    scene_data['tags'] = [t.get('name') for t in tags if t.get('name')]
-
-                # Get image paths (poster/background)
-                paths = scene.get('paths', {})
-                if paths:
-                    if paths.get('screenshot'):
-                        scene_data['poster_url'] = paths['screenshot']
-                    if paths.get('preview'):
-                        scene_data['background_url'] = paths['preview']
+                from validation.scene_extractor import extract_scene_metadata, get_scene_file_path
+                file_path = get_scene_file_path(scene) or file_path
+                scene_data.update(extract_scene_metadata(scene))
 
         except Exception as e:
             import traceback
