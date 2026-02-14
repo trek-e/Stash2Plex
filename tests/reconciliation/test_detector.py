@@ -212,6 +212,22 @@ class TestDetectEmptyMetadata:
 
         assert len(results) == 0
 
+    def test_file_without_path(self):
+        """Skips files without path field."""
+        detector = GapDetector()
+        stash_scenes = [
+            {
+                'id': 11,
+                'studio': 'Test Studio',
+                'files': [{}]  # File dict without 'path' key
+            }
+        ]
+        plex_items_metadata = {}
+
+        results = detector.detect_empty_metadata(stash_scenes, plex_items_metadata)
+
+        assert len(results) == 0
+
     def test_multiple_scenes_mixed_results(self):
         """Correctly handles multiple scenes with mixed results."""
         detector = GapDetector()
@@ -386,6 +402,24 @@ class TestDetectStaleSyncs:
         assert len(results) == 2
         assert {r.scene_id for r in results} == {6, 8}
 
+    def test_invalid_datetime_format(self):
+        """Skips scenes with invalid datetime format."""
+        detector = GapDetector()
+        stash_scenes = [
+            {
+                'id': 9,
+                'updated_at': 'invalid-date-format',
+                'files': [{'path': '/videos/scene9.mp4'}]
+            }
+        ]
+        sync_timestamps = {
+            9: datetime(2026, 2, 1, 12, 0, 0, tzinfo=timezone.utc).timestamp()
+        }
+
+        results = detector.detect_stale_syncs(stash_scenes, sync_timestamps)
+
+        assert len(results) == 0
+
 
 class TestDetectMissing:
     """Test missing item detection."""
@@ -486,6 +520,22 @@ class TestDetectMissing:
 
         assert len(results) == 1
         assert results[0].scene_id == 5
+
+    def test_file_without_path(self):
+        """Skips files without path field."""
+        detector = GapDetector()
+        stash_scenes = [
+            {
+                'id': 8,
+                'files': [{}]  # File dict without 'path' key
+            }
+        ]
+        sync_timestamps = {}
+        matched_paths = set()
+
+        results = detector.detect_missing(stash_scenes, sync_timestamps, matched_paths)
+
+        assert len(results) == 0
 
 
 class TestGapResult:
