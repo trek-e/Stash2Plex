@@ -23,7 +23,7 @@ v1.4 adds metadata reconciliation to detect and repair gaps between Stash and Pl
 **Milestone Goal:** Detect and repair metadata gaps between Stash and Plex — covering items with empty Plex fields, stale syncs, and scenes missing from Plex entirely.
 
 - [x] **Phase 14: Gap Detection Engine** - Core logic to detect empty metadata, stale syncs, and missing Plex items ✓ 2026-02-14
-- [ ] **Phase 15: Manual Reconciliation** - User-triggered reconciliation task with scope control
+- [x] **Phase 15: Manual Reconciliation** - User-triggered reconciliation task with scope control ✓ 2026-02-14
 - [ ] **Phase 16: Automated Reconciliation & Reporting** - Periodic scheduling, startup trigger, and enhanced status reporting
 
 ## Phase Details
@@ -56,7 +56,7 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [ ] 15-01-PLAN.md — Wire GapDetectionEngine into Stash plugin task system with scope control and progress logging
+- [x] 15-01-PLAN.md — Wire GapDetectionEngine into Stash plugin task system with scope control and progress logging
 
 ### Phase 16: Automated Reconciliation & Reporting
 **Goal**: Plugin automatically reconciles on schedule and reports reconciliation history in UI
@@ -80,9 +80,9 @@ Phases execute in numeric order: 14 → 15 → 16
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 14. Gap Detection Engine | 2/2 | ✓ Complete | 2026-02-14 |
-| 15. Manual Reconciliation | 0/1 | Not started | - |
+| 15. Manual Reconciliation | 1/1 | ✓ Complete | 2026-02-14 |
 | 16. Automated Reconciliation & Reporting | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-14*
-*Last updated: 2026-02-14 after phase 15 planning*
+*Last updated: 2026-02-14 after phase 15 completion*

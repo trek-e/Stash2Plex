@@ -9,16 +9,16 @@ Requirements for v1.4 release. Each maps to roadmap phases.
 
 ### Gap Detection
 
-- [ ] **GAP-01**: Plugin can detect Plex items with empty metadata fields (studio/performers/tags) where Stash has data
-- [ ] **GAP-02**: Plugin can detect Stash scenes updated more recently than their last successful sync to Plex
-- [ ] **GAP-03**: Plugin can detect Stash scenes that have no matching item in Plex
-- [ ] **GAP-04**: Discovered gaps are enqueued through existing persistent queue (reusing retry/backpressure/circuit breaker/DLQ)
-- [ ] **GAP-05**: User can scope reconciliation to all scenes or recent scenes (last 24 hours)
+- [x] **GAP-01**: Plugin can detect Plex items with empty metadata fields (studio/performers/tags) where Stash has data
+- [x] **GAP-02**: Plugin can detect Stash scenes updated more recently than their last successful sync to Plex
+- [x] **GAP-03**: Plugin can detect Stash scenes that have no matching item in Plex
+- [x] **GAP-04**: Discovered gaps are enqueued through existing persistent queue (reusing retry/backpressure/circuit breaker/DLQ)
+- [x] **GAP-05**: User can scope reconciliation to all scenes or recent scenes (last 24 hours)
 
 ### Manual Reconciliation
 
-- [ ] **RECON-01**: User can trigger "Reconcile Library" task from Stash UI
-- [ ] **RECON-02**: Reconciliation logs progress summary showing gap counts by type (empty/stale/missing)
+- [x] **RECON-01**: User can trigger "Reconcile Library" task from Stash UI
+- [x] **RECON-02**: Reconciliation logs progress summary showing gap counts by type (empty/stale/missing)
 
 ### Automated Reconciliation
 
@@ -62,9 +62,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GAP-02 | Phase 14 | Complete |
 | GAP-03 | Phase 14 | Complete |
 | GAP-04 | Phase 14 | Complete |
-| GAP-05 | Phase 15 | Pending |
-| RECON-01 | Phase 15 | Pending |
-| RECON-02 | Phase 15 | Pending |
+| GAP-05 | Phase 15 | Complete |
+| RECON-01 | Phase 15 | Complete |
+| RECON-02 | Phase 15 | Complete |
 | AUTO-01 | Phase 16 | Pending |
 | AUTO-02 | Phase 16 | Pending |
 | AUTO-03 | Phase 16 | Pending |
@@ -79,4 +79,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-14*
-*Last updated: 2026-02-14 after phase 14 completion*
+*Last updated: 2026-02-14 after phase 15 completion*
