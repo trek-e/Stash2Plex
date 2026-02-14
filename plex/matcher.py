@@ -20,7 +20,6 @@ Cache stores simplified dicts, but matching returns actual plexapi Video objects
 from enum import Enum
 import logging
 import re
-import sys
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
@@ -31,10 +30,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger('Stash2Plex.plex.matcher')
 
-# Stash plugin log levels
-def log_debug(msg): print(f"\x01d\x02[Stash2Plex Matcher] {msg}", file=sys.stderr)
-def log_info(msg): print(f"\x01i\x02[Stash2Plex Matcher] {msg}", file=sys.stderr)
-def log_warn(msg): print(f"\x01w\x02[Stash2Plex Matcher] {msg}", file=sys.stderr)
+from shared.log import create_logger
+_, log_debug, log_info, log_warn, _ = create_logger("Matcher")
 
 
 def _cached_item_has_file(item_data: dict, filename: str, case_insensitive: bool = True) -> bool:

@@ -7,7 +7,6 @@ and enqueue discovered gaps.
 """
 
 import logging
-import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -22,11 +21,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger('Stash2Plex.reconciliation.engine')
 
-# Stash plugin log levels
-def log_debug(msg): print(f"\x01d\x02[Stash2Plex Gap Engine] {msg}", file=sys.stderr)
-def log_info(msg): print(f"\x01i\x02[Stash2Plex Gap Engine] {msg}", file=sys.stderr)
-def log_warn(msg): print(f"\x01w\x02[Stash2Plex Gap Engine] {msg}", file=sys.stderr)
-def log_error(msg): print(f"\x01e\x02[Stash2Plex Gap Engine] {msg}", file=sys.stderr)
+from shared.log import create_logger
+_, log_debug, log_info, log_warn, log_error = create_logger("Gap Engine")
 
 
 @dataclass

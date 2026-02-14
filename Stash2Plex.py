@@ -12,13 +12,9 @@ import json
 import time
 
 
-# Stash plugin log levels - prefix format: \x01 + level + \x02 + message
-def log_trace(msg): print(f"\x01t\x02[Stash2Plex] {msg}", file=sys.stderr)
-def log_debug(msg): print(f"\x01d\x02[Stash2Plex] {msg}", file=sys.stderr)
-def log_info(msg): print(f"\x01i\x02[Stash2Plex] {msg}", file=sys.stderr)
-def log_warn(msg): print(f"\x01w\x02[Stash2Plex] {msg}", file=sys.stderr)
-def log_error(msg): print(f"\x01e\x02[Stash2Plex] {msg}", file=sys.stderr)
-def log_progress(p): print(f"\x01p\x02{p}")
+from shared.log import create_logger, create_progress_logger
+log_trace, log_debug, log_info, log_warn, log_error = create_logger()
+log_progress = create_progress_logger()
 
 
 log_trace("Script starting...")

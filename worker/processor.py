@@ -21,12 +21,8 @@ from worker.stats import SyncStats
 # These are imported inside _update_metadata() where they're used
 
 
-# Stash plugin log levels
-def log_trace(msg): print(f"\x01t\x02[Stash2Plex Worker] {msg}", file=sys.stderr)
-def log_debug(msg): print(f"\x01d\x02[Stash2Plex Worker] {msg}", file=sys.stderr)
-def log_info(msg): print(f"\x01i\x02[Stash2Plex Worker] {msg}", file=sys.stderr)
-def log_warn(msg): print(f"\x01w\x02[Stash2Plex Worker] {msg}", file=sys.stderr)
-def log_error(msg): print(f"\x01e\x02[Stash2Plex Worker] {msg}", file=sys.stderr)
+from shared.log import create_logger
+log_trace, log_debug, log_info, log_warn, log_error = create_logger("Worker")
 
 # Lazy imports to avoid module-level pollution in tests
 # These functions are imported inside methods that use them

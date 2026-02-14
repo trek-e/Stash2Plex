@@ -8,14 +8,12 @@ is due based on persisted state in reconciliation_state.json.
 
 import json
 import os
-import sys
 import time
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
-# Stash plugin log helpers
-def log_info(msg): print(f"\x01i\x02[Stash2Plex Scheduler] {msg}", file=sys.stderr)
-def log_debug(msg): print(f"\x01d\x02[Stash2Plex Scheduler] {msg}", file=sys.stderr)
+from shared.log import create_logger
+_, log_debug, log_info, _, _ = create_logger("Scheduler")
 
 # Interval to seconds mapping
 INTERVAL_SECONDS = {
