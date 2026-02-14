@@ -199,6 +199,71 @@ class GapDetectionEngine:
 
         return scenes or []
 
+    def _connect_to_plex(self):
+        """Connect to Plex server with error translation.
+
+        Returns:
+            Connected PlexServer instance.
+
+        Raises:
+            PlexServerDown: If Plex server is unreachable.
+        """
+        from plex.client import PlexClient
+        from plex.exceptions import PlexServerDown, translate_plex_exception
+
+        try:
+            client = PlexClient(
+                url=self.config.plex_url,
+                token=self.config.plex_token
+            )
+            plex = client.connect()
+            log_debug(f"Connected to Plex server: {plex.friendlyName}")
+            return plex
+        except Exception as e:
+            translated = translate_plex_exception(e)
+            if isinstance(translated, PlexServerDown):
+                log_error("Plex server is down, aborting gap detection")
+                raise PlexServerDown("Plex server unreachable") from e
+            raise
+
+    def _init_caches(self):
+        """Initialize library and match caches.
+
+        Returns:
+            Tuple of (library_cache, match_cache), either may be None on failure.
+        """
+        from plex.cache import PlexCache, MatchCache
+
+        try:
+            return PlexCache(self.data_dir), MatchCache(self.data_dir)
+        except Exception as e:
+            log_warn(f"Failed to initialize caches, continuing without: {e}")
+            return None, None
+
+    def _get_library_sections(self, plex) -> dict[str, Any]:
+        """Resolve configured library names to Plex LibrarySection objects.
+
+        Args:
+            plex: Connected PlexServer instance.
+
+        Returns:
+            Dict of library_name -> LibrarySection.
+
+        Raises:
+            Exception: If no libraries could be resolved.
+        """
+        libraries = self.config.plex_libraries if hasattr(self.config, 'plex_libraries') else [self.config.plex_library]
+        sections = {}
+        for lib_name in libraries:
+            try:
+                sections[lib_name] = plex.library.section(lib_name)
+            except Exception as e:
+                log_warn(f"Failed to get library '{lib_name}': {e}")
+
+        if not sections:
+            raise Exception("No Plex libraries available")
+        return sections
+
     def _build_plex_data(
         self,
         scenes: list[dict[str, Any]],
@@ -206,16 +271,8 @@ class GapDetectionEngine:
     ) -> tuple[dict[str, dict[str, Any]], set[str]]:
         """Build Plex metadata dict and matched_paths set.
 
-        This does the heavy lifting:
-        - Connects to Plex
-        - For each scene, determines if it has a Plex match
-        - Extracts Plex metadata for empty detection
-        - Builds matched_paths set for missing detection
-
-        Uses lighter pre-check strategy:
-        - Check sync_timestamps first (known matches)
-        - Check match_cache for path-to-key mappings
-        - Fall back to full matcher for unknowns
+        Orchestrates: connect to Plex, init caches, resolve libraries,
+        then process scenes in batches for memory efficiency.
 
         Args:
             scenes: Stash scenes to check
@@ -223,60 +280,17 @@ class GapDetectionEngine:
 
         Returns:
             Tuple of (plex_items_metadata dict, matched_paths set)
-            - plex_items_metadata: file_path -> {studio, performers, tags, details, date}
-            - matched_paths: set of file paths with known Plex matches
 
         Raises:
-            Exception if Plex server is unreachable (PlexServerDown)
+            PlexServerDown: If Plex server is unreachable.
         """
-        from plex.exceptions import PlexServerDown, PlexNotFound
-
         plex_items_metadata = {}
         matched_paths = set()
 
-        # Connect to Plex
-        try:
-            # Lazy import to avoid module-level plexapi dependency
-            from plex.client import PlexClient
-            from plex.cache import PlexCache, MatchCache
+        plex = self._connect_to_plex()
+        library_cache, match_cache = self._init_caches()
+        library_sections = self._get_library_sections(plex)
 
-            client = PlexClient(
-                url=self.config.plex_url,
-                token=self.config.plex_token
-            )
-            plex = client.connect()
-            log_debug(f"Connected to Plex server: {plex.friendlyName}")
-        except Exception as e:
-            # Check if this is PlexServerDown
-            from plex.exceptions import translate_plex_exception
-            translated = translate_plex_exception(e)
-            if isinstance(translated, PlexServerDown):
-                log_error("Plex server is down, aborting gap detection")
-                raise PlexServerDown("Plex server unreachable") from e
-            raise
-
-        # Initialize caches
-        try:
-            library_cache = PlexCache(self.data_dir)
-            match_cache = MatchCache(self.data_dir)
-        except Exception as e:
-            log_warn(f"Failed to initialize caches, continuing without: {e}")
-            library_cache = None
-            match_cache = None
-
-        # Get library sections
-        libraries = self.config.plex_libraries if hasattr(self.config, 'plex_libraries') else [self.config.plex_library]
-        library_sections = {}
-        for lib_name in libraries:
-            try:
-                library_sections[lib_name] = plex.library.section(lib_name)
-            except Exception as e:
-                log_warn(f"Failed to get library '{lib_name}': {e}")
-
-        if not library_sections:
-            raise Exception("No Plex libraries available")
-
-        # Process scenes in batches for memory efficiency
         batch_size = 100
         for i in range(0, len(scenes), batch_size):
             batch = scenes[i:i + batch_size]
@@ -290,7 +304,6 @@ class GapDetectionEngine:
                 matched_paths
             )
 
-            # Log progress
             if (i + batch_size) % 50 == 0 or (i + batch_size) >= len(scenes):
                 log_debug(f"Processed {min(i + batch_size, len(scenes))}/{len(scenes)} scenes")
 
