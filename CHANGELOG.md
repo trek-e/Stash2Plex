@@ -5,6 +5,16 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-02-14
+
+### Added
+
+- **Configurable Missing Detection**: New `reconcile_missing` setting (default: true) to enable/disable "missing from Plex" detection during reconciliation. Disable when your Stash library is a superset of Plex to prevent noise from scenes that intentionally have no Plex match.
+
+### Configuration
+
+- `reconcile_missing` - Include "missing from Plex" detection in reconciliation (default: true)
+
 ## [1.4.1] - 2026-02-14
 
 ### Changed
