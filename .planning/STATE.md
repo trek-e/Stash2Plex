@@ -5,15 +5,15 @@
 See: .planning/PROJECT.md (updated 2026-02-14)
 
 **Core value:** Reliable sync — when metadata changes in Stash, it eventually reaches Plex
-**Current focus:** Planning next milestone
+**Current focus:** Between milestones — ad-hoc improvements shipped as v1.4.1-v1.4.2
 
 ## Current Position
 
-Milestone: v1.4 Metadata Reconciliation — COMPLETE
-Status: Milestone shipped 2026-02-14
-Last activity: 2026-02-14 — Archived v1.4 milestone
+Milestone: v1.4 Metadata Reconciliation — COMPLETE + post-milestone patches
+Status: v1.4.2 released 2026-02-14
+Last activity: 2026-02-14 — Released v1.4.2 (reconcile_missing toggle)
 
-Progress: [██████████] 100% (v1.4 complete — 3 phases, 5 plans, 11 requirements)
+Progress: [██████████] 100% (v1.4 complete + 2 patch releases)
 
 ## Performance Metrics
 
@@ -57,24 +57,41 @@ Recent decisions affecting current work:
 - v1.4: Startup trigger requires 1-hour gap to avoid rapid restart noise
 - v1.4: Manual reconciliation resets auto timer (prevents duplicate runs)
 - v1.4: Lighter pre-check for gap detection (sync_timestamps lookup before matcher call)
+- v1.4.2: reconcile_missing toggle (disable noisy missing-item detection when Stash is superset of Plex)
 - v1.3: Debug logs as log_info with prefix (Stash filters out log_debug entirely)
 - v1.3: is_identification flag passthrough (scan gate must not block identification sync)
 - v1.1: LOCKED: Missing fields clear Plex values (None/empty in data clears existing Plex value)
 
 ### Pending Todos
 
-None yet.
+None.
 
 ### Blockers/Concerns
 
-None yet.
+None.
 
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: v1.4 milestone archived
+Stopped at: v1.4.2 released — all post-milestone work complete
+
+### Work completed this session:
+- **v1.4.1**: Code quality refactoring (5 commits)
+  - Shared logging module (`shared/log.py`) — extracted from 6 files
+  - Shared scene extractor (`validation/scene_extractor.py`) — extracted from 3 files
+  - Broke `_build_plex_data()` into `_connect_to_plex()`, `_init_caches()`, `_get_library_sections()`
+  - Broke `handle_task()` into dispatch table + `handle_bulk_sync()` + helpers
+  - Broke `_update_metadata()` (347 lines) into 5 focused field sync methods
+- **v1.4.2**: Added `reconcile_missing` toggle for missing-from-Plex detection
+- **Docs**: Updated README, config.md, ARCHITECTURE.md, API reference for v1.4.x
+- **GitHub releases**: v1.4.2 released with zip artifact
+
+### Stats:
+- 1000 tests passing, 85% coverage
+- 10 commits since v1.4.0
+
 Resume file: None
-Next action: /gsd:new-milestone to start next milestone
+Next action: `/gsd:new-milestone` to start next milestone
 
 ---
 *Last updated: 2026-02-14*
