@@ -154,3 +154,11 @@ settings:
     displayName: "Obfuscate Paths in Logs"
     description: "Replace file paths in logs with random word substitutions to protect privacy when sharing logs"
     type: BOOLEAN
+  reconcile_interval:
+    displayName: "Auto-Reconciliation Interval"
+    description: "How often to auto-check for metadata gaps (never/hourly/daily/weekly). Default: never"
+    type: STRING
+  reconcile_scope:
+    displayName: "Auto-Reconciliation Scope"
+    description: "Default scope for auto-reconciliation (all/24h/7days). Default: 24h"
+    type: STRING

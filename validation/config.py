@@ -145,6 +145,16 @@ class Stash2PlexConfig(BaseModel):
         description="Replace file paths in logs with deterministic word substitutions for privacy"
     )
 
+    # Reconciliation settings
+    reconcile_interval: str = Field(
+        default="never",
+        description="Auto-reconciliation interval: never, hourly, daily, weekly"
+    )
+    reconcile_scope: str = Field(
+        default="24h",
+        description="Default reconciliation scope: all, 24h, 7days"
+    )
+
     # Stash connection (for fetching images)
     stash_url: Optional[str] = Field(
         default=None,
@@ -178,6 +188,24 @@ class Stash2PlexConfig(BaseModel):
         if len(v) < 10:
             raise ValueError('plex_token appears invalid (too short)')
         return v
+
+    @field_validator('reconcile_interval', mode='before')
+    @classmethod
+    def validate_reconcile_interval(cls, v):
+        """Validate reconcile_interval is one of: never, hourly, daily, weekly."""
+        valid = ('never', 'hourly', 'daily', 'weekly')
+        if isinstance(v, str) and v.lower() in valid:
+            return v.lower()
+        raise ValueError(f"reconcile_interval must be one of {valid}, got: {v}")
+
+    @field_validator('reconcile_scope', mode='before')
+    @classmethod
+    def validate_reconcile_scope(cls, v):
+        """Validate reconcile_scope is one of: all, 24h, 7days."""
+        valid = ('all', '24h', '7days')
+        if isinstance(v, str) and v.lower() in valid:
+            return v.lower()
+        raise ValueError(f"reconcile_scope must be one of {valid}, got: {v}")
 
     @field_validator(
         'strict_matching', 'preserve_plex_edits',
