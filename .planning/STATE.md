@@ -5,15 +5,15 @@
 See: .planning/PROJECT.md (updated 2026-02-14)
 
 **Core value:** Reliable sync — when metadata changes in Stash, it eventually reaches Plex
-**Current focus:** Between milestones — ad-hoc improvements shipped as v1.4.1-v1.4.2
+**Current focus:** Between milestones — ad-hoc improvements shipped as v1.4.1-v1.4.3
 
 ## Current Position
 
 Milestone: v1.4 Metadata Reconciliation — COMPLETE + post-milestone patches
-Status: v1.4.2 released 2026-02-14
-Last activity: 2026-02-14 — Released v1.4.2 (reconcile_missing toggle)
+Status: v1.4.3 released 2026-02-14
+Last activity: 2026-02-14 — Released v1.4.3 (reconciliation PlexClient.connect fix)
 
-Progress: [██████████] 100% (v1.4 complete + 2 patch releases)
+Progress: [██████████] 100% (v1.4 complete + 3 patch releases)
 
 ## Performance Metrics
 
@@ -73,22 +73,17 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: v1.4.2 released — all post-milestone work complete
+Stopped at: v1.4.3 released — bugfix for reconciliation
 
 ### Work completed this session:
-- **v1.4.1**: Code quality refactoring (5 commits)
-  - Shared logging module (`shared/log.py`) — extracted from 6 files
-  - Shared scene extractor (`validation/scene_extractor.py`) — extracted from 3 files
-  - Broke `_build_plex_data()` into `_connect_to_plex()`, `_init_caches()`, `_get_library_sections()`
-  - Broke `handle_task()` into dispatch table + `handle_bulk_sync()` + helpers
-  - Broke `_update_metadata()` (347 lines) into 5 focused field sync methods
-- **v1.4.2**: Added `reconcile_missing` toggle for missing-from-Plex detection
-- **Docs**: Updated README, config.md, ARCHITECTURE.md, API reference for v1.4.x
-- **GitHub releases**: v1.4.2 released with zip artifact
+- **v1.4.3**: Fixed reconciliation `'PlexClient' object has no attribute 'connect'` error
+  - Root cause: `reconciliation/engine.py` called `client.connect()` but PlexClient uses `.server` property
+  - Fixed engine code + updated test mocks to use `PropertyMock` on `.server`
+  - Released as v1.4.3 with GitHub release and updated plugin index
 
 ### Stats:
 - 1000 tests passing, 85% coverage
-- 10 commits since v1.4.0
+- 13 commits since v1.4.0
 
 Resume file: None
 Next action: `/gsd:new-milestone` to start next milestone
