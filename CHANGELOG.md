@@ -5,6 +5,16 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-02-14
+
+### Changed
+
+- **Shared Logging Module**: Extracted duplicated Stash log functions from 6 files into `shared/log.py` with `create_logger()` factory.
+- **Shared Scene Extractor**: Consolidated duplicated scene-to-job-data transformation from 3 files into `validation/scene_extractor.py`.
+- **Refactored Gap Detection Engine**: Broke `_build_plex_data()` into focused setup methods (`_connect_to_plex()`, `_init_caches()`, `_get_library_sections()`).
+- **Refactored Task Dispatch**: Replaced 157-line `handle_task()` with dispatch table and separate `handle_bulk_sync()` function.
+- **Refactored Metadata Sync**: Broke 347-line `_update_metadata()` into focused field sync methods (`_build_core_edits()`, `_sync_performers()`, `_upload_image()`, `_sync_tags()`, `_sync_collection()`).
+
 ## [1.4.0] - 2026-02-14
 
 ### Added
