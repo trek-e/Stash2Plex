@@ -55,6 +55,10 @@ tasks:
     description: Detect and queue metadata gaps for scenes updated in the last 24 hours
     defaultArgs:
       mode: reconcile_recent
+  - name: Reconcile Library (Last 7 Days)
+    description: Detect and queue metadata gaps for scenes updated in the last 7 days
+    defaultArgs:
+      mode: reconcile_7days
 
 settings:
   plex_url:

@@ -190,6 +190,13 @@ class GapDetectionEngine:
                 f={"updated_at": {"value": yesterday, "modifier": "GREATER_THAN"}},
                 fragment=fragment
             )
+        elif scope == "recent_7days":
+            week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+            log_debug(f"Fetching scenes updated since {week_ago}")
+            scenes = self.stash.find_scenes(
+                f={"updated_at": {"value": week_ago, "modifier": "GREATER_THAN"}},
+                fragment=fragment
+            )
         else:  # "all"
             log_debug("Fetching all scenes")
             scenes = self.stash.find_scenes(fragment=fragment)

@@ -540,6 +540,33 @@ def handle_queue_status():
             for error_type, count in dlq_summary.items():
                 log_info(f"  {error_type}: {count}")
 
+        # Reconciliation status (RPT-01)
+        try:
+            from reconciliation.scheduler import ReconciliationScheduler
+            scheduler = ReconciliationScheduler(data_dir)
+            state = scheduler.load_state()
+
+            log_info("=== Reconciliation Status ===")
+            if state.last_run_time > 0:
+                import datetime
+                last_run_dt = datetime.datetime.fromtimestamp(state.last_run_time)
+                log_info(f"Last run: {last_run_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+                log_info(f"Scope: {state.last_run_scope}")
+                log_info(f"Scenes checked: {state.last_scenes_checked}")
+                log_info(f"Gaps found: {state.last_gaps_found}")
+                if state.last_gaps_by_type:
+                    log_info(f"  Empty metadata: {state.last_gaps_by_type.get('empty_metadata', 0)}")
+                    log_info(f"  Stale sync: {state.last_gaps_by_type.get('stale_sync', 0)}")
+                    log_info(f"  Missing from Plex: {state.last_gaps_by_type.get('missing', 0)}")
+                log_info(f"Enqueued: {state.last_enqueued}")
+                if state.is_startup_run:
+                    log_info("(Triggered by startup)")
+                log_info(f"Total reconciliation runs: {state.run_count}")
+            else:
+                log_info("No reconciliation runs yet")
+        except Exception as e:
+            log_debug(f"Failed to load reconciliation status: {e}")
+
     except Exception as e:
         log_error(f"Failed to get queue status: {e}")
         import traceback
@@ -793,6 +820,11 @@ def handle_reconcile(scope: str):
         )
         result = engine.run(scope=scope)
 
+        # Record run in scheduler state (resets auto-reconcile timer)
+        from reconciliation.scheduler import ReconciliationScheduler
+        scheduler = ReconciliationScheduler(data_dir)
+        scheduler.record_run(result, scope=scope, is_startup=False)
+
         # Log progress summary (RECON-02: gap counts by type)
         log_info("=== Reconciliation Summary ===")
         log_info(f"Scenes checked: {result.scenes_checked}")
@@ -815,6 +847,79 @@ def handle_reconcile(scope: str):
         log_error(f"Reconciliation failed: {e}")
         import traceback
         traceback.print_exc()
+
+
+def maybe_auto_reconcile():
+    """Check if auto-reconciliation is due and run it if so.
+
+    Called on every plugin invocation (hook or task). Checks:
+    1. If this is the first invocation since Stash startup -> run recent scope
+    2. If reconcile_interval has elapsed -> run configured scope
+
+    This is a lightweight check (reads one JSON file) that only triggers
+    the heavier gap detection when reconciliation is actually due.
+    """
+    if not config or config.reconcile_interval == 'never':
+        return
+
+    if not stash_interface or not queue_manager:
+        return
+
+    try:
+        data_dir = get_plugin_data_dir()
+        from reconciliation.scheduler import ReconciliationScheduler
+
+        scheduler = ReconciliationScheduler(data_dir)
+
+        # Check startup trigger first (AUTO-02)
+        if scheduler.is_startup_due():
+            log_info("Auto-reconciliation: startup trigger (recent scenes)")
+            _run_auto_reconcile(scheduler, scope="recent", is_startup=True)
+            return
+
+        # Check interval trigger (AUTO-01)
+        if scheduler.is_due(config.reconcile_interval):
+            # Map config scope to engine scope (AUTO-03)
+            scope_map = {'all': 'all', '24h': 'recent', '7days': 'recent_7days'}
+            engine_scope = scope_map.get(config.reconcile_scope, 'recent')
+            log_info(f"Auto-reconciliation: interval trigger ({config.reconcile_interval}, scope: {config.reconcile_scope})")
+            _run_auto_reconcile(scheduler, scope=engine_scope, is_startup=False)
+            return
+
+    except Exception as e:
+        log_warn(f"Auto-reconciliation check failed: {e}")
+
+
+def _run_auto_reconcile(scheduler, scope: str, is_startup: bool):
+    """Execute auto-reconciliation and record results.
+
+    Args:
+        scheduler: ReconciliationScheduler instance
+        scope: Engine scope ('all', 'recent', or 'recent_7days')
+        is_startup: Whether triggered by startup
+    """
+    try:
+        data_dir = get_plugin_data_dir()
+        from reconciliation.engine import GapDetectionEngine
+
+        queue = queue_manager.get_queue() if queue_manager else None
+
+        engine = GapDetectionEngine(
+            stash=stash_interface,
+            config=config,
+            data_dir=data_dir,
+            queue=queue
+        )
+        result = engine.run(scope=scope)
+
+        # Record the run
+        scope_label = config.reconcile_scope if not is_startup else "recent (startup)"
+        scheduler.record_run(result, scope=scope_label, is_startup=is_startup)
+
+        log_info(f"Auto-reconciliation complete: {result.total_gaps} gaps found, {result.enqueued_count} enqueued")
+
+    except Exception as e:
+        log_warn(f"Auto-reconciliation failed: {e}")
 
 
 def handle_task(task_args: dict, stash=None):
@@ -850,6 +955,9 @@ def handle_task(task_args: dict, stash=None):
         return
     elif mode == 'reconcile_recent':
         handle_reconcile('recent')
+        return
+    elif mode == 'reconcile_7days':
+        handle_reconcile('recent_7days')
         return
 
     # Sync tasks require Stash connection
@@ -1063,6 +1171,9 @@ def main():
         print(json.dumps({"output": "disabled"}))
         return
 
+    # Auto-reconciliation check (runs on every invocation, lightweight)
+    maybe_auto_reconcile()
+
     # Handle hook or task
     if is_hook:
         try:
@@ -1082,7 +1193,7 @@ def main():
     # Give worker time to process pending jobs before exiting
     # Worker thread is daemon, so it dies when main process exits
     # Skip for management tasks that don't enqueue work
-    management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status', 'process_queue', 'reconcile_all', 'reconcile_recent'}
+    management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status', 'process_queue', 'reconcile_all', 'reconcile_recent', 'reconcile_7days'}
     task_mode = args.get("mode", "") if not is_hook else ""
     if worker and queue_manager and task_mode not in management_modes:
         import time
