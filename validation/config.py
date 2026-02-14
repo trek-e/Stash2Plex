@@ -154,6 +154,10 @@ class Stash2PlexConfig(BaseModel):
         default="24h",
         description="Default reconciliation scope: all, 24h, 7days"
     )
+    reconcile_missing: bool = Field(
+        default=True,
+        description="Include 'missing from Plex' detection in reconciliation (scenes in Stash with no Plex match)"
+    )
 
     # Stash connection (for fetching images)
     stash_url: Optional[str] = Field(
@@ -212,7 +216,7 @@ class Stash2PlexConfig(BaseModel):
         'sync_master', 'sync_studio', 'sync_summary', 'sync_tagline',
         'sync_date', 'sync_performers', 'sync_tags', 'sync_poster',
         'sync_background', 'sync_collection', 'trigger_plex_scan',
-        'debug_logging', 'obfuscate_paths',
+        'debug_logging', 'obfuscate_paths', 'reconcile_missing',
         mode='before'
     )
     @classmethod

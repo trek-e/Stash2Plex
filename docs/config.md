@@ -293,6 +293,24 @@ Detected gaps are automatically enqueued for sync through the normal queue pipel
 
 ---
 
+### reconcile_missing
+
+| Property | Value |
+|----------|-------|
+| Type | BOOLEAN |
+| Required | No |
+| Default | `true` |
+
+**Description:** Include "missing from Plex" detection in reconciliation.
+
+**Behavior:**
+- **When true** (default): Reconciliation detects scenes in Stash that have no matching item in Plex.
+- **When false**: Skip missing-item detection entirely. Only detects empty metadata and stale syncs.
+
+**Use case:** Disable if your Stash library is a superset of your Plex library (i.e., Stash has scenes that intentionally aren't in Plex). This prevents "missing" gaps from flooding your queue with scenes that will never match.
+
+---
+
 ## Internal Settings
 
 These settings are not exposed in the Stash UI but are recognized by the code. Advanced users can set them by modifying the plugin configuration directly.

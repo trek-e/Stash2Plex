@@ -163,6 +163,7 @@ Stash2Plex provides 10 tasks accessible from **Settings > Plugins > Stash2Plex**
 | `trigger_plex_scan` | boolean | `false` | Trigger Plex library scan on new scenes |
 | `reconcile_interval` | string | `never` | Auto-reconciliation interval (never/hourly/daily/weekly) |
 | `reconcile_scope` | string | `24h` | Auto-reconciliation scope (all/24h/7days) |
+| `reconcile_missing` | boolean | `true` | Include "missing from Plex" detection in reconciliation |
 
 ### Field Sync Toggles
 

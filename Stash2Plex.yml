@@ -166,3 +166,7 @@ settings:
     displayName: "Auto-Reconciliation Scope"
     description: "Default scope for auto-reconciliation (all/24h/7days). Default: 24h"
     type: STRING
+  reconcile_missing:
+    displayName: "Detect Missing from Plex"
+    description: "Include 'missing from Plex' detection in reconciliation — scenes in Stash with no Plex match (default: true)"
+    type: BOOLEAN

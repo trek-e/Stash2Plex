@@ -129,7 +129,11 @@ class GapDetectionEngine:
         # Step 5: Run detectors
         empty_gaps = self.detector.detect_empty_metadata(scenes, plex_items_metadata)
         stale_gaps = self.detector.detect_stale_syncs(scenes, sync_timestamps)
-        missing_gaps = self.detector.detect_missing(scenes, sync_timestamps, matched_paths)
+        if getattr(self.config, 'reconcile_missing', True):
+            missing_gaps = self.detector.detect_missing(scenes, sync_timestamps, matched_paths)
+        else:
+            missing_gaps = []
+            log_debug("Skipping 'missing from Plex' detection (reconcile_missing=false)")
 
         result.empty_metadata_count = len(empty_gaps)
         result.stale_sync_count = len(stale_gaps)

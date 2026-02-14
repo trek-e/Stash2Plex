@@ -414,3 +414,24 @@ def test_scenes_without_files_skipped(mock_stash, mock_config, tmp_data_dir, moc
         assert result.scenes_checked == 1
         assert result.total_gaps == 0
         assert len(result.errors) == 0
+
+
+def test_reconcile_missing_disabled_skips_missing_detection(mock_stash, mock_config, tmp_data_dir, sample_scenes, mock_plex_client):
+    """Test that reconcile_missing=False skips 'missing from Plex' detection."""
+    mock_config.reconcile_missing = False
+    mock_stash.find_scenes.return_value = [sample_scenes[0]]
+
+    with patch('plex.client.PlexClient', return_value=mock_plex_client), \
+         patch('plex.cache.PlexCache'), \
+         patch('plex.cache.MatchCache'), \
+         patch('plex.matcher.find_plex_items_with_confidence') as mock_matcher:
+
+        from plex.exceptions import PlexNotFound
+        mock_matcher.side_effect = PlexNotFound("Not found")
+
+        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=None)
+        result = engine.run(scope="all")
+
+        # Should NOT detect missing gaps even though matcher raises PlexNotFound
+        assert result.missing_count == 0
+        assert result.scenes_checked == 1
