@@ -53,10 +53,10 @@ Plans:
   2. User can choose reconciliation scope: all scenes or recent scenes (last 24 hours)
   3. Reconciliation logs progress summary showing gap counts by type (empty metadata: X, stale sync: Y, missing from Plex: Z)
   4. Reconciliation completes without overwhelming the queue (gaps are enqueued, not processed inline)
-**Plans**: TBD
+**Plans:** 1 plan
 
 Plans:
-- [ ] TBD (plans created during /gsd:plan-phase 15)
+- [ ] 15-01-PLAN.md — Wire GapDetectionEngine into Stash plugin task system with scope control and progress logging
 
 ### Phase 16: Automated Reconciliation & Reporting
 **Goal**: Plugin automatically reconciles on schedule and reports reconciliation history in UI
@@ -80,9 +80,9 @@ Phases execute in numeric order: 14 → 15 → 16
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 14. Gap Detection Engine | 2/2 | ✓ Complete | 2026-02-14 |
-| 15. Manual Reconciliation | 0/TBD | Not started | - |
+| 15. Manual Reconciliation | 0/1 | Not started | - |
 | 16. Automated Reconciliation & Reporting | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-14*
-*Last updated: 2026-02-14 after phase 14 completion*
+*Last updated: 2026-02-14 after phase 15 planning*
