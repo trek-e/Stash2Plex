@@ -8,41 +8,23 @@ Improvements to the PlexSync plugin for Stash, which syncs metadata from Stash t
 
 Reliable sync: when metadata changes in Stash, it eventually reaches Plex — even if Plex was temporarily unavailable or Stash hadn't finished indexing yet.
 
-## Current Milestone: v1.4 Metadata Reconciliation
+## Current State (v1.4)
 
-**Goal:** Detect and repair metadata gaps between Stash and Plex — covering items with empty Plex fields, stale syncs, and scenes missing from Plex entirely.
+**Shipped:** 2026-02-14
 
-**Target features:**
-- Gap detection (empty fields, stale timestamps, missing items)
-- Manual reconciliation task button
-- Auto-reconciliation (startup + configurable interval)
-- All gaps flow through existing queue infrastructure
+PlexSync v1.4 adds metadata reconciliation — automatic detection and repair of gaps between Stash and Plex:
+- Gap detection engine: empty metadata, stale sync, and missing item detection
+- Manual reconciliation tasks: Reconcile Library (All / Recent / Last 7 Days) in Stash UI
+- Auto-reconciliation: startup trigger + configurable interval (never/hourly/daily/weekly)
+- Reconciliation status in "View Queue Status" (last run, gaps found by type, enqueued count)
+- Configurable scope (all/24h/7days) with check-on-invocation scheduling pattern
+- 999 tests, 91% coverage, 3,029 LOC in reconciliation module
 
-## Current State (v1.3.4)
-
-**Shipped:** 2026-02-09
-
-PlexSync v1.3.x adds production stability and operational features (28 commits, ad-hoc):
-- Multi-library support (comma-separated `plex_library`)
-- Debug logging mode and path obfuscation for troubleshooting
-- Batch backpressure (0.15s throttle) preventing circuit breaker trips
-- Configurable max_tags (default: 100, replaces hardcoded 50)
-- Identification event pipeline fix (scan gate bypass)
-- Queue stability: O(n²) reprocessing, queue doubling, stuck items, server-down handling
-- Skip-already-synced optimization for bulk sync
-- PEP 668 compatibility for containerized environments
-
-Built on v1.2 foundation:
-- Queue management UI (status, clear, DLQ management, Process Queue button)
-- Dynamic timeout based on measured processing times
-
-Built on v1.1 foundation:
-- 910 tests with >80% coverage across all modules
-- Complete documentation (user guide, architecture, API reference)
-- Disk-backed caching reducing Plex API calls
-- SyncStats with batch summary logging
-- Partial failure recovery with per-field tracking
-- Metadata sync toggles for selective field syncing
+Built on v1.0-v1.3 foundation:
+- SQLite-backed persistent queue with crash recovery and circuit breaker (v1.0)
+- 910+ tests, complete documentation, disk-backed caching (v1.1)
+- Queue management UI with Process Queue button (v1.2)
+- Production stability: multi-library, debug logging, batch backpressure (v1.3)
 
 **Tech stack:** Python 3.9+, SQLite (persist-queue), plexapi, pydantic, diskcache, MkDocs
 
@@ -89,15 +71,21 @@ Built on v1.1 foundation:
 - [x] Queue stability — O(n²) reprocessing, doubling, stuck items all resolved
 - [x] PEP 668 compatibility — containerized Python environments supported
 
-### Active (v1.4)
+### Validated (v1.4)
 
-- [ ] Reconciliation: detect Plex items with empty metadata that Stash has data for
-- [ ] Reconciliation: detect Stash scenes updated more recently than last sync
-- [ ] Reconciliation: detect Stash scenes not indexed by Plex (trigger Plex scan)
-- [ ] Manual "Reconcile" task button in Stash UI
-- [ ] Auto-reconciliation on Stash startup
-- [ ] Configurable periodic reconciliation interval (default: daily)
-- [ ] Discovered gaps enqueued through existing queue (backpressure/retry/circuit breaker)
+- [x] Reconciliation: detect Plex items with empty metadata that Stash has data for
+- [x] Reconciliation: detect Stash scenes updated more recently than last sync
+- [x] Reconciliation: detect Stash scenes with no matching Plex item
+- [x] Manual reconciliation tasks in Stash UI (All / Recent / Last 7 Days)
+- [x] Auto-reconciliation on Stash startup (recent scope, >1hr since last run)
+- [x] Configurable periodic reconciliation interval (never/hourly/daily/weekly)
+- [x] Configurable reconciliation scope (all/24h/7days)
+- [x] Discovered gaps enqueued through existing queue (backpressure/retry/circuit breaker)
+- [x] Enhanced "View Queue Status" with reconciliation history and gap counts by type
+
+### Active
+
+(None — planning next milestone)
 
 ### Out of Scope
 
@@ -133,6 +121,10 @@ Built on v1.1 foundation:
 | Batch backpressure 0.15s | Prevents circuit breaker trips at ~160 items | v1.3 |
 | max_tags default 100 | 50 was too low for real-world tag counts (50-89 common) | v1.3 |
 | is_identification flag passthrough | Scan gate must not block identification sync | v1.3 |
+| Check-on-invocation scheduling | Stash plugins aren't daemons; check JSON state each invocation | v1.4 |
+| Lighter pre-check for gap detection | sync_timestamps lookup before expensive matcher call | v1.4 |
+| Meaningful metadata gate for gaps | Reuse handlers.py quality gate (studio/performers/tags/details/date) | v1.4 |
+| Standard sync jobs for gaps | Enqueue as normal jobs, no special gap tagging | v1.4 |
 
 ## Milestones
 
@@ -142,6 +134,7 @@ Built on v1.1 foundation:
 | v1.1 | Complete | 2026-02-03 | 11 phases, 27 plans, 136 commits |
 | v1.2 | Complete | 2026-02-04 | 3 phases, 3 plans, 15 commits |
 | v1.3 | Complete | 2026-02-09 | Ad-hoc, 28 commits, production-driven |
+| v1.4 | Complete | 2026-02-14 | 3 phases, 5 plans, metadata reconciliation |
 
 ---
-*Last updated: 2026-02-14 after v1.4 milestone start*
+*Last updated: 2026-02-14 after v1.4 milestone completion*

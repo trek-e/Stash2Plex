@@ -1,5 +1,69 @@
 # Project Milestones: PlexSync
 
+## v1.4 Metadata Reconciliation (Shipped: 2026-02-14)
+
+**Delivered:** Automatic detection and repair of metadata gaps between Stash and Plex — empty fields, stale syncs, and missing items are found and enqueued for sync, with manual and scheduled triggers.
+
+**Phases completed:** 14-16 (5 plans total)
+
+**Key accomplishments:**
+
+- Gap detection engine: three detection methods (empty metadata, stale sync, missing items) with batch processing and deduplication
+- Manual reconciliation tasks in Stash UI: All / Recent / Last 7 Days scope options
+- Auto-reconciliation scheduler using check-on-invocation pattern (startup + interval triggers)
+- Enhanced "View Queue Status" with reconciliation history and gap counts by type
+- Configurable reconcile_interval (never/hourly/daily/weekly) and reconcile_scope (all/24h/7days)
+- 89 new tests (910 → 999), 91% coverage maintained
+
+**Stats:**
+
+- 5 plans across 3 phases
+- 10 feature/test commits
+- 3,029 lines in reconciliation module
+- 5,876 lines added total
+- Single day (2026-02-14)
+
+**Git range:** `9a76a1e` → `d9a9c81`
+
+**Tag:** `v1.4`
+
+---
+
+## v1.3 Production Stability (Shipped: 2026-02-09)
+
+**Delivered:** Production-driven fixes and features — ad-hoc development addressing real-world issues discovered after v1.2 deployment.
+
+**Phases completed:** Ad-hoc (no formal GSD phases)
+
+**Key accomplishments:**
+
+- Debug logging with configurable visibility (log_info with prefix, since Stash filters log_debug)
+- Path obfuscation for privacy in debug logs
+- Batch backpressure and configurable max_tags
+- Identification metadata sync (scan gate bypass for stash-box identification events)
+- Metadata quality gate refinement
+
+**Tag:** `v1.3`
+
+---
+
+## v1.2 Queue Management UI (Shipped: 2026-02-04)
+
+**Delivered:** User-facing queue management tasks in Stash UI — view status, clear queue, clear DLQ, purge old DLQ entries, and process queue on demand.
+
+**Phases completed:** 11-13 (3 plans total)
+
+**Key accomplishments:**
+
+- Four new Stash UI tasks for queue management (status, clear queue, clear DLQ, purge old DLQ)
+- Process Queue button for on-demand batch processing
+- Dynamic queue timeout configuration
+- Metadata quality gate preventing race condition with stash-box identification
+
+**Tag:** `v1.2`
+
+---
+
 ## v1.1 Foundation Hardening (Shipped: 2026-02-03)
 
 **Delivered:** Comprehensive test coverage (500+ tests), complete documentation suite, performance caching, observability improvements, and reliability hardening — all without new features.
@@ -28,8 +92,6 @@
 
 **Tag:** `v1.1`
 
-**What's next:** v1.2 with Queue Management UI, Process Queue Button, Dynamic Queue Timeout
-
 ---
 
 ## v1.0 Initial Release (Shipped: 2026-02-03)
@@ -57,7 +119,5 @@
 **Git range:** `9ae922a` → `491dbaa`
 
 **Tag:** `v1.0`
-
-**What's next:** v1.1 Foundation Hardening (complete)
 
 ---
