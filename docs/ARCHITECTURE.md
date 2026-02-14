@@ -30,6 +30,17 @@ graph TB
             SANITIZE["sanitizers.py"]
             CONFIG["config.py<br/>Stash2PlexConfig"]
             OBFUSCATE["obfuscation.py"]
+            EXTRACTOR["scene_extractor.py"]
+        end
+
+        subgraph shared["shared/"]
+            LOGGER["log.py<br/>create_logger()"]
+        end
+
+        subgraph reconciliation["reconciliation/"]
+            ENGINE["engine.py<br/>GapDetectionEngine"]
+            DETECTOR["detector.py<br/>GapDetector"]
+            SCHEDULER["scheduler.py<br/>ReconciliationScheduler"]
         end
 
         subgraph sync_queue["sync_queue/"]
@@ -78,9 +89,25 @@ graph TB
     WORKER -->|failed jobs| DLQ
     WORKER -->|save| TIMESTAMPS
 
+    %% Reconciliation flow
+    ENTRY -->|reconcile tasks| ENGINE
+    ENGINE -->|detect gaps| DETECTOR
+    ENGINE -->|match items| MATCHER
+    ENGINE -->|enqueue gaps| QUEUE
+    SCHEDULER -->|check if due| ENGINE
+    ENTRY -->|startup/hook| SCHEDULER
+
+    %% Shared utilities
+    LOGGER -.->|logging| ENTRY
+    LOGGER -.->|logging| HANDLER
+    LOGGER -.->|logging| WORKER
+    EXTRACTOR -.->|extract metadata| HANDLER
+    EXTRACTOR -.->|extract metadata| ENGINE
+
     %% Configuration
     CONFIG -.->|configure| WORKER
     CONFIG -.->|configure| CLIENT
+    CONFIG -.->|configure| ENGINE
 ```
 
 ---
@@ -100,9 +127,10 @@ graph TB
 
 **Tasks handled:**
 - `all` / `recent` - Bulk sync scenes to Plex (skips scenes already synced since last update)
-- `queue_status` - View pending and DLQ counts
+- `queue_status` - View pending/DLQ counts and reconciliation history
 - `clear_queue` / `clear_dlq` / `purge_dlq` - Queue management
 - `process_queue` - Foreground processing until empty (no timeout)
+- `reconcile_all` / `reconcile_recent` / `reconcile_7days` - Gap detection and enqueue
 
 **Design Note:** Dependencies are parsed from `requirements.txt` with a small override map for packages where import names differ from pip names. This avoids hardcoding the dependency list in multiple places.
 
@@ -196,6 +224,7 @@ graph TB
 - `sanitizers.py` - Text cleaning functions
 - `config.py` - Stash2PlexConfig model with validation
 - `obfuscation.py` - Path obfuscation for privacy-safe logging
+- `scene_extractor.py` - Shared scene-to-job-data transformation
 
 **Responsibilities:**
 - Enforce required fields (scene_id, title) via Pydantic
@@ -203,8 +232,41 @@ graph TB
 - Validate plugin configuration at startup
 - Fail fast on invalid data before queue ingress
 - Obfuscate file paths in logs when `obfuscate_paths` is enabled
+- Extract flat metadata from nested Stash GraphQL scene responses
 
 **Design Note:** Validation at queue ingress prevents bad data from causing repeated processing failures. Invalid metadata is logged and rejected immediately.
+
+---
+
+### reconciliation/ - Gap Detection Layer
+
+**Purpose:** Detect and resolve metadata gaps between Stash and Plex.
+
+**Key Files:**
+- `engine.py` - GapDetectionEngine orchestrator (Stash GQL → Plex matcher → gap detection → enqueue)
+- `detector.py` - Pure gap detection logic (empty metadata, stale syncs, missing items)
+- `scheduler.py` - ReconciliationScheduler (check-on-invocation pattern for auto-reconciliation)
+
+**Responsibilities:**
+- Fetch scenes from Stash via GQL with scope filtering (all, 24h, 7 days)
+- Connect to Plex and resolve file matches using matcher + caches
+- Detect three gap types: empty metadata, stale syncs, missing from Plex
+- Enqueue discovered gaps as standard sync jobs (with deduplication)
+- Schedule auto-reconciliation using persisted state file (`reconciliation_state.json`)
+- Trigger on Stash startup (if >1 hour since last run) and at configurable intervals
+
+**Design Note:** Stash plugins exit after each hook/task invocation, so the scheduler uses a check-on-invocation pattern: each plugin run reads `reconciliation_state.json` to decide if reconciliation is due. Manual reconciliation resets the auto timer to prevent duplicate runs. Gap detection uses a lighter pre-check (sync timestamps lookup) before falling back to the full Plex matcher.
+
+---
+
+### shared/ - Shared Utilities
+
+**Purpose:** Common utilities shared across all modules.
+
+**Key Files:**
+- `log.py` - `create_logger()` factory for Stash plugin log protocol
+
+**Design Note:** The Stash plugin log protocol uses a binary prefix format (`\x01` + level char + `\x02` + message) on stderr. The `create_logger(component)` factory returns a tuple of log functions with the component prefix, replacing what was previously copy-pasted in 6 files.
 
 ---
 
@@ -318,4 +380,4 @@ On permanent error: job goes directly to dead letter queue without retry.
 
 ---
 
-*Architecture overview for Stash2Plex plugin developers — v1.3.3*
+*Architecture overview for Stash2Plex plugin developers — v1.4.1*

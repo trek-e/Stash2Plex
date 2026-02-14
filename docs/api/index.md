@@ -12,3 +12,4 @@ For system design and architecture decisions, see the [Architecture Documentatio
 | [validation](validation.md) | Metadata validation and sanitization |
 | [plex](plex.md) | Plex server client and file path matching |
 | [worker](worker.md) | Job processing with retry, circuit breaker, backoff |
+| [reconciliation](reconciliation.md) | Gap detection, reconciliation engine, and auto-scheduler |

@@ -243,6 +243,56 @@ These settings have no usable defaults and must be configured before Stash2Plex 
 
 ---
 
+## Reconciliation Settings
+
+### reconcile_interval
+
+| Property | Value |
+|----------|-------|
+| Type | STRING |
+| Required | No |
+| Default | `never` |
+| Values | `never`, `hourly`, `daily`, `weekly` |
+
+**Description:** How often Stash2Plex automatically checks for metadata gaps between Stash and Plex.
+
+**Behavior:**
+- **`never`** (default): Auto-reconciliation is disabled. Use manual reconciliation tasks instead.
+- **`hourly`**: Check every hour.
+- **`daily`**: Check every 24 hours.
+- **`weekly`**: Check every 7 days.
+
+**How it works:** Since Stash plugins are invoked per-event (not long-running), Stash2Plex uses a check-on-invocation pattern: each plugin run checks a state file to determine if reconciliation is due. It also runs on Stash startup if more than 1 hour has passed since the last run (using the `reconcile_scope` setting).
+
+**What it detects:**
+- **Empty metadata:** Plex item has no metadata but Stash scene does
+- **Stale syncs:** Stash scene was updated after the last sync
+- **Missing items:** Stash scene has no Plex match
+
+Detected gaps are automatically enqueued for sync through the normal queue pipeline.
+
+---
+
+### reconcile_scope
+
+| Property | Value |
+|----------|-------|
+| Type | STRING |
+| Required | No |
+| Default | `24h` |
+| Values | `all`, `24h`, `7days` |
+
+**Description:** Default scope for auto-reconciliation (how far back to check).
+
+**Behavior:**
+- **`all`**: Check every scene in Stash (slowest, most thorough)
+- **`24h`** (default): Check scenes updated in the last 24 hours (fastest, good for regular intervals)
+- **`7days`**: Check scenes updated in the last 7 days (balanced)
+
+**Note:** This only applies to auto-reconciliation. Manual reconciliation tasks ("Reconcile Library (All)", "Recent", "Last 7 Days") have their own fixed scopes.
+
+---
+
 ## Internal Settings
 
 These settings are not exposed in the Stash UI but are recognized by the code. Advanced users can set them by modifying the plugin configuration directly.
@@ -445,6 +495,8 @@ Stash2Plex validates your configuration on startup. Invalid settings log errors 
 | connect_timeout | Must be 1-30 |
 | read_timeout | Must be 5-120 |
 | max_tags | Must be 10-500 |
+| reconcile_interval | Must be one of: never, hourly, daily, weekly |
+| reconcile_scope | Must be one of: all, 24h, 7days |
 
 ---
 

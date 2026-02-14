@@ -2,7 +2,7 @@
 
 Sync metadata from Stash to Plex with queue-based reliability.
 
-[![Tests](https://img.shields.io/badge/tests-885%2B-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-999%2B-brightgreen)](tests/)
 [![Coverage](https://img.shields.io/badge/coverage-%3E80%25-brightgreen)](pytest.ini)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
@@ -21,6 +21,8 @@ Stash2Plex is a Stash plugin that automatically syncs scene metadata from Stash 
 - **Performance caching** - Reduces Plex API calls with disk-backed caching
 - **Selective sync** - Toggle which metadata fields sync to Plex
 - **Dynamic timeouts** - Processing timeout scales with queue size automatically
+- **Metadata reconciliation** - Detect and fix gaps: empty metadata, stale syncs, missing Plex items
+- **Auto-reconciliation** - Scheduled gap detection on startup and at configurable intervals
 - **Plex scan trigger** - Optionally trigger Plex library scan when Stash discovers new scenes
 - **Sync statistics** - Track success rates and timing with batch summaries
 - **Connection pooling** - HTTP keep-alive reduces connection overhead during bulk sync
@@ -99,17 +101,20 @@ That's it! Stash2Plex is now syncing metadata from Stash to Plex.
 
 ## Plugin Tasks
 
-Stash2Plex provides 7 tasks accessible from **Settings > Plugins > Stash2Plex**:
+Stash2Plex provides 10 tasks accessible from **Settings > Plugins > Stash2Plex**:
 
 | Task | Description |
 |------|-------------|
 | **Sync All Scenes** | Force sync all scenes to Plex (use sparingly) |
 | **Sync Recent Scenes** | Sync scenes updated in the last 24 hours |
-| **View Queue Status** | Show pending queue and DLQ counts in logs |
+| **View Queue Status** | Show pending queue, DLQ counts, and reconciliation history |
 | **Clear Pending Queue** | Remove all pending queue items |
 | **Clear Dead Letter Queue** | Remove all DLQ entries |
 | **Purge Old DLQ Entries** | Remove DLQ entries older than 30 days |
 | **Process Queue** | Process all pending items until empty (foreground, no timeout) |
+| **Reconcile Library (All)** | Detect and queue metadata gaps for all scenes |
+| **Reconcile Library (Recent)** | Detect and queue metadata gaps for scenes updated in 24 hours |
+| **Reconcile Library (Last 7 Days)** | Detect and queue metadata gaps for scenes updated in 7 days |
 
 ## Documentation
 
@@ -156,6 +161,8 @@ Stash2Plex provides 7 tasks accessible from **Settings > Plugins > Stash2Plex**:
 | `connect_timeout` | number | `5` | Plex connection timeout (seconds) |
 | `read_timeout` | number | `30` | Plex read timeout (seconds) |
 | `trigger_plex_scan` | boolean | `false` | Trigger Plex library scan on new scenes |
+| `reconcile_interval` | string | `never` | Auto-reconciliation interval (never/hourly/daily/weekly) |
+| `reconcile_scope` | string | `24h` | Auto-reconciliation scope (all/24h/7days) |
 
 ### Field Sync Toggles
 
