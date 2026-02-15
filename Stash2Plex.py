@@ -918,6 +918,82 @@ def _run_auto_reconcile(scheduler, scope: str, is_startup: bool):
         log_warn(f"Auto-reconciliation failed: {e}")
 
 
+def handle_health_check():
+    """Check Plex server connectivity and circuit breaker status."""
+    try:
+        data_dir = get_plugin_data_dir()
+        log_info("=== Plex Health Check ===")
+
+        # Report circuit breaker state
+        cb_file = os.path.join(data_dir, 'circuit_breaker.json')
+        if os.path.exists(cb_file):
+            try:
+                with open(cb_file, 'r') as f:
+                    cb_data = json.load(f)
+                state = cb_data.get('state', 'closed').upper()
+                log_info(f"Circuit Breaker State: {state}")
+
+                if state == "OPEN" and cb_data.get('opened_at'):
+                    opened_at = cb_data['opened_at']
+                    elapsed = time.time() - opened_at
+                    minutes = int(elapsed / 60)
+                    seconds = int(elapsed % 60)
+                    log_info(f"Circuit opened {minutes}m {seconds}s ago")
+            except Exception as e:
+                log_info(f"Circuit Breaker State: UNKNOWN (corrupted state file: {e})")
+        else:
+            log_info("Circuit Breaker State: CLOSED (no state file)")
+
+        # Test Plex connectivity with health probe
+        if not config:
+            log_error("No config available for health check")
+            return
+
+        from plex.client import PlexClient
+        from plex.health import check_plex_health
+
+        client = PlexClient(
+            url=config.plex_url,
+            token=config.plex_token,
+            connect_timeout=5.0,
+            read_timeout=5.0
+        )
+
+        is_healthy, latency_ms = check_plex_health(client, timeout=5.0)
+
+        if is_healthy:
+            log_info(f"Plex is HEALTHY (responded in {latency_ms:.0f}ms)")
+        else:
+            log_warn("Plex is UNREACHABLE")
+            log_info("Verify Plex URL and network connectivity")
+
+        # Report queue size
+        if queue_manager:
+            queue = queue_manager.get_queue()
+            pending = queue.size
+            if pending > 0:
+                log_info(f"Queue: {pending} pending items")
+
+                # If circuit is open and jobs are waiting, warn user
+                if os.path.exists(cb_file):
+                    try:
+                        with open(cb_file, 'r') as f:
+                            cb_data = json.load(f)
+                        if cb_data.get('state', 'closed').lower() == 'open':
+                            log_warn(f"{pending} jobs waiting for Plex to recover")
+                    except:
+                        pass
+            else:
+                log_info("Queue: empty")
+
+        log_info("=== Health Check Complete ===")
+
+    except Exception as e:
+        log_error(f"Health check failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 # Dispatch table for management modes (no Stash connection needed)
 _MANAGEMENT_HANDLERS = {
     'queue_status': lambda args: handle_queue_status(),
@@ -928,6 +1004,7 @@ _MANAGEMENT_HANDLERS = {
     'reconcile_all': lambda args: handle_reconcile('all'),
     'reconcile_recent': lambda args: handle_reconcile('recent'),
     'reconcile_7days': lambda args: handle_reconcile('recent_7days'),
+    'health_check': lambda args: handle_health_check(),
 }
 
 
@@ -1161,7 +1238,7 @@ def main():
     # Give worker time to process pending jobs before exiting
     # Worker thread is daemon, so it dies when main process exits
     # Skip for management tasks that don't enqueue work
-    management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status', 'process_queue', 'reconcile_all', 'reconcile_recent', 'reconcile_7days'}
+    management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status', 'process_queue', 'reconcile_all', 'reconcile_recent', 'reconcile_7days', 'health_check'}
     task_mode = args.get("mode", "") if not is_hook else ""
     if worker and queue_manager and task_mode not in management_modes:
         import time

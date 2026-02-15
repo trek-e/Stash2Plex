@@ -47,6 +47,10 @@ tasks:
     description: Process all pending queue items until empty (resumes stuck queues)
     defaultArgs:
       mode: process_queue
+  - name: Health Check
+    description: Check Plex server connectivity and circuit breaker status
+    defaultArgs:
+      mode: health_check
   - name: Reconcile Library (All)
     description: Detect and queue metadata gaps for all scenes (empty metadata, stale syncs, missing from Plex)
     defaultArgs:
