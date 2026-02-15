@@ -71,10 +71,12 @@ class TestMaybeCheckRecovery:
         mock_queue_manager.get_queue.return_value = mock_queue
 
         with patch('worker.recovery.RecoveryScheduler') as MockRecoveryScheduler, \
+             patch('worker.outage_history.OutageHistory') as MockOutageHistory, \
              patch('plex.client.PlexClient') as MockPlexClient, \
              patch('plex.health.check_plex_health') as mock_check_health:
 
             # Setup mocks
+            mock_outage_history = MockOutageHistory.return_value
             mock_scheduler = MockRecoveryScheduler.return_value
             mock_scheduler.should_check_recovery.return_value = True
             mock_check_health.return_value = (True, 50.0)
@@ -83,8 +85,8 @@ class TestMaybeCheckRecovery:
             # Call function
             maybe_check_recovery()
 
-            # Verify RecoveryScheduler was created
-            MockRecoveryScheduler.assert_called_once_with("/tmp/test_data")
+            # Verify RecoveryScheduler was created with outage_history
+            MockRecoveryScheduler.assert_called_once_with("/tmp/test_data", outage_history=mock_outage_history)
 
             # Verify should_check_recovery was called
             mock_scheduler.should_check_recovery.assert_called_once_with(CircuitState.OPEN)
@@ -200,3 +202,108 @@ class TestMaybeCheckRecovery:
             # Verify exception was logged at debug level
             mock_log_debug.assert_called_once()
             assert "Recovery check failed" in mock_log_debug.call_args[0][0]
+
+
+class TestOutageUIHandlers:
+    """Tests for outage summary and queue status enhancements."""
+
+    @patch('Stash2Plex.get_plugin_data_dir')
+    def test_handle_outage_summary_no_outages(self, mock_get_data_dir):
+        """handle_outage_summary logs 'No outages recorded' when history is empty."""
+        from Stash2Plex import handle_outage_summary
+
+        mock_get_data_dir.return_value = "/tmp/test_data"
+
+        with patch('worker.outage_history.OutageHistory') as MockHistory, \
+             patch('Stash2Plex.log_info') as mock_log_info:
+
+            # Mock empty history
+            mock_history_instance = MockHistory.return_value
+            mock_history_instance.get_history.return_value = []
+
+            handle_outage_summary()
+
+            # Verify "No outages recorded" was logged
+            log_calls = [call[0][0] for call in mock_log_info.call_args_list]
+            assert any("No outages recorded" in msg for msg in log_calls)
+
+    @patch('Stash2Plex.get_plugin_data_dir')
+    def test_handle_outage_summary_with_outages(self, mock_get_data_dir):
+        """handle_outage_summary displays metrics when outages exist."""
+        from Stash2Plex import handle_outage_summary
+        from worker.outage_history import OutageRecord
+
+        mock_get_data_dir.return_value = "/tmp/test_data"
+
+        # Create sample outage records
+        records = [
+            OutageRecord(started_at=1000.0, ended_at=1060.0, duration=60.0, jobs_affected=5),
+            OutageRecord(started_at=2000.0, ended_at=2120.0, duration=120.0, jobs_affected=3),
+        ]
+
+        with patch('worker.outage_history.OutageHistory') as MockHistory, \
+             patch('Stash2Plex.log_info') as mock_log_info:
+
+            mock_history_instance = MockHistory.return_value
+            mock_history_instance.get_history.return_value = records
+            mock_history_instance.get_current_outage.return_value = None
+
+            handle_outage_summary()
+
+            # Verify metrics were logged
+            log_calls = [call[0][0] for call in mock_log_info.call_args_list]
+            log_output = " ".join(log_calls)
+
+            assert "Outage Summary Report" in log_output
+            assert "Total outages tracked" in log_output
+            assert "MTTR" in log_output
+            assert "Recent Outages" in log_output
+
+    @patch('Stash2Plex.get_plugin_data_dir')
+    def test_handle_queue_status_includes_circuit_breaker_section(self, mock_get_data_dir, tmp_path):
+        """handle_queue_status includes Circuit Breaker Status section."""
+        from Stash2Plex import handle_queue_status
+        import json
+
+        data_dir = str(tmp_path)
+        mock_get_data_dir.return_value = data_dir
+
+        # Create circuit_breaker.json
+        cb_file = tmp_path / "circuit_breaker.json"
+        cb_data = {
+            "state": "closed",
+            "failure_count": 0,
+            "success_count": 0,
+            "opened_at": None
+        }
+        cb_file.write_text(json.dumps(cb_data))
+
+        # Create queue directory
+        queue_dir = tmp_path / "queue"
+        queue_dir.mkdir()
+
+        with patch('Stash2Plex.log_info') as mock_log_info:
+            handle_queue_status()
+
+            # Verify Circuit Breaker Status section was logged
+            log_calls = [call[0][0] for call in mock_log_info.call_args_list]
+            log_output = " ".join(log_calls)
+
+            assert "Circuit Breaker Status" in log_output
+            assert "Recovery Status" in log_output
+            assert "Recent Outages" in log_output
+
+    def test_outage_summary_in_management_handlers(self):
+        """Verify outage_summary is registered in _MANAGEMENT_HANDLERS."""
+        from Stash2Plex import _MANAGEMENT_HANDLERS
+
+        assert 'outage_summary' in _MANAGEMENT_HANDLERS
+
+    def test_outage_summary_in_management_modes(self):
+        """Verify outage_summary is in management_modes set."""
+        # This is checked at runtime in main(), so we verify the string appears in the file
+        import Stash2Plex
+        source = open(Stash2Plex.__file__).read()
+
+        assert 'outage_summary' in source
+        assert "management_modes = {" in source

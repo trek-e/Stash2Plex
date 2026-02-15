@@ -470,3 +470,75 @@ class TestEdgeCases:
 
         # Just after boundary
         assert scheduler.should_check_recovery(CircuitState.OPEN, now=1005.001) is True
+
+
+class TestRecoveryOutageHistory:
+    """Test outage history integration with recovery scheduler."""
+
+    def test_recovery_records_outage_end(self, temp_dir, mock_circuit_breaker):
+        """record_health_check calls outage_history.record_outage_end on recovery."""
+        from unittest.mock import Mock
+
+        mock_history = Mock()
+        scheduler = RecoveryScheduler(temp_dir, outage_history=mock_history)
+
+        # Simulate successful recovery (HALF_OPEN -> CLOSED transition)
+        mock_circuit_breaker.state = CircuitState.HALF_OPEN
+
+        def transition_to_closed():
+            mock_circuit_breaker.state = CircuitState.CLOSED
+        mock_circuit_breaker.record_success.side_effect = transition_to_closed
+
+        scheduler.record_health_check(success=True, latency_ms=50.0, circuit_breaker=mock_circuit_breaker)
+
+        # Should have called record_outage_end
+        mock_history.record_outage_end.assert_called_once()
+        call_args = mock_history.record_outage_end.call_args[0]
+        assert len(call_args) == 1
+
+        # Verify it was called with last_recovery_time
+        state = scheduler.load_state()
+        assert call_args[0] == state.last_recovery_time
+
+    def test_recovery_without_outage_history(self, temp_dir, mock_circuit_breaker):
+        """Recovery without outage_history doesn't raise error."""
+        scheduler = RecoveryScheduler(temp_dir, outage_history=None)
+
+        mock_circuit_breaker.state = CircuitState.HALF_OPEN
+
+        def transition_to_closed():
+            mock_circuit_breaker.state = CircuitState.CLOSED
+        mock_circuit_breaker.record_success.side_effect = transition_to_closed
+
+        # Should not raise exception
+        scheduler.record_health_check(success=True, latency_ms=50.0, circuit_breaker=mock_circuit_breaker)
+
+    def test_no_outage_end_when_circuit_stays_open(self, temp_dir, mock_circuit_breaker):
+        """record_health_check doesn't call record_outage_end when circuit stays OPEN."""
+        from unittest.mock import Mock
+
+        mock_history = Mock()
+        scheduler = RecoveryScheduler(temp_dir, outage_history=mock_history)
+
+        mock_circuit_breaker.state = CircuitState.OPEN
+
+        scheduler.record_health_check(success=False, latency_ms=0.0, circuit_breaker=mock_circuit_breaker)
+
+        # Should NOT have called record_outage_end
+        mock_history.record_outage_end.assert_not_called()
+
+    def test_no_outage_end_when_circuit_stays_half_open(self, temp_dir, mock_circuit_breaker):
+        """record_health_check doesn't call record_outage_end when circuit stays HALF_OPEN."""
+        from unittest.mock import Mock
+
+        mock_history = Mock()
+        scheduler = RecoveryScheduler(temp_dir, outage_history=mock_history)
+
+        # Circuit is HALF_OPEN but doesn't transition to CLOSED
+        mock_circuit_breaker.state = CircuitState.HALF_OPEN
+
+        # No side effect - circuit stays HALF_OPEN
+        scheduler.record_health_check(success=True, latency_ms=50.0, circuit_breaker=mock_circuit_breaker)
+
+        # Should NOT have called record_outage_end (circuit didn't close)
+        mock_history.record_outage_end.assert_not_called()

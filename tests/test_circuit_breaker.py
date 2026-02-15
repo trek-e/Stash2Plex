@@ -535,3 +535,67 @@ class TestCircuitBreakerFileLocking:
         # Verify state can be loaded
         breaker2 = CircuitBreaker(state_file=state_file)
         assert breaker2.state == CircuitState.OPEN
+
+
+class TestCircuitBreakerOutageHistory:
+    """Test outage history integration with circuit breaker."""
+
+    def test_open_records_outage_start(self):
+        """Opening circuit calls outage_history.record_outage_start."""
+        from unittest.mock import Mock
+
+        mock_history = Mock()
+        breaker = CircuitBreaker(failure_threshold=2, outage_history=mock_history)
+
+        # Trigger OPEN transition
+        breaker.record_failure()
+        breaker.record_failure()
+
+        assert breaker.state == CircuitState.OPEN
+
+        # Should have called record_outage_start with opened_at timestamp
+        mock_history.record_outage_start.assert_called_once()
+        call_args = mock_history.record_outage_start.call_args[0]
+        assert len(call_args) == 1
+        assert call_args[0] == breaker._opened_at
+
+    def test_open_without_outage_history(self):
+        """Opening circuit without outage_history doesn't raise error."""
+        breaker = CircuitBreaker(failure_threshold=2, outage_history=None)
+
+        # Should not raise exception
+        breaker.record_failure()
+        breaker.record_failure()
+
+        assert breaker.state == CircuitState.OPEN
+
+    def test_outage_history_parameter_stored(self):
+        """Outage history parameter is stored correctly."""
+        from unittest.mock import Mock
+
+        mock_history = Mock()
+        breaker = CircuitBreaker(outage_history=mock_history)
+
+        assert breaker._outage_history is mock_history
+
+    def test_no_outage_record_on_state_load(self, tmp_path):
+        """Loading persisted OPEN state doesn't record new outage."""
+        from unittest.mock import Mock
+
+        state_file = str(tmp_path / "cb.json")
+
+        # Create breaker and open it (no outage_history)
+        breaker = CircuitBreaker(failure_threshold=2, state_file=state_file)
+        breaker.record_failure()
+        breaker.record_failure()
+        assert breaker.state == CircuitState.OPEN
+
+        # Create new breaker with outage_history - loading should not record
+        mock_history = Mock()
+        breaker2 = CircuitBreaker(state_file=state_file, outage_history=mock_history)
+
+        # Should be OPEN (loaded from file)
+        assert breaker2.state == CircuitState.OPEN
+
+        # Should NOT have called record_outage_start
+        mock_history.record_outage_start.assert_not_called()
