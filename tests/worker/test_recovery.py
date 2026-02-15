@@ -131,14 +131,16 @@ class TestLoadState:
         assert state.last_check_time == 0.0
 
     def test_load_state_missing_fields(self, scheduler, temp_dir):
-        """load_state returns defaults when JSON missing fields."""
+        """load_state uses defaults for missing fields (dataclass behavior)."""
         state_path = os.path.join(temp_dir, 'recovery_state.json')
         with open(state_path, 'w') as f:
             json.dump({'last_check_time': 123.0}, f)  # Missing other fields
 
         state = scheduler.load_state()
         assert isinstance(state, RecoveryState)
-        assert state.last_check_time == 0.0
+        assert state.last_check_time == 123.0  # Provided field
+        assert state.consecutive_successes == 0  # Default for missing field
+        assert state.recovery_count == 0  # Default for missing field
 
 
 class TestSaveState:
