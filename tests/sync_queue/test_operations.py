@@ -131,8 +131,9 @@ class TestAckJob:
         ack_job(mock_queue, job)
 
         captured = capsys.readouterr()
-        assert "99" in captured.out
-        assert "completed" in captured.out.lower()
+        # Logging goes to stderr, not stdout
+        assert "99" in captured.err
+        assert "completed" in captured.err.lower()
 
 
 # =============================================================================
@@ -160,8 +161,9 @@ class TestNackJob:
         nack_job(mock_queue, job)
 
         captured = capsys.readouterr()
-        assert "77" in captured.out
-        assert "retry" in captured.out.lower()
+        # Logging goes to stderr, not stdout
+        assert "77" in captured.err
+        assert "retry" in captured.err.lower()
 
 
 # =============================================================================
@@ -189,8 +191,9 @@ class TestFailJob:
         fail_job(mock_queue, job)
 
         captured = capsys.readouterr()
-        assert "66" in captured.out
-        assert "failed" in captured.out.lower()
+        # Logging goes to stderr, not stdout
+        assert "66" in captured.err
+        assert "failed" in captured.err.lower()
 
 
 # =============================================================================

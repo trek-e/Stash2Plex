@@ -282,16 +282,28 @@ def calculate_outage_metrics(history: List[OutageRecord]) -> Dict[str, float]:
         }
 
     # Calculate total downtime and MTTR
-    total_downtime = sum(r.duration for r in completed if r.duration is not None)
-    mttr = total_downtime / len(completed)
+    # Defense: filter out records with None duration (should never happen but prevents crash)
+    valid_durations = [r.duration for r in completed if r.duration is not None]
+    if not valid_durations:
+        return {
+            'mttr': 0.0,
+            'mtbf': 0.0,
+            'availability': 100.0,
+            'total_downtime': 0.0,
+            'outage_count': 0
+        }
+
+    total_downtime = sum(valid_durations)
+    mttr = total_downtime / len(valid_durations)
 
     # Calculate MTBF (requires >= 2 outages)
     mtbf = 0.0
     if len(completed) >= 2:
-        # Sum time between consecutive outages
+        # Sum time between consecutive outages (end of outage N to start of outage N+1)
         time_between_sum = 0.0
         for i in range(1, len(completed)):
-            time_between_sum += completed[i].started_at - completed[i - 1].started_at
+            # MTBF = uptime = time from end of previous outage to start of next outage
+            time_between_sum += completed[i].started_at - completed[i - 1].ended_at
 
         mtbf = time_between_sum / (len(completed) - 1)
 

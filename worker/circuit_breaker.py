@@ -239,6 +239,10 @@ class CircuitBreaker:
 
     def _close(self) -> None:
         """Transition to CLOSED state."""
+        # Record outage end before clearing opened_at
+        if self._outage_history is not None and self._opened_at is not None:
+            self._outage_history.record_outage_end(time.time())
+
         self._state = CircuitState.CLOSED
         self._opened_at = None
         self._failure_count = 0

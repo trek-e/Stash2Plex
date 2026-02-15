@@ -338,11 +338,11 @@ def test_calculate_metrics_two_completed_outages():
     # MTTR = (60 + 120) / 2 = 90
     assert metrics['mttr'] == 90.0
 
-    # MTBF = (2000 - 1000) / (2 - 1) = 1000
-    assert metrics['mtbf'] == 1000.0
+    # MTBF = uptime = (2000 - 1060) / (2 - 1) = 940 (time from end of outage 1 to start of outage 2)
+    assert metrics['mtbf'] == 940.0
 
-    # Availability = (1000 / (1000 + 90)) * 100 ≈ 91.74%
-    expected_availability = (1000.0 / (1000.0 + 90.0)) * 100
+    # Availability = (940 / (940 + 90)) * 100 ≈ 91.26%
+    expected_availability = (940.0 / (940.0 + 90.0)) * 100
     assert abs(metrics['availability'] - expected_availability) < 0.01
 
     assert metrics['total_downtime'] == 180.0
@@ -361,11 +361,11 @@ def test_calculate_metrics_multiple_outages():
     # MTTR = (30 + 50 + 40) / 3 = 40
     assert metrics['mttr'] == 40.0
 
-    # MTBF = ((2000-1000) + (3000-2000)) / (3-1) = 2000 / 2 = 1000
-    assert metrics['mtbf'] == 1000.0
+    # MTBF = uptime = ((2000-1030) + (3000-2050)) / (3-1) = (970 + 950) / 2 = 960
+    assert metrics['mtbf'] == 960.0
 
-    # Availability = (1000 / (1000 + 40)) * 100 ≈ 96.15%
-    expected_availability = (1000.0 / (1000.0 + 40.0)) * 100
+    # Availability = (960 / (960 + 40)) * 100 = 96.0%
+    expected_availability = (960.0 / (960.0 + 40.0)) * 100
     assert abs(metrics['availability'] - expected_availability) < 0.01
 
     assert metrics['total_downtime'] == 120.0
@@ -383,7 +383,7 @@ def test_calculate_metrics_mixed_ongoing_and_completed():
 
     # Only 2 completed outages
     assert metrics['mttr'] == 90.0  # (60 + 120) / 2
-    assert metrics['mtbf'] == 2000.0  # (3000 - 1000) / 1
+    assert metrics['mtbf'] == 1940.0  # uptime = (3000 - 1060) / 1
     assert metrics['total_downtime'] == 180.0
     assert metrics['outage_count'] == 2
 
@@ -446,4 +446,4 @@ def test_metrics_from_history_manager(temp_data_dir):
 
     assert metrics['outage_count'] == 3
     assert metrics['mttr'] == 40.0
-    assert metrics['mtbf'] == 1000.0
+    assert metrics['mtbf'] == 960.0  # uptime = ((2000-1030) + (3000-2050)) / 2 = 960

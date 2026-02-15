@@ -12,6 +12,10 @@ import sqlite3
 import time
 from typing import Optional
 
+from shared.log import create_logger
+
+log_trace, log_debug, log_info, log_warn, log_error = create_logger("Queue")
+
 # Simple counter for job IDs (resets on restart, used for log correlation only)
 _job_counter = itertools.count(1)
 
@@ -54,7 +58,7 @@ def enqueue(queue: 'persistqueue.SQLiteAckQueue', scene_id: int, update_type: st
     }
 
     queue.put(job)
-    print(f"Enqueued sync job for scene {scene_id}")
+    log_trace(f"Enqueued sync job for scene {scene_id}")
 
     return job
 
@@ -87,7 +91,7 @@ def ack_job(queue: 'persistqueue.SQLiteAckQueue', job: dict):
     """
     queue.ack(job)
     pqid = job.get('pqid', '?')
-    print(f"Job {pqid} completed")
+    log_trace(f"Job {pqid} completed")
 
 
 def nack_job(queue: 'persistqueue.SQLiteAckQueue', job: dict):
@@ -100,7 +104,7 @@ def nack_job(queue: 'persistqueue.SQLiteAckQueue', job: dict):
     """
     queue.nack(job)
     pqid = job.get('pqid', '?')
-    print(f"Job {pqid} returned to queue for retry")
+    log_trace(f"Job {pqid} returned to queue for retry")
 
 
 def fail_job(queue: 'persistqueue.SQLiteAckQueue', job: dict):
@@ -113,7 +117,7 @@ def fail_job(queue: 'persistqueue.SQLiteAckQueue', job: dict):
     """
     queue.ack_failed(job)
     pqid = job.get('pqid', '?')
-    print(f"Job {pqid} marked as failed")
+    log_debug(f"Job {pqid} marked as failed")
 
 
 def get_stats(queue_path: str) -> dict:
