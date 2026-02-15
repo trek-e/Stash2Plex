@@ -25,7 +25,7 @@
 **Milestone Goal:** Automatic recovery when Plex comes back online after downtime — queue drains without user interaction, circuit breaker state persists across restarts, and health monitoring provides visibility into outage/recovery status.
 
 - [x] **Phase 17: Circuit Breaker Persistence** - Circuit breaker state survives plugin restarts — completed 2026-02-15
-- [ ] **Phase 18: Health Check Infrastructure** - Lightweight Plex connectivity validation
+- [x] **Phase 18: Health Check Infrastructure** - Lightweight Plex connectivity validation — completed 2026-02-15
 - [ ] **Phase 19: Recovery Detection & Automation** - Automatic Plex recovery detection with queue drain
 - [ ] **Phase 20: Graduated Recovery & Rate Limiting** - Rate-limited queue draining prevents overwhelming recovered Plex
 - [ ] **Phase 21: Outage Visibility & History** - Enhanced status UI with outage tracking and history
@@ -61,8 +61,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 18-01-PLAN.md --- TDD: Deep health check function using server.query('/identity')
-- [ ] 18-02-PLAN.md --- Manual health check task + active health probes in worker loop
+- [x] 18-01-PLAN.md --- TDD: Deep health check function using server.query('/identity')
+- [x] 18-02-PLAN.md --- Manual health check task + active health probes in worker loop
 
 ### Phase 19: Recovery Detection & Automation
 **Goal**: Plugin automatically detects when Plex recovers from outage and drains pending queue without user interaction
@@ -133,11 +133,11 @@ Phases execute in numeric order: 17 → 18 → 19 → 20 → 21 → 22
 | 15. Manual Reconciliation | v1.4 | 1/1 | ✓ Complete | 2026-02-14 |
 | 16. Automated Reconciliation & Reporting | v1.4 | 2/2 | ✓ Complete | 2026-02-14 |
 | 17. Circuit Breaker Persistence | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
-| 18. Health Check Infrastructure | v1.5 | 0/TBD | Not started | - |
+| 18. Health Check Infrastructure | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
 | 19. Recovery Detection & Automation | v1.5 | 0/TBD | Not started | - |
 | 20. Graduated Recovery & Rate Limiting | v1.5 | 0/TBD | Not started | - |
 | 21. Outage Visibility & History | v1.5 | 0/TBD | Not started | - |
 | 22. DLQ Recovery for Outage Jobs | v1.5 | 0/TBD | Not started | - |
 
 ---
-*Last updated: 2026-02-15 after v1.5 roadmap creation*
+*Last updated: 2026-02-15 after Phase 18 completion*
