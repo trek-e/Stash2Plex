@@ -845,6 +845,59 @@ def handle_reconcile(scope: str):
         traceback.print_exc()
 
 
+def maybe_check_recovery():
+    """Check if recovery detection is due and run it if so.
+
+    Called on every plugin invocation (hook or task) BEFORE maybe_auto_reconcile().
+    If circuit breaker is OPEN/HALF_OPEN and check interval has elapsed, probes
+    Plex health and transitions circuit breaker state based on result.
+
+    This is a lightweight check when circuit is CLOSED (reads circuit state only).
+    Only creates PlexClient and runs health check when recovery probe is actually due.
+    """
+    if not config or not worker:
+        return
+
+    try:
+        # Quick check: if circuit is CLOSED, nothing to recover
+        circuit_state = worker.circuit_breaker.state
+        from worker.circuit_breaker import CircuitState
+        if circuit_state == CircuitState.CLOSED:
+            return
+
+        data_dir = get_plugin_data_dir()
+        from worker.recovery import RecoveryScheduler
+
+        scheduler = RecoveryScheduler(data_dir)
+
+        if not scheduler.should_check_recovery(circuit_state):
+            return
+
+        # Recovery probe is due - run health check
+        from plex.client import PlexClient
+        from plex.health import check_plex_health
+
+        client = PlexClient(
+            url=config.plex_url,
+            token=config.plex_token,
+            connect_timeout=5.0,
+            read_timeout=5.0
+        )
+
+        is_healthy, latency_ms = check_plex_health(client, timeout=5.0)
+        scheduler.record_health_check(is_healthy, latency_ms, worker.circuit_breaker)
+
+        # Log queue drain info if recovery completed
+        if is_healthy and worker.circuit_breaker.state == CircuitState.CLOSED:
+            queue = queue_manager.get_queue() if queue_manager else None
+            pending = queue.size if queue else 0
+            if pending > 0:
+                log_info(f"Queue will drain automatically ({pending} jobs pending)")
+
+    except Exception as e:
+        log_debug(f"Recovery check failed: {e}")
+
+
 def maybe_auto_reconcile():
     """Check if auto-reconciliation is due and run it if so.
 
@@ -1215,6 +1268,9 @@ def main():
     if config and not config.enabled:
         print(json.dumps({"output": "disabled"}))
         return
+
+    # Recovery detection (runs on every invocation, lightweight when circuit CLOSED)
+    maybe_check_recovery()
 
     # Auto-reconciliation check (runs on every invocation, lightweight)
     maybe_auto_reconcile()
