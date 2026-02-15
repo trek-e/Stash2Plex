@@ -62,15 +62,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| RECV-01 | Phase 19 | Pending |
-| RECV-02 | Phase 19 | Pending |
-| RECV-03 | Phase 19 | Pending |
+| RECV-01 | Phase 19 | Complete |
+| RECV-02 | Phase 19 | Complete |
+| RECV-03 | Phase 19 | Complete |
 | RECV-04 | Phase 20 | Pending |
 | HLTH-01 | Phase 18 | Complete |
 | HLTH-02 | Phase 18 | Complete |
 | HLTH-03 | Phase 18 | Complete |
 | STAT-01 | Phase 17 | Complete |
-| STAT-02 | Phase 19 | Pending |
+| STAT-02 | Phase 19 | Complete |
 | VISB-01 | Phase 21 | Pending |
 | VISB-02 | Phase 17 | Complete |
 | VISB-03 | Phase 21 | Pending |

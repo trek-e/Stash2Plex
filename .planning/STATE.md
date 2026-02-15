@@ -80,7 +80,7 @@ None yet. Research indicates zero new dependencies needed (stdlib + plexapi).
 Last session: 2026-02-15 (plan execution)
 Stopped at: Completed 19-02-PLAN.md (Worker Loop Integration) — Phase 19 complete
 Resume file: None
-Next step: Phase 19 complete, ready for v1.5 milestone release or proceed to Phase 20
+Next step: Begin Phase 20 (Graduated Recovery & Rate Limiting)
 
 ---
 *Last updated: 2026-02-15 after completing plan 19-02 (2 of 2 in phase 19) — Phase 19 COMPLETE*
