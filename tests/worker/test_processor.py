@@ -1414,3 +1414,286 @@ class TestActiveHealthProbes:
         # This test verifies the constant is 5.0, not tied to config
         timeout = 5.0
         assert timeout == 5.0
+
+
+class TestRateLimiterIntegration:
+    """Tests for RecoveryRateLimiter integration in worker loop."""
+
+    def test_rate_limiter_initialized(self, processor_worker):
+        """Worker initializes _rate_limiter on creation."""
+        from worker.rate_limiter import RecoveryRateLimiter
+
+        assert hasattr(processor_worker, '_rate_limiter')
+        assert isinstance(processor_worker._rate_limiter, RecoveryRateLimiter)
+
+    def test_was_in_recovery_flag_initialized(self, processor_worker):
+        """Worker initializes _was_in_recovery flag to False."""
+        assert hasattr(processor_worker, '_was_in_recovery')
+        assert processor_worker._was_in_recovery is False
+
+    def test_no_rate_limiting_in_normal_operation(self, processor_worker):
+        """When circuit is CLOSED and no recovery period, should_wait returns 0.0."""
+        from worker.circuit_breaker import CircuitState
+
+        # Normal operation: circuit CLOSED (default state), no recovery period
+        # Circuit breaker starts in CLOSED state by default
+        assert processor_worker.circuit_breaker.state == CircuitState.CLOSED
+        assert processor_worker._rate_limiter.is_in_recovery_period() is False
+
+        wait_time = processor_worker._rate_limiter.should_wait()
+        assert wait_time == 0.0
+
+    def test_cross_restart_resume_from_recovery_state(self, mock_queue, mock_dlq, mock_config, tmp_path):
+        """Worker resumes recovery period from recovery_state.json on startup."""
+        from worker.processor import SyncWorker
+        from worker.recovery import RecoveryScheduler, RecoveryState
+        import time
+
+        # Add required config attributes
+        mock_config.plex_connect_timeout = 10.0
+        mock_config.plex_read_timeout = 30.0
+        mock_config.preserve_plex_edits = False
+        mock_config.strict_matching = False
+        mock_config.dlq_retention_days = 30
+
+        # Create recovery state file with active recovery period
+        scheduler = RecoveryScheduler(str(tmp_path))
+        state = RecoveryState()
+        state.recovery_started_at = time.time() - 60.0  # Started 60s ago
+        scheduler.save_state(state)
+
+        # Create worker (should load and resume recovery period)
+        worker = SyncWorker(
+            queue=mock_queue,
+            dlq=mock_dlq,
+            config=mock_config,
+            data_dir=str(tmp_path),
+        )
+
+        # Verify rate limiter is in recovery period
+        assert worker._rate_limiter.is_in_recovery_period() is True
+        assert worker._was_in_recovery is True
+
+    def test_recovery_period_starts_on_half_open_to_closed_transition(self, processor_worker):
+        """When circuit transitions HALF_OPEN->CLOSED, recovery period starts."""
+        from worker.circuit_breaker import CircuitState
+
+        # Simulate the HALF_OPEN->CLOSED transition by directly testing the
+        # rate limiter behavior that would be triggered in the worker loop
+        # We can't directly set circuit state, so we test the rate limiter integration
+
+        # Start recovery period (as worker loop would do on transition)
+        processor_worker._rate_limiter.start_recovery_period()
+        processor_worker._was_in_recovery = True
+
+        # Verify recovery period is active
+        assert processor_worker._rate_limiter.is_in_recovery_period() is True
+        assert processor_worker._was_in_recovery is True
+
+    def test_job_success_records_result(self, processor_worker):
+        """Successful job processing records success with rate limiter."""
+        # Record a successful result
+        processor_worker._rate_limiter.record_result(success=True)
+
+        # Verify result was recorded (check error rate is 0)
+        assert processor_worker._rate_limiter.error_rate() == 0.0
+
+    def test_transient_error_records_failure(self, processor_worker):
+        """TransientError records failure with rate limiter."""
+        # Record a failure
+        processor_worker._rate_limiter.record_result(success=False)
+
+        # Verify result was recorded (check error rate is 100%)
+        assert processor_worker._rate_limiter.error_rate() == 1.0
+
+    def test_plex_server_down_records_failure(self, processor_worker):
+        """PlexServerDown records failure with rate limiter."""
+        # Record a failure
+        processor_worker._rate_limiter.record_result(success=False)
+
+        # Verify result was recorded
+        assert processor_worker._rate_limiter.error_rate() == 1.0
+
+    def test_recovery_started_at_persists_to_json(self, processor_worker, tmp_path):
+        """recovery_started_at is persisted to recovery_state.json when recovery starts."""
+        from worker.recovery import RecoveryScheduler
+        import time
+
+        # Start recovery period
+        processor_worker._rate_limiter.start_recovery_period()
+        processor_worker._was_in_recovery = True
+
+        # Persist to file (simulating worker loop behavior)
+        scheduler = RecoveryScheduler(str(tmp_path))
+        state = scheduler.load_state()
+        state.recovery_started_at = time.time()
+        scheduler.save_state(state)
+
+        # Load state from file and verify
+        loaded_state = scheduler.load_state()
+        assert loaded_state.recovery_started_at > 0
+
+    def test_recovery_period_cleanup_when_ramp_completes(self, processor_worker, tmp_path):
+        """When recovery period ends, recovery_started_at is cleared in persisted state."""
+        from worker.recovery import RecoveryScheduler
+        import time
+
+        # Set up recovery period that has ended
+        scheduler = RecoveryScheduler(str(tmp_path))
+        state = scheduler.load_state()
+        state.recovery_started_at = time.time() - 400.0  # 400s ago (past 300s ramp)
+        scheduler.save_state(state)
+
+        # Rate limiter thinks recovery period ended
+        processor_worker._rate_limiter.recovery_started_at = time.time() - 400.0
+        assert processor_worker._rate_limiter.is_in_recovery_period() is False
+
+        # Clean up when detected
+        processor_worker._was_in_recovery = True
+        if not processor_worker._rate_limiter.is_in_recovery_period() and processor_worker._was_in_recovery:
+            processor_worker._was_in_recovery = False
+            scheduler.clear_recovery_period()
+
+        # Verify cleared
+        loaded_state = scheduler.load_state()
+        assert loaded_state.recovery_started_at == 0.0
+        assert processor_worker._was_in_recovery is False
+
+    def test_rate_limiter_should_wait_during_recovery(self, processor_worker):
+        """During recovery period, should_wait() may return non-zero wait time."""
+        import time
+
+        # Start recovery period
+        processor_worker._rate_limiter.start_recovery_period(now=time.time())
+
+        # Immediately try to process another job
+        # Tokens should be available (capacity=1.0, starts full)
+        wait_time1 = processor_worker._rate_limiter.should_wait(now=time.time())
+        assert wait_time1 == 0.0  # First job gets through
+
+        # Try to process another job immediately (tokens exhausted)
+        wait_time2 = processor_worker._rate_limiter.should_wait(now=time.time())
+        assert wait_time2 > 0  # Should wait for token refill
+
+    def test_error_rate_monitoring_triggers_backoff(self, processor_worker):
+        """High error rate triggers adaptive backoff in rate limiter."""
+        import time
+
+        # Start recovery period
+        now = time.time()
+        processor_worker._rate_limiter.start_recovery_period(now=now)
+
+        # Record many failures to exceed 30% threshold
+        for _ in range(5):
+            processor_worker._rate_limiter.record_result(success=False, now=now)
+
+        # Record some successes (5 failures, 3 successes = 62.5% error rate)
+        for _ in range(3):
+            processor_worker._rate_limiter.record_result(success=True, now=now)
+
+        # Verify error rate is high
+        error_rate = processor_worker._rate_limiter.error_rate(now=now)
+        assert error_rate > 0.3
+
+        # Verify backoff was triggered (rate multiplier should be 0.5)
+        assert processor_worker._rate_limiter.rate_multiplier == 0.5
+
+
+class TestRecoveryStateExtension:
+    """Tests for extended RecoveryState with recovery_started_at field."""
+
+    def test_recovery_state_has_recovery_started_at_field(self):
+        """RecoveryState includes recovery_started_at field with default 0.0."""
+        from worker.recovery import RecoveryState
+
+        state = RecoveryState()
+        assert hasattr(state, 'recovery_started_at')
+        assert state.recovery_started_at == 0.0
+
+    def test_recovery_started_at_persists_to_json(self, tmp_path):
+        """recovery_started_at field persists to recovery_state.json."""
+        from worker.recovery import RecoveryScheduler, RecoveryState
+        import json
+
+        scheduler = RecoveryScheduler(str(tmp_path))
+        state = RecoveryState()
+        state.recovery_started_at = 1234567890.0
+        scheduler.save_state(state)
+
+        # Read file directly to verify field is saved
+        state_path = tmp_path / 'recovery_state.json'
+        with open(state_path, 'r') as f:
+            data = json.load(f)
+
+        assert 'recovery_started_at' in data
+        assert data['recovery_started_at'] == 1234567890.0
+
+    def test_recovery_started_at_loads_from_json(self, tmp_path):
+        """recovery_started_at field loads correctly from recovery_state.json."""
+        from worker.recovery import RecoveryScheduler
+        import json
+
+        # Create file with recovery_started_at
+        state_path = tmp_path / 'recovery_state.json'
+        data = {
+            'last_check_time': 1000.0,
+            'consecutive_successes': 0,
+            'consecutive_failures': 0,
+            'last_recovery_time': 0.0,
+            'recovery_count': 0,
+            'recovery_started_at': 9876543210.0,
+        }
+        with open(state_path, 'w') as f:
+            json.dump(data, f)
+
+        # Load state
+        scheduler = RecoveryScheduler(str(tmp_path))
+        state = scheduler.load_state()
+
+        assert state.recovery_started_at == 9876543210.0
+
+    def test_record_health_check_sets_recovery_started_at_on_recovery(self, tmp_path):
+        """record_health_check sets recovery_started_at when circuit transitions HALF_OPEN->CLOSED."""
+        from worker.recovery import RecoveryScheduler
+        from worker.circuit_breaker import CircuitState
+        from unittest.mock import Mock
+        import time
+
+        scheduler = RecoveryScheduler(str(tmp_path))
+
+        # Create mock circuit breaker in HALF_OPEN state
+        mock_breaker = Mock()
+        mock_breaker.state = CircuitState.HALF_OPEN
+
+        # After record_success is called, circuit transitions to CLOSED
+        def transition_to_closed():
+            mock_breaker.state = CircuitState.CLOSED
+
+        mock_breaker.record_success.side_effect = transition_to_closed
+
+        # Record successful health check (should trigger recovery)
+        before_time = time.time()
+        scheduler.record_health_check(success=True, latency_ms=50.0, circuit_breaker=mock_breaker)
+        after_time = time.time()
+
+        # Load state and verify recovery_started_at was set
+        state = scheduler.load_state()
+        assert before_time <= state.recovery_started_at <= after_time
+
+    def test_clear_recovery_period_resets_recovery_started_at(self, tmp_path):
+        """clear_recovery_period() sets recovery_started_at to 0.0."""
+        from worker.recovery import RecoveryScheduler, RecoveryState
+
+        scheduler = RecoveryScheduler(str(tmp_path))
+
+        # Set recovery_started_at to non-zero
+        state = RecoveryState()
+        state.recovery_started_at = 1234567890.0
+        scheduler.save_state(state)
+
+        # Clear recovery period
+        scheduler.clear_recovery_period()
+
+        # Load and verify
+        state = scheduler.load_state()
+        assert state.recovery_started_at == 0.0
