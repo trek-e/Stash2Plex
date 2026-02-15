@@ -307,3 +307,224 @@ class TestOutageUIHandlers:
 
         assert 'outage_summary' in source
         assert "management_modes = {" in source
+
+    # === Recover Outage Jobs Tests ===
+
+    def test_recover_outage_jobs_in_management_handlers(self):
+        """Verify recover_outage_jobs is registered in _MANAGEMENT_HANDLERS."""
+        from Stash2Plex import _MANAGEMENT_HANDLERS
+
+        assert 'recover_outage_jobs' in _MANAGEMENT_HANDLERS
+
+    def test_recover_outage_jobs_in_management_modes(self):
+        """Verify recover_outage_jobs is in management_modes set."""
+        import Stash2Plex
+        source = open(Stash2Plex.__file__).read()
+
+        assert 'recover_outage_jobs' in source
+        assert "management_modes = {" in source
+
+    @patch('Stash2Plex.get_plugin_data_dir')
+    def test_handle_recover_outage_jobs_no_outages(self, mock_get_data_dir):
+        """handle_recover_outage_jobs logs 'No outage history found' when history is empty."""
+        from Stash2Plex import handle_recover_outage_jobs
+
+        mock_get_data_dir.return_value = "/tmp/test_data"
+
+        with patch('worker.outage_history.OutageHistory') as MockHistory, \
+             patch('Stash2Plex.log_info') as mock_log_info:
+
+            # Mock empty history
+            mock_history_instance = MockHistory.return_value
+            mock_history_instance.get_history.return_value = []
+
+            handle_recover_outage_jobs()
+
+            # Verify "No outage history found" was logged
+            log_calls = [call[0][0] for call in mock_log_info.call_args_list]
+            assert any("No outage history found" in msg for msg in log_calls)
+
+    @patch('Stash2Plex.get_plugin_data_dir')
+    def test_handle_recover_outage_jobs_no_completed_outages(self, mock_get_data_dir):
+        """handle_recover_outage_jobs logs error when no completed outages exist."""
+        from Stash2Plex import handle_recover_outage_jobs
+        from worker.outage_history import OutageRecord
+
+        mock_get_data_dir.return_value = "/tmp/test_data"
+
+        # Create ongoing outage (no ended_at)
+        records = [
+            OutageRecord(started_at=1000.0, ended_at=None, duration=0.0, jobs_affected=0)
+        ]
+
+        with patch('worker.outage_history.OutageHistory') as MockHistory, \
+             patch('Stash2Plex.log_info') as mock_log_info:
+
+            mock_history_instance = MockHistory.return_value
+            mock_history_instance.get_history.return_value = records
+
+            handle_recover_outage_jobs()
+
+            # Verify "No completed outages found" was logged
+            log_calls = [call[0][0] for call in mock_log_info.call_args_list]
+            assert any("No completed outages found" in msg for msg in log_calls)
+
+    @patch('Stash2Plex.get_plugin_data_dir')
+    def test_handle_recover_outage_jobs_no_dlq_entries(self, mock_get_data_dir):
+        """handle_recover_outage_jobs logs when no recoverable DLQ entries found."""
+        from Stash2Plex import handle_recover_outage_jobs
+        from worker.outage_history import OutageRecord
+
+        mock_get_data_dir.return_value = "/tmp/test_data"
+
+        # Completed outage
+        records = [
+            OutageRecord(started_at=1000.0, ended_at=1060.0, duration=60.0, jobs_affected=0)
+        ]
+
+        with patch('worker.outage_history.OutageHistory') as MockHistory, \
+             patch('sync_queue.dlq.DeadLetterQueue') as MockDLQ, \
+             patch('sync_queue.dlq_recovery.get_outage_dlq_entries') as mock_get_entries, \
+             patch('sync_queue.dlq_recovery.get_error_types_for_recovery') as mock_get_error_types, \
+             patch('Stash2Plex.log_info') as mock_log_info:
+
+            mock_history_instance = MockHistory.return_value
+            mock_history_instance.get_history.return_value = records
+
+            # Mock no DLQ entries found
+            mock_get_entries.return_value = []
+            mock_get_error_types.return_value = ["PlexServerDown"]
+
+            handle_recover_outage_jobs()
+
+            # Verify "No recoverable DLQ entries found" was logged
+            log_calls = [call[0][0] for call in mock_log_info.call_args_list]
+            assert any("No recoverable DLQ entries found" in msg for msg in log_calls)
+
+    @patch('Stash2Plex.stash_interface')
+    @patch('Stash2Plex.queue_manager')
+    @patch('Stash2Plex.config')
+    @patch('Stash2Plex.get_plugin_data_dir')
+    def test_handle_recover_outage_jobs_successful_recovery(self, mock_get_data_dir, mock_config, mock_queue_manager, mock_stash):
+        """handle_recover_outage_jobs successfully recovers DLQ entries."""
+        from Stash2Plex import handle_recover_outage_jobs
+        from worker.outage_history import OutageRecord
+        from sync_queue.dlq_recovery import RecoveryResult
+
+        mock_get_data_dir.return_value = "/tmp/test_data"
+
+        # Setup config
+        mock_config.plex_url = "http://localhost:32400"
+        mock_config.plex_token = "test-token"
+
+        # Completed outage
+        records = [
+            OutageRecord(started_at=1000.0, ended_at=1060.0, duration=60.0, jobs_affected=2)
+        ]
+
+        # Mock DLQ entries
+        dlq_entries = [
+            {'id': 1, 'scene_id': 101, 'error_type': 'PlexServerDown'},
+            {'id': 2, 'scene_id': 102, 'error_type': 'PlexServerDown'}
+        ]
+
+        # Mock recovery result
+        recovery_result = RecoveryResult(
+            total_dlq_entries=2,
+            recovered=2,
+            skipped_already_queued=0,
+            skipped_plex_down=0,
+            skipped_scene_missing=0,
+            failed=0,
+            recovered_scene_ids=[101, 102]
+        )
+
+        with patch('worker.outage_history.OutageHistory') as MockHistory, \
+             patch('sync_queue.dlq.DeadLetterQueue') as MockDLQ, \
+             patch('sync_queue.dlq_recovery.get_outage_dlq_entries') as mock_get_entries, \
+             patch('sync_queue.dlq_recovery.get_error_types_for_recovery') as mock_get_error_types, \
+             patch('sync_queue.dlq_recovery.recover_outage_jobs') as mock_recover, \
+             patch('Stash2Plex.log_info') as mock_log_info:
+
+            mock_history_instance = MockHistory.return_value
+            mock_history_instance.get_history.return_value = records
+
+            mock_get_entries.return_value = dlq_entries
+            mock_get_error_types.return_value = ["PlexServerDown"]
+            mock_recover.return_value = recovery_result
+
+            # Mock queue manager
+            mock_queue = MagicMock()
+            mock_queue_manager.get_queue.return_value = mock_queue
+
+            handle_recover_outage_jobs()
+
+            # Verify recovery was called
+            mock_recover.assert_called_once()
+
+            # Verify results were logged
+            log_calls = [call[0][0] for call in mock_log_info.call_args_list]
+            log_output = " ".join(log_calls)
+
+            assert "Recovery complete: 2 recovered" in log_output
+            assert "Re-queued scene IDs" in log_output
+
+    @patch('Stash2Plex.get_plugin_data_dir')
+    def test_handle_recover_outage_jobs_uses_conservative_defaults(self, mock_get_data_dir):
+        """handle_recover_outage_jobs uses conservative defaults (PlexServerDown only)."""
+        from Stash2Plex import handle_recover_outage_jobs
+        from worker.outage_history import OutageRecord
+
+        mock_get_data_dir.return_value = "/tmp/test_data"
+
+        # Completed outage
+        records = [
+            OutageRecord(started_at=1000.0, ended_at=1060.0, duration=60.0, jobs_affected=0)
+        ]
+
+        with patch('worker.outage_history.OutageHistory') as MockHistory, \
+             patch('sync_queue.dlq.DeadLetterQueue') as MockDLQ, \
+             patch('sync_queue.dlq_recovery.get_outage_dlq_entries') as mock_get_entries, \
+             patch('sync_queue.dlq_recovery.get_error_types_for_recovery') as mock_get_error_types, \
+             patch('Stash2Plex.log_info') as mock_log_info:
+
+            mock_history_instance = MockHistory.return_value
+            mock_history_instance.get_history.return_value = records
+
+            mock_get_entries.return_value = []
+            mock_get_error_types.return_value = ["PlexServerDown"]
+
+            handle_recover_outage_jobs()
+
+            # Verify get_error_types_for_recovery was called with include_optional=False
+            mock_get_error_types.assert_called_once_with(include_optional=False)
+
+            # Verify conservative filter was logged
+            log_calls = [call[0][0] for call in mock_log_info.call_args_list]
+            log_output = " ".join(log_calls)
+            assert "Recovery filter: PlexServerDown" in log_output
+
+    def test_recover_outage_jobs_task_registered_in_yml(self):
+        """Verify 'Recover Outage Jobs' task exists in Stash2Plex.yml."""
+        import os
+
+        yml_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'Stash2Plex.yml')
+        with open(yml_path, 'r') as f:
+            yml_content = f.read()
+
+        # Verify task exists with correct structure
+        assert 'Recover Outage Jobs' in yml_content, "Task name not found in Stash2Plex.yml"
+        assert 'mode: recover_outage_jobs' in yml_content, "Task mode not found in Stash2Plex.yml"
+
+        # Verify description contains key information
+        lines = yml_content.split('\n')
+        found_task = False
+        for i, line in enumerate(lines):
+            if 'Recover Outage Jobs' in line:
+                found_task = True
+                # Check nearby lines for description
+                context = '\n'.join(lines[max(0, i-2):min(len(lines), i+5)])
+                assert 'PlexServerDown' in context, "Description should mention PlexServerDown errors"
+                break
+
+        assert found_task, "Could not find 'Recover Outage Jobs' task in yml"
