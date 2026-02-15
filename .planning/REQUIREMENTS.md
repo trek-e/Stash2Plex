@@ -62,27 +62,35 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| RECV-01 | — | Pending |
-| RECV-02 | — | Pending |
-| RECV-03 | — | Pending |
-| RECV-04 | — | Pending |
-| HLTH-01 | — | Pending |
-| HLTH-02 | — | Pending |
-| HLTH-03 | — | Pending |
-| STAT-01 | — | Pending |
-| STAT-02 | — | Pending |
-| VISB-01 | — | Pending |
-| VISB-02 | — | Pending |
-| VISB-03 | — | Pending |
-| VISB-04 | — | Pending |
-| DLQM-01 | — | Pending |
-| DLQM-02 | — | Pending |
+| RECV-01 | Phase 19 | Pending |
+| RECV-02 | Phase 19 | Pending |
+| RECV-03 | Phase 19 | Pending |
+| RECV-04 | Phase 20 | Pending |
+| HLTH-01 | Phase 18 | Pending |
+| HLTH-02 | Phase 18 | Pending |
+| HLTH-03 | Phase 18 | Pending |
+| STAT-01 | Phase 17 | Pending |
+| STAT-02 | Phase 19 | Pending |
+| VISB-01 | Phase 21 | Pending |
+| VISB-02 | Phase 17 | Pending |
+| VISB-03 | Phase 21 | Pending |
+| VISB-04 | Phase 21 | Pending |
+| DLQM-01 | Phase 22 | Pending |
+| DLQM-02 | Phase 22 | Pending |
 
 **Coverage:**
 - v1.5 requirements: 15 total
-- Mapped to phases: 0
-- Unmapped: 15 ⚠️
+- Mapped to phases: 15 (100%)
+- Unmapped: 0 ✓
+
+**Phase Distribution:**
+- Phase 17 (Circuit Breaker Persistence): 2 requirements
+- Phase 18 (Health Check Infrastructure): 3 requirements
+- Phase 19 (Recovery Detection & Automation): 4 requirements
+- Phase 20 (Graduated Recovery & Rate Limiting): 1 requirement
+- Phase 21 (Outage Visibility & History): 3 requirements
+- Phase 22 (DLQ Recovery for Outage Jobs): 2 requirements
 
 ---
 *Requirements defined: 2026-02-15*
-*Last updated: 2026-02-15 after initial definition*
+*Last updated: 2026-02-15 after roadmap creation (100% coverage validated)*
