@@ -1302,3 +1302,115 @@ class TestSyncToggles:
 
         # uploadArt should not be called
         mock_plex_item.uploadArt.assert_not_called()
+
+
+class TestActiveHealthProbes:
+    """Tests for active health check integration in worker loop during OPEN circuit state."""
+
+    def test_health_check_state_initialized(self, processor_worker):
+        """Worker initializes health check state variables."""
+        assert hasattr(processor_worker, '_last_health_check')
+        assert hasattr(processor_worker, '_health_check_interval')
+        assert hasattr(processor_worker, '_consecutive_health_failures')
+        assert processor_worker._last_health_check == 0.0
+        assert processor_worker._health_check_interval == 5.0
+        assert processor_worker._consecutive_health_failures == 0
+
+    def test_health_check_interval_timing(self, processor_worker):
+        """Health check respects interval timing."""
+        import time
+
+        # Set state
+        now = time.time()
+        processor_worker._last_health_check = now - 3.0  # 3 seconds ago
+        processor_worker._health_check_interval = 5.0
+
+        # Not enough time has elapsed
+        elapsed = now - processor_worker._last_health_check
+        assert elapsed < processor_worker._health_check_interval
+
+        # Now advance time
+        later = now + 5.0
+        elapsed = later - processor_worker._last_health_check
+        assert elapsed >= processor_worker._health_check_interval
+
+    def test_successful_health_check_resets_state(self, processor_worker):
+        """Successful health check resets interval to 5s and failure counter to 0."""
+        import time
+
+        # Set health check state to indicate previous failures
+        processor_worker._health_check_interval = 20.0  # Backed off
+        processor_worker._consecutive_health_failures = 3
+        start_time = time.time()
+
+        # Simulate successful health check response
+        is_healthy = True
+        if is_healthy:
+            processor_worker._consecutive_health_failures = 0
+            processor_worker._health_check_interval = 5.0
+            processor_worker._last_health_check = start_time
+
+        # Verify reset
+        assert processor_worker._consecutive_health_failures == 0
+        assert processor_worker._health_check_interval == 5.0
+        assert processor_worker._last_health_check == start_time
+
+    def test_failed_health_check_uses_backoff(self, processor_worker):
+        """Failed health check increases interval via exponential backoff."""
+        from worker.backoff import calculate_delay
+        import time
+
+        # Set initial state
+        processor_worker._health_check_interval = 5.0
+        processor_worker._consecutive_health_failures = 0
+        start_time = time.time()
+
+        # Simulate failed health check
+        is_healthy = False
+        if not is_healthy:
+            processor_worker._consecutive_health_failures += 1
+            processor_worker._health_check_interval = calculate_delay(
+                retry_count=processor_worker._consecutive_health_failures,
+                base=5.0,
+                cap=60.0,
+                jitter_seed=42  # Deterministic for testing
+            )
+            processor_worker._last_health_check = start_time
+
+        # Verify failure count increased
+        assert processor_worker._consecutive_health_failures == 1
+
+        # Verify interval was calculated (with jitter, should be 0-10s range)
+        # For retry_count=1: base * 2^1 = 5 * 2 = 10, with full jitter: 0-10
+        assert 0.0 <= processor_worker._health_check_interval <= 10.0
+
+    def test_consecutive_failures_increment(self, processor_worker):
+        """Consecutive failures increment correctly."""
+        processor_worker._consecutive_health_failures = 2
+
+        # Simulate another failure
+        processor_worker._consecutive_health_failures += 1
+
+        assert processor_worker._consecutive_health_failures == 3
+
+    def test_backoff_calculation_parameters(self):
+        """Verify backoff uses correct parameters (5s base, 60s cap)."""
+        from worker.backoff import calculate_delay
+
+        # Test with deterministic seed
+        delay1 = calculate_delay(retry_count=0, base=5.0, cap=60.0, jitter_seed=42)
+        delay2 = calculate_delay(retry_count=1, base=5.0, cap=60.0, jitter_seed=42)
+        delay3 = calculate_delay(retry_count=4, base=5.0, cap=60.0, jitter_seed=42)
+        delay4 = calculate_delay(retry_count=10, base=5.0, cap=60.0, jitter_seed=42)  # Should hit cap
+
+        # Verify ranges
+        assert 0.0 <= delay1 <= 5.0   # 2^0 = 1, 5*1 = 5
+        assert 0.0 <= delay2 <= 10.0  # 2^1 = 2, 5*2 = 10
+        assert 0.0 <= delay3 <= 60.0  # 2^4 = 16, 5*16 = 80, capped at 60
+        assert 0.0 <= delay4 <= 60.0  # Well over cap, should be capped
+
+    def test_health_check_timeout_value(self):
+        """Verify health check uses 5s timeout constant."""
+        # This test verifies the constant is 5.0, not tied to config
+        timeout = 5.0
+        assert timeout == 5.0

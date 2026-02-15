@@ -113,6 +113,11 @@ class SyncWorker:
             state_file=cb_state_file
         )
 
+        # Health check state for active probes during OPEN circuit
+        self._last_health_check: float = 0.0
+        self._health_check_interval: float = 5.0  # Initial: 5s
+        self._consecutive_health_failures: int = 0
+
     def start(self):
         """Start the background worker thread"""
         if self.running:
@@ -301,8 +306,37 @@ class SyncWorker:
                 if not self.circuit_breaker.can_execute():
                     if _dbg:
                         log_info(f"[DEBUG] Circuit breaker state={self.circuit_breaker.state.value}, sleeping {self.config.poll_interval}s")
-                    else:
-                        log_debug(f"Circuit OPEN, sleeping {self.config.poll_interval}s")
+
+                    # Active health check during OPEN state to detect recovery
+                    now = time.time()
+                    if now - self._last_health_check >= self._health_check_interval:
+                        from plex.health import check_plex_health
+
+                        client = self._get_plex_client()
+                        is_healthy, latency_ms = check_plex_health(client, timeout=5.0)
+                        self._last_health_check = now
+
+                        if is_healthy:
+                            # Plex is back online
+                            log_info(f"Plex health check passed ({latency_ms:.0f}ms), recovery possible")
+                            self._consecutive_health_failures = 0
+                            self._health_check_interval = 5.0
+                            # NOTE: Do NOT directly modify circuit breaker state here.
+                            # Circuit breaker's own recovery_timeout handles OPEN->HALF_OPEN transition.
+                            # This health check is informational - the next can_execute() call will
+                            # naturally transition to HALF_OPEN if timeout has elapsed.
+                        else:
+                            # Plex still down, apply backoff
+                            self._consecutive_health_failures += 1
+                            from worker.backoff import calculate_delay
+                            self._health_check_interval = calculate_delay(
+                                retry_count=self._consecutive_health_failures,
+                                base=5.0,
+                                cap=60.0,
+                                jitter_seed=None  # Random jitter in production
+                            )
+                            log_debug(f"Plex health check failed (attempt #{self._consecutive_health_failures}), next check in {self._health_check_interval:.1f}s")
+
                     # Sleep in small increments so stop() can interrupt quickly
                     for _ in range(int(self.config.poll_interval * 2)):
                         if not self.running:
