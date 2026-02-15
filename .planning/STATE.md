@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 
 Milestone: v1.5 Outage Resilience
 Phase: 20 of 22 (Graduated Recovery & Rate Limiting)
-Plan: 1 of 2 in current phase
+Plan: 2 of 2 in current phase
 Status: Complete
-Last activity: 2026-02-15 — Completed 20-01-PLAN.md (RecoveryRateLimiter Implementation)
+Last activity: 2026-02-15 — Completed 20-02-PLAN.md (Worker Loop Integration)
 
-Progress: [██████      ] 50% (1 of 2 plans in phase 20 complete)
+Progress: [████████████] 100% (2 of 2 plans in phase 20 complete)
 
 ## Performance Metrics
 
@@ -39,9 +39,9 @@ Progress: [██████      ] 50% (1 of 2 plans in phase 20 complete)
 | 17-circuit-breaker-persistence | 2 | 4 min | 2 min |
 | 18-health-check-infrastructure | 2 | 7.42 min | 3.71 min |
 | 19-recovery-detection-automation | 2 | 5.77 min | 2.89 min |
-| 20-graduated-recovery-rate-limiting | 1 | 3.83 min | 3.83 min |
+| 20-graduated-recovery-rate-limiting | 2 | 8.63 min | 4.32 min |
 
-**v1.5 Progress:** 7 of 8 plans complete across phases 17-20 (87.5%)
+**v1.5 Progress:** 8 of 8 plans complete across phases 17-20 (100%)
 
 ## Accumulated Context
 
@@ -73,6 +73,12 @@ Recent decisions affecting current work:
 - [Phase 20-01]: Backoff duration 60s before attempting recovery (reasonable cooldown)
 - [Phase 20-01]: Error rate recovery threshold 10% (well below 30% trigger for stability)
 - [Phase 20-01]: All time-dependent methods accept 'now' parameter for deterministic testing
+- [Phase 20-02]: RecoveryState extended with recovery_started_at field (default 0.0)
+- [Phase 20-02]: clear_recovery_period() method added to RecoveryScheduler for cleanup
+- [Phase 20-02]: Rate limiter initialized in SyncWorker.__init__ with cross-restart resume
+- [Phase 20-02]: Sleep in 0.5s chunks during rate limiting for quick interruption by stop()
+- [Phase 20-02]: Recovery period state persists to recovery_state.json for cross-restart continuity
+- [Phase 20-02]: Normal operation (circuit CLOSED, no recovery) has zero overhead from rate limiter
 
 ### Pending Todos
 
@@ -85,9 +91,9 @@ None yet. Research indicates zero new dependencies needed (stdlib + plexapi).
 ## Session Continuity
 
 Last session: 2026-02-15 (plan execution)
-Stopped at: Completed 20-01-PLAN.md (RecoveryRateLimiter Implementation)
+Stopped at: Completed 20-02-PLAN.md (Worker Loop Integration)
 Resume file: None
-Next step: Continue Phase 20 (plan 20-02: Worker Loop Integration)
+Next step: Phase 20 complete — proceed to Phase 21 or v1.5 testing
 
 ---
-*Last updated: 2026-02-15 after completing plan 20-01 (1 of 2 in phase 20)*
+*Last updated: 2026-02-15 after completing plan 20-02 (2 of 2 in phase 20)*
