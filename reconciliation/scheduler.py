@@ -9,6 +9,7 @@ is due based on persisted state in reconciliation_state.json.
 import json
 import os
 import time
+import fcntl
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
@@ -58,23 +59,43 @@ class ReconciliationScheduler:
         self.state_path = os.path.join(data_dir, self.STATE_FILE)
 
     def load_state(self) -> ReconciliationState:
-        """Load reconciliation state from disk."""
+        """Load reconciliation state from disk with file locking.
+
+        Uses fcntl.flock() to prevent concurrent access races.
+        """
         try:
             if os.path.exists(self.state_path):
                 with open(self.state_path, 'r') as f:
-                    data = json.load(f)
-                return ReconciliationState(**data)
-        except (json.JSONDecodeError, TypeError, KeyError) as e:
+                    # Acquire shared lock for reading
+                    fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+                    try:
+                        data = json.load(f)
+                        return ReconciliationState(**data)
+                    finally:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        except (json.JSONDecodeError, TypeError, KeyError, OSError) as e:
             log_debug(f"Failed to load reconciliation state, using defaults: {e}")
         return ReconciliationState()
 
     def save_state(self, state: ReconciliationState) -> None:
-        """Save reconciliation state to disk atomically."""
+        """Save reconciliation state to disk atomically with file locking.
+
+        Uses exclusive lock during write to prevent concurrent modification.
+        Atomic write via tmp file + os.replace() ensures no partial writes.
+        """
         tmp_path = self.state_path + '.tmp'
+        lock_path = self.state_path + '.lock'
         try:
-            with open(tmp_path, 'w') as f:
-                json.dump(asdict(state), f, indent=2)
-            os.replace(tmp_path, self.state_path)
+            # Use dedicated lock file to coordinate writes
+            with open(lock_path, 'w') as lock_file:
+                # Acquire exclusive lock for writing
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                try:
+                    with open(tmp_path, 'w') as f:
+                        json.dump(asdict(state), f, indent=2)
+                    os.replace(tmp_path, self.state_path)
+                finally:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
         except OSError as e:
             log_debug(f"Failed to save reconciliation state: {e}")
 

@@ -23,13 +23,19 @@ class GapResult:
 def has_meaningful_metadata(data: dict[str, Any]) -> bool:
     """Check if data dict has any meaningful metadata fields.
 
-    This reuses the same quality gate logic from handlers.py (lines 301-307).
+    This reuses the same quality gate logic from handlers.py (lines 266-272).
     A scene has meaningful metadata if it has any of:
     - studio
     - performers
     - tags
     - details
     - date
+
+    NOTE: rating100 is intentionally EXCLUDED. A rating alone is not considered
+    "meaningful metadata" because:
+    1. Ratings are often auto-assigned defaults (not user-curated)
+    2. A scene with ONLY a rating shouldn't trigger sync (would clear other Plex fields)
+    3. Per LOCKED architecture decision: empty/null fields clear Plex values
 
     Args:
         data: Dictionary to check for metadata fields

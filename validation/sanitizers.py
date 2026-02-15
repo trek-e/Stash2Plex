@@ -83,6 +83,8 @@ def sanitize_for_plex(
         max_length: Maximum length (0 = no limit). Default 255.
         logger: Optional logger for debug output
         strip_emoji: If True, remove emoji characters. Default False.
+            NOTE: Currently not used in production (emojis preserved by default).
+            Available for future use if emoji-related Plex issues arise.
 
     Returns:
         Sanitized text string

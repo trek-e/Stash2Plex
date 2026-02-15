@@ -158,6 +158,12 @@ class Stash2PlexConfig(BaseModel):
         default=True,
         description="Include 'missing from Plex' detection in reconciliation (scenes in Stash with no Plex match)"
     )
+    reconcile_batch_size: int = Field(
+        default=100,
+        ge=10,
+        le=1000,
+        description="Batch size for reconciliation Plex matching (lower = less memory, higher = faster)"
+    )
 
     # Stash connection (for fetching images)
     stash_url: Optional[str] = Field(

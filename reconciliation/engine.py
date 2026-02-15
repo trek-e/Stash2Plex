@@ -82,7 +82,10 @@ class GapDetectionEngine:
         """Run gap detection and optionally enqueue discovered gaps.
 
         Args:
-            scope: "all" (all scenes) or "recent" (last 24 hours)
+            scope: Scope of scenes to check:
+                - "all": All scenes in library
+                - "recent": Scenes added in last 24 hours (by created_at)
+                - "recent_7days": Scenes added in last 7 days (by created_at)
 
         Returns:
             GapDetectionResult with counts and any errors encountered
@@ -256,7 +259,8 @@ class GapDetectionEngine:
         Raises:
             Exception: If no libraries could be resolved.
         """
-        libraries = self.config.plex_libraries if hasattr(self.config, 'plex_libraries') else [self.config.plex_library]
+        # plex_libraries is a @property that returns list[str] (empty if plex_library is None)
+        libraries = self.config.plex_libraries
         sections = {}
         for lib_name in libraries:
             try:
@@ -295,7 +299,12 @@ class GapDetectionEngine:
         library_cache, match_cache = self._init_caches()
         library_sections = self._get_library_sections(plex)
 
-        batch_size = 100
+        # Use configurable batch size (default 100 if not set or invalid)
+        try:
+            batch_size = int(self.config.reconcile_batch_size)
+        except (AttributeError, ValueError, TypeError):
+            batch_size = 100
+
         for i in range(0, len(scenes), batch_size):
             batch = scenes[i:i + batch_size]
             self._process_scene_batch(
@@ -399,6 +408,10 @@ class GapDetectionEngine:
         - tags: list of genre names
         - details: summary text
         - date: year or originallyAvailableAt
+        - rating100: userRating on 0-100 scale
+
+        Note: rating100 is extracted for completeness but NOT used by
+        has_meaningful_metadata() quality gate (see detector.py for rationale).
 
         Args:
             plex_item: plexapi Video object
@@ -436,6 +449,15 @@ class GapDetectionEngine:
             orig_date = getattr(plex_item, 'originallyAvailableAt', None)
             if orig_date:
                 metadata['date'] = str(orig_date)
+
+        # Rating (Plex userRating is 0.0-10.0, convert to 0-100)
+        user_rating = getattr(plex_item, 'userRating', None)
+        if user_rating is not None:
+            try:
+                metadata['rating100'] = int(float(user_rating) * 10)
+            except (ValueError, TypeError):
+                # Skip if userRating is not a valid number
+                pass
 
         return metadata
 
