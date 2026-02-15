@@ -10,12 +10,12 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Milestone: v1.5 Outage Resilience
-Phase: 19 of 22 (Recovery Detection & Automation)
-Plan: 2 of 2 in current phase
+Phase: 20 of 22 (Graduated Recovery & Rate Limiting)
+Plan: 1 of 2 in current phase
 Status: Complete
-Last activity: 2026-02-15 — Completed 19-02-PLAN.md (Worker Loop Integration)
+Last activity: 2026-02-15 — Completed 20-01-PLAN.md (RecoveryRateLimiter Implementation)
 
-Progress: [████████████] 100% (2 of 2 plans in phase 19 complete)
+Progress: [██████      ] 50% (1 of 2 plans in phase 20 complete)
 
 ## Performance Metrics
 
@@ -39,8 +39,9 @@ Progress: [████████████] 100% (2 of 2 plans in phase 19 
 | 17-circuit-breaker-persistence | 2 | 4 min | 2 min |
 | 18-health-check-infrastructure | 2 | 7.42 min | 3.71 min |
 | 19-recovery-detection-automation | 2 | 5.77 min | 2.89 min |
+| 20-graduated-recovery-rate-limiting | 1 | 3.83 min | 3.83 min |
 
-**v1.5 Progress:** 6 of 6 plans complete across phases 17-19 (COMPLETE)
+**v1.5 Progress:** 7 of 8 plans complete across phases 17-20 (87.5%)
 
 ## Accumulated Context
 
@@ -66,6 +67,12 @@ Recent decisions affecting current work:
 - [Phase 19-01]: Recovery logged at info level with count
 - [Phase 19-02]: maybe_check_recovery() runs BEFORE maybe_auto_reconcile() (recovery detection should happen first)
 - [Phase 19-02]: Recovery check failures logged at debug level (expected behavior during outages, avoid noisy logs)
+- [Phase 20-01]: Token bucket capacity set to 1.0 for minimal burst (single job ahead)
+- [Phase 20-01]: Linear interpolation for rate scaling (simple, predictable behavior)
+- [Phase 20-01]: Error window of 60s for error rate calculation (recent behavior)
+- [Phase 20-01]: Backoff duration 60s before attempting recovery (reasonable cooldown)
+- [Phase 20-01]: Error rate recovery threshold 10% (well below 30% trigger for stability)
+- [Phase 20-01]: All time-dependent methods accept 'now' parameter for deterministic testing
 
 ### Pending Todos
 
@@ -78,9 +85,9 @@ None yet. Research indicates zero new dependencies needed (stdlib + plexapi).
 ## Session Continuity
 
 Last session: 2026-02-15 (plan execution)
-Stopped at: Completed 19-02-PLAN.md (Worker Loop Integration) — Phase 19 complete
+Stopped at: Completed 20-01-PLAN.md (RecoveryRateLimiter Implementation)
 Resume file: None
-Next step: Begin Phase 20 (Graduated Recovery & Rate Limiting)
+Next step: Continue Phase 20 (plan 20-02: Worker Loop Integration)
 
 ---
-*Last updated: 2026-02-15 after completing plan 19-02 (2 of 2 in phase 19) — Phase 19 COMPLETE*
+*Last updated: 2026-02-15 after completing plan 20-01 (1 of 2 in phase 20)*
