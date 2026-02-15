@@ -28,7 +28,7 @@
 - [x] **Phase 18: Health Check Infrastructure** - Lightweight Plex connectivity validation — completed 2026-02-15
 - [x] **Phase 19: Recovery Detection & Automation** - Automatic Plex recovery detection with queue drain — completed 2026-02-15
 - [x] **Phase 20: Graduated Recovery & Rate Limiting** - Rate-limited queue draining prevents overwhelming recovered Plex — completed 2026-02-15
-- [ ] **Phase 21: Outage Visibility & History** - Enhanced status UI with outage tracking and history
+- [x] **Phase 21: Outage Visibility & History** - Enhanced status UI with outage tracking and history — completed 2026-02-15
 - [ ] **Phase 22: DLQ Recovery for Outage Jobs** - Re-queue DLQ entries from outage windows
 
 ## Phase Details
@@ -107,8 +107,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 21-01-PLAN.md --- TDD: OutageHistory manager with circular buffer, time formatting, and metrics calculation
-- [ ] 21-02-PLAN.md --- Wire outage recording, enhance queue status display, create outage summary task
+- [x] 21-01-PLAN.md --- TDD: OutageHistory manager with circular buffer, time formatting, and metrics calculation
+- [x] 21-02-PLAN.md --- Wire outage recording, enhance queue status display, create outage summary task
 
 ### Phase 22: DLQ Recovery for Outage Jobs
 **Goal**: Re-queue DLQ entries with transient errors from outage windows, enabling recovery of jobs that failed during Plex downtime
@@ -139,8 +139,8 @@ Phases execute in numeric order: 17 → 18 → 19 → 20 → 21 → 22
 | 18. Health Check Infrastructure | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
 | 19. Recovery Detection & Automation | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
 | 20. Graduated Recovery & Rate Limiting | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
-| 21. Outage Visibility & History | v1.5 | 0/2 | Not started | - |
+| 21. Outage Visibility & History | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
 | 22. DLQ Recovery for Outage Jobs | v1.5 | 0/TBD | Not started | - |
 
 ---
-*Last updated: 2026-02-15 after Phase 21 planning*
+*Last updated: 2026-02-15 after Phase 21 completion*
