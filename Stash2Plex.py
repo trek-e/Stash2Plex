@@ -1125,6 +1125,113 @@ def handle_outage_summary():
         traceback.print_exc()
 
 
+def handle_recover_outage_jobs():
+    """Re-queue DLQ jobs that failed during last Plex outage (PlexServerDown only)."""
+    try:
+        data_dir = get_plugin_data_dir()
+
+        from worker.outage_history import (
+            OutageHistory,
+            format_duration,
+            format_elapsed_since
+        )
+        from sync_queue.dlq_recovery import (
+            get_outage_dlq_entries,
+            recover_outage_jobs,
+            get_error_types_for_recovery
+        )
+        from sync_queue.dlq import DeadLetterQueue
+
+        # Load outage history
+        history = OutageHistory(data_dir)
+        records = history.get_history()
+
+        if not records:
+            log_info("No outage history found - nothing to recover")
+            return
+
+        # Filter to completed outages only (ended_at is not None)
+        completed = [r for r in records if r.ended_at is not None]
+
+        if not completed:
+            log_info("No completed outages found - recovery requires a resolved outage")
+            return
+
+        # Get last completed outage
+        last_outage = completed[-1]
+
+        log_info(f"Recovering DLQ jobs from outage: {format_duration(last_outage.duration)} (ended {format_elapsed_since(last_outage.ended_at)})")
+
+        # Conservative default: PlexServerDown only
+        error_types = get_error_types_for_recovery(include_optional=False)
+        log_info(f"Recovery filter: {', '.join(error_types)}")
+
+        # Query DLQ for entries in outage window
+        dlq = DeadLetterQueue(data_dir)
+        entries = get_outage_dlq_entries(
+            dlq,
+            last_outage.started_at,
+            last_outage.ended_at,
+            error_types
+        )
+
+        if not entries:
+            log_info("No recoverable DLQ entries found for last outage window")
+            return
+
+        log_info(f"Found {len(entries)} DLQ entries to evaluate")
+
+        # Get queue for re-enqueuing
+        if not queue_manager:
+            log_error("Queue manager not initialized")
+            return
+
+        queue = queue_manager.get_queue()
+        if not queue:
+            log_error("Queue not available")
+            return
+
+        # Create PlexClient instance (same pattern as handle_health_check)
+        if not config:
+            log_error("No config available for Plex client")
+            return
+
+        from plex.client import PlexClient
+
+        plex_client = PlexClient(
+            url=config.plex_url,
+            token=config.plex_token,
+            connect_timeout=5.0,
+            read_timeout=30.0
+        )
+
+        # Recover jobs
+        result = recover_outage_jobs(
+            entries,
+            queue,
+            stash_interface,
+            plex_client,
+            data_dir
+        )
+
+        # Log detailed results
+        log_info(
+            f"Recovery complete: {result.recovered} recovered, "
+            f"{result.skipped_already_queued} already queued, "
+            f"{result.skipped_plex_down} skipped (Plex down), "
+            f"{result.skipped_scene_missing} skipped (scene missing), "
+            f"{result.failed} failed"
+        )
+
+        if result.recovered > 0:
+            log_info(f"Re-queued scene IDs: {result.recovered_scene_ids}")
+
+    except Exception as e:
+        log_error(f"Failed to recover outage jobs: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def handle_health_check():
     """Check Plex server connectivity and circuit breaker status."""
     try:
@@ -1213,6 +1320,7 @@ _MANAGEMENT_HANDLERS = {
     'reconcile_7days': lambda args: handle_reconcile('recent_7days'),
     'health_check': lambda args: handle_health_check(),
     'outage_summary': lambda args: handle_outage_summary(),
+    'recover_outage_jobs': lambda args: handle_recover_outage_jobs(),
 }
 
 
@@ -1449,7 +1557,7 @@ def main():
     # Give worker time to process pending jobs before exiting
     # Worker thread is daemon, so it dies when main process exits
     # Skip for management tasks that don't enqueue work
-    management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status', 'process_queue', 'reconcile_all', 'reconcile_recent', 'reconcile_7days', 'health_check', 'outage_summary'}
+    management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status', 'process_queue', 'reconcile_all', 'reconcile_recent', 'reconcile_7days', 'health_check', 'outage_summary', 'recover_outage_jobs'}
     task_mode = args.get("mode", "") if not is_hook else ""
     if worker and queue_manager and task_mode not in management_modes:
         import time

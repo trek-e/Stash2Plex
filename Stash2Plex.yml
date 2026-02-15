@@ -55,6 +55,10 @@ tasks:
     description: Show outage history, MTTR, MTBF, and availability statistics
     defaultArgs:
       mode: outage_summary
+  - name: Recover Outage Jobs
+    description: Re-queue DLQ jobs that failed during last Plex outage (PlexServerDown errors only, requires Plex to be healthy)
+    defaultArgs:
+      mode: recover_outage_jobs
   - name: Reconcile Library (All)
     description: Detect and queue metadata gaps for all scenes (empty metadata, stale syncs, missing from Plex)
     defaultArgs:
