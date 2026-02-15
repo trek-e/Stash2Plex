@@ -424,3 +424,125 @@ class TestCircuitBreakerWithWorkerFullWorkflow:
             worker.circuit_breaker.record_success()
             assert worker.circuit_breaker.state == CircuitState.CLOSED
             assert worker.circuit_breaker.can_execute() is True
+
+
+@pytest.mark.integration
+class TestCircuitBreakerPersistenceIntegration:
+    """Tests for circuit breaker state persistence across worker instances."""
+
+    def test_state_persists_across_worker_instances(self, mock_queue, mock_dlq, mock_config, tmp_path):
+        """Circuit breaker OPEN state survives creating a new worker (simulates plugin restart)."""
+        from worker.processor import SyncWorker
+        from worker.circuit_breaker import CircuitState
+
+        # First worker instance: open circuit via 5 failures
+        worker1 = SyncWorker(
+            queue=mock_queue,
+            dlq=mock_dlq,
+            config=mock_config,
+            data_dir=str(tmp_path),
+        )
+        for _ in range(5):
+            worker1.circuit_breaker.record_failure()
+        assert worker1.circuit_breaker.state == CircuitState.OPEN
+
+        # Verify state file created
+        state_file = tmp_path / "circuit_breaker.json"
+        assert state_file.exists()
+
+        # Second worker instance (simulates plugin restart): loads OPEN state
+        worker2 = SyncWorker(
+            queue=mock_queue,
+            dlq=mock_dlq,
+            config=mock_config,
+            data_dir=str(tmp_path),
+        )
+        assert worker2.circuit_breaker.state == CircuitState.OPEN
+        assert worker2.circuit_breaker.can_execute() is False
+
+    def test_closed_state_persists_after_recovery(self, mock_queue, mock_dlq, mock_config, tmp_path):
+        """After recovery (HALF_OPEN -> CLOSED), new worker sees CLOSED state."""
+        from worker.processor import SyncWorker
+        from worker.circuit_breaker import CircuitState
+
+        # First worker: open circuit
+        worker1 = SyncWorker(
+            queue=mock_queue,
+            dlq=mock_dlq,
+            config=mock_config,
+            data_dir=str(tmp_path),
+        )
+        for _ in range(5):
+            worker1.circuit_breaker.record_failure()
+        assert worker1.circuit_breaker.state == CircuitState.OPEN
+
+        # Force HALF_OPEN and recover
+        worker1.circuit_breaker._state = CircuitState.HALF_OPEN
+        worker1.circuit_breaker.record_success()
+        assert worker1.circuit_breaker.state == CircuitState.CLOSED
+
+        # New worker: should be CLOSED
+        worker2 = SyncWorker(
+            queue=mock_queue,
+            dlq=mock_dlq,
+            config=mock_config,
+            data_dir=str(tmp_path),
+        )
+        assert worker2.circuit_breaker.state == CircuitState.CLOSED
+        assert worker2.circuit_breaker.can_execute() is True
+
+    def test_no_state_file_without_data_dir(self, mock_queue, mock_dlq, mock_config):
+        """Worker without data_dir creates circuit breaker without persistence."""
+        from worker.processor import SyncWorker
+
+        worker = SyncWorker(
+            queue=mock_queue,
+            dlq=mock_dlq,
+            config=mock_config,
+            data_dir=None,
+        )
+        assert worker.circuit_breaker._state_file is None
+
+    @freeze_time("2026-01-01 12:00:00")
+    def test_half_open_state_persists_across_restart(self, mock_queue, mock_dlq, mock_config, tmp_path):
+        """HALF_OPEN state persists, allowing recovery test on restart."""
+        from worker.processor import SyncWorker
+        from worker.circuit_breaker import CircuitState
+
+        # First worker: open circuit
+        worker1 = SyncWorker(
+            queue=mock_queue,
+            dlq=mock_dlq,
+            config=mock_config,
+            data_dir=str(tmp_path),
+        )
+        for _ in range(5):
+            worker1.circuit_breaker.record_failure()
+
+        # Advance time past recovery timeout to trigger HALF_OPEN
+        with freeze_time("2026-01-01 12:01:01"):
+            assert worker1.circuit_breaker.state == CircuitState.HALF_OPEN
+
+            # New worker should load HALF_OPEN state
+            worker2 = SyncWorker(
+                queue=mock_queue,
+                dlq=mock_dlq,
+                config=mock_config,
+                data_dir=str(tmp_path),
+            )
+            assert worker2.circuit_breaker.state == CircuitState.HALF_OPEN
+            assert worker2.circuit_breaker.can_execute() is True
+
+    def test_state_file_location(self, mock_queue, mock_dlq, mock_config, tmp_path):
+        """State file is stored in data_dir as circuit_breaker.json."""
+        from worker.processor import SyncWorker
+
+        worker = SyncWorker(
+            queue=mock_queue,
+            dlq=mock_dlq,
+            config=mock_config,
+            data_dir=str(tmp_path),
+        )
+
+        expected_path = str(tmp_path / "circuit_breaker.json")
+        assert worker.circuit_breaker._state_file == expected_path

@@ -100,10 +100,17 @@ class SyncWorker:
 
         # Circuit breaker for resilience during Plex outages
         from worker.circuit_breaker import CircuitBreaker
+
+        # Enable state persistence when data_dir is available
+        cb_state_file = None
+        if data_dir is not None:
+            cb_state_file = os.path.join(data_dir, 'circuit_breaker.json')
+
         self.circuit_breaker = CircuitBreaker(
             failure_threshold=5,
             recovery_timeout=60.0,
-            success_threshold=1
+            success_threshold=1,
+            state_file=cb_state_file
         )
 
     def start(self):
