@@ -74,10 +74,11 @@ Plans:
   3. Queue automatically drains when Plex recovers (no manual "Process Queue" needed)
   4. Recovery notification logged when circuit closes after outage
   5. Recovery scheduler state (last check time, consecutive successes) persists to recovery_state.json
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 19-01: TBD
+- [ ] 19-01-PLAN.md --- TDD: RecoveryScheduler with check-on-invocation pattern and state persistence
+- [ ] 19-02-PLAN.md --- Wire maybe_check_recovery() into main loop with integration tests
 
 ### Phase 20: Graduated Recovery & Rate Limiting
 **Goal**: Queue draining after recovery uses graduated rate limiting to avoid overwhelming just-recovered Plex server
@@ -134,10 +135,10 @@ Phases execute in numeric order: 17 → 18 → 19 → 20 → 21 → 22
 | 16. Automated Reconciliation & Reporting | v1.4 | 2/2 | ✓ Complete | 2026-02-14 |
 | 17. Circuit Breaker Persistence | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
 | 18. Health Check Infrastructure | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
-| 19. Recovery Detection & Automation | v1.5 | 0/TBD | Not started | - |
+| 19. Recovery Detection & Automation | v1.5 | 0/2 | Not started | - |
 | 20. Graduated Recovery & Rate Limiting | v1.5 | 0/TBD | Not started | - |
 | 21. Outage Visibility & History | v1.5 | 0/TBD | Not started | - |
 | 22. DLQ Recovery for Outage Jobs | v1.5 | 0/TBD | Not started | - |
 
 ---
-*Last updated: 2026-02-15 after Phase 18 completion*
+*Last updated: 2026-02-15 after Phase 19 planning*
