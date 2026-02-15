@@ -5,6 +5,24 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.5] - 2026-02-15
+
+### Fixed
+
+- **Worker Lock Leaks**: Fixed lock not being released when config validation fails or worker thread fails to start, which could block queue processing.
+- **MTBF Calculation**: Fixed incorrect Mean Time Between Failures calculation that measured time between outage starts instead of actual uptime between failures.
+- **Outage End Not Recorded**: Circuit breaker `_close()` now records outage end in history, fixing incomplete outage metrics (MTTR, MTBF, availability).
+- **MTTR Crash Protection**: Added defensive null check on outage duration before summing, preventing crash on corrupted data.
+- **Reconciliation Scheduler Locking**: Added `fcntl.flock()` file locking to prevent concurrent processes from corrupting scheduler state.
+
+### Improved
+
+- **Standardized Logging**: Queue operations now use structured `shared.log` instead of raw `print()`.
+- **Plex Module Exports**: `plex/__init__.py` exports now match actual usage patterns.
+- **PlexClient Context Manager**: Added `close()` and `with` statement support for proper resource cleanup.
+- **Configurable Batch Size**: Reconciliation batch size now configurable via `reconcile_batch_size` setting (default 100).
+- **Plex Rating Extraction**: Reconciliation now extracts Plex `userRating` for metadata comparison.
+
 ## [1.5.4] - 2026-02-15
 
 ### Fixed
