@@ -42,10 +42,11 @@
   2. Plugin restart during Plex outage preserves OPEN state (no retry exhaustion after restart)
   3. State transitions (CLOSED → OPEN → HALF_OPEN) are logged with descriptive messages
   4. File locking prevents race conditions when concurrent invocations modify circuit breaker state
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 17-01: TBD
+- [ ] 17-01-PLAN.md --- TDD: Circuit breaker persistence, transition logging, and file locking
+- [ ] 17-02-PLAN.md --- Wire state_file into SyncWorker and add integration tests
 
 ### Phase 18: Health Check Infrastructure
 **Goal**: Lightweight Plex connectivity check validates server is reachable and responsive
@@ -130,7 +131,7 @@ Phases execute in numeric order: 17 → 18 → 19 → 20 → 21 → 22
 | 14. Gap Detection Engine | v1.4 | 2/2 | ✓ Complete | 2026-02-14 |
 | 15. Manual Reconciliation | v1.4 | 1/1 | ✓ Complete | 2026-02-14 |
 | 16. Automated Reconciliation & Reporting | v1.4 | 2/2 | ✓ Complete | 2026-02-14 |
-| 17. Circuit Breaker Persistence | v1.5 | 0/TBD | Not started | - |
+| 17. Circuit Breaker Persistence | v1.5 | 0/2 | Not started | - |
 | 18. Health Check Infrastructure | v1.5 | 0/TBD | Not started | - |
 | 19. Recovery Detection & Automation | v1.5 | 0/TBD | Not started | - |
 | 20. Graduated Recovery & Rate Limiting | v1.5 | 0/TBD | Not started | - |
