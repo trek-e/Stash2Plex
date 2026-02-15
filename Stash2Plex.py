@@ -157,6 +157,7 @@ worker = None
 config: Stash2PlexConfig = None
 sync_timestamps: dict = None
 stash_interface = None
+_worker_lock_fd = None  # File descriptor for worker exclusion lock
 
 
 def get_plugin_data_dir():
@@ -350,20 +351,46 @@ def initialize(config_dict: dict = None):
         data_dir=data_dir,
         max_retries=config.max_retries
     )
-    worker.start()
 
-    log_info("Initialization complete")
+    # Worker exclusion lock: only one plugin process drains the queue at a time.
+    # During bulk scans, many hook processes fire concurrently. Without this lock,
+    # each process starts its own worker thread competing for the same queue and
+    # Plex API, causing cascading timeouts where no job ever completes.
+    global _worker_lock_fd
+    lock_path = os.path.join(data_dir, 'worker.lock')
+    try:
+        import fcntl
+        _worker_lock_fd = open(lock_path, 'w')
+        fcntl.flock(_worker_lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        worker.start()
+        log_info("Initialization complete (worker started)")
+    except (BlockingIOError, OSError):
+        # Another plugin process already has the lock — just enqueue, don't drain
+        if _worker_lock_fd:
+            _worker_lock_fd.close()
+            _worker_lock_fd = None
+        log_info("Initialization complete (worker deferred — another process is draining)")
 
 
 def shutdown():
     """Clean shutdown of worker and queue."""
-    global worker, queue_manager
+    global worker, queue_manager, _worker_lock_fd
 
     if worker:
         worker.stop()
 
     if queue_manager:
         queue_manager.shutdown()
+
+    # Release worker exclusion lock so next process can drain
+    if _worker_lock_fd:
+        try:
+            import fcntl
+            fcntl.flock(_worker_lock_fd.fileno(), fcntl.LOCK_UN)
+            _worker_lock_fd.close()
+        except OSError:
+            pass
+        _worker_lock_fd = None
 
     log_trace("Shutdown complete")
 
@@ -1557,9 +1584,10 @@ def main():
     # Give worker time to process pending jobs before exiting
     # Worker thread is daemon, so it dies when main process exits
     # Skip for management tasks that don't enqueue work
+    # Skip if worker lock was not acquired (another process is draining)
     management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status', 'process_queue', 'reconcile_all', 'reconcile_recent', 'reconcile_7days', 'health_check', 'outage_summary', 'recover_outage_jobs'}
     task_mode = args.get("mode", "") if not is_hook else ""
-    if worker and queue_manager and task_mode not in management_modes:
+    if worker and queue_manager and task_mode not in management_modes and _worker_lock_fd is not None:
         import time
         from worker.stats import SyncStats
         queue = queue_manager.get_queue()

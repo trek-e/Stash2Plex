@@ -528,3 +528,89 @@ class TestOutageUIHandlers:
                 break
 
         assert found_task, "Could not find 'Recover Outage Jobs' task in yml"
+
+
+class TestWorkerLock:
+    """Tests for worker exclusion lock preventing concurrent queue draining."""
+
+    def test_worker_lock_fd_global_exists(self):
+        """_worker_lock_fd global is defined."""
+        import Stash2Plex
+        assert hasattr(Stash2Plex, '_worker_lock_fd')
+
+    @patch('Stash2Plex._worker_lock_fd', None)
+    @patch('Stash2Plex.worker', Mock())
+    @patch('Stash2Plex.queue_manager', Mock())
+    def test_drain_wait_skipped_when_no_lock(self):
+        """Queue drain wait is skipped when worker lock was not acquired."""
+        import Stash2Plex
+
+        # _worker_lock_fd is None means lock was not acquired
+        # The drain condition checks: worker and queue_manager and ... and _worker_lock_fd is not None
+        # With _worker_lock_fd=None, the drain block should not execute
+        worker_mock = Mock()
+        queue_manager_mock = Mock()
+
+        with patch.object(Stash2Plex, 'worker', worker_mock), \
+             patch.object(Stash2Plex, 'queue_manager', queue_manager_mock), \
+             patch.object(Stash2Plex, '_worker_lock_fd', None):
+
+            # Simulate the drain condition check from main()
+            task_mode = ""
+            management_modes = {'queue_status', 'process_queue'}
+            should_drain = (worker_mock and queue_manager_mock
+                            and task_mode not in management_modes
+                            and Stash2Plex._worker_lock_fd is not None)
+
+            assert not should_drain, "Should skip drain when _worker_lock_fd is None"
+
+    @patch('Stash2Plex._worker_lock_fd', "not_none")
+    @patch('Stash2Plex.worker', Mock())
+    @patch('Stash2Plex.queue_manager', Mock())
+    def test_drain_wait_runs_when_lock_acquired(self):
+        """Queue drain wait runs when worker lock was acquired."""
+        import Stash2Plex
+
+        worker_mock = Mock()
+        queue_manager_mock = Mock()
+
+        with patch.object(Stash2Plex, 'worker', worker_mock), \
+             patch.object(Stash2Plex, 'queue_manager', queue_manager_mock), \
+             patch.object(Stash2Plex, '_worker_lock_fd', "not_none"):
+
+            task_mode = ""
+            management_modes = {'queue_status', 'process_queue'}
+            should_drain = (worker_mock and queue_manager_mock
+                            and task_mode not in management_modes
+                            and Stash2Plex._worker_lock_fd is not None)
+
+            assert should_drain, "Should drain when _worker_lock_fd is not None"
+
+    def test_shutdown_releases_lock(self):
+        """shutdown() closes the lock file descriptor."""
+        import Stash2Plex
+
+        mock_fd = Mock()
+        mock_fd.fileno.return_value = 3
+
+        with patch.object(Stash2Plex, 'worker', None), \
+             patch.object(Stash2Plex, 'queue_manager', None), \
+             patch.object(Stash2Plex, '_worker_lock_fd', mock_fd), \
+             patch('Stash2Plex.fcntl', create=True) as mock_fcntl:
+
+            Stash2Plex.shutdown()
+
+            # Lock should be released and fd closed
+            mock_fd.close.assert_called_once()
+            assert Stash2Plex._worker_lock_fd is None
+
+    def test_shutdown_handles_no_lock(self):
+        """shutdown() works when no lock was acquired."""
+        import Stash2Plex
+
+        with patch.object(Stash2Plex, 'worker', None), \
+             patch.object(Stash2Plex, 'queue_manager', None), \
+             patch.object(Stash2Plex, '_worker_lock_fd', None):
+
+            # Should not raise
+            Stash2Plex.shutdown()

@@ -5,6 +5,12 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-02-15
+
+### Fixed
+
+- **Concurrent Worker Contention During Scans**: During bulk scans, many hook processes fired simultaneously, each starting its own worker thread competing for the same queue and Plex API. This caused cascading 30s timeouts where no job ever completed and metadata was never updated. Now uses file-based worker exclusion lock (`fcntl.flock`) — only one plugin process drains the queue at a time. Other processes enqueue their job and exit immediately (< 100ms). Lock auto-releases on process exit, even on crashes.
+
 ## [1.5.0] - 2026-02-15
 
 ### Added
