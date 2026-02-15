@@ -58,10 +58,11 @@ Plans:
   3. Hybrid health monitoring combines passive checks (job results) with active probes
   4. Health check interval uses exponential backoff during extended outages (5s → 10s → 20s → 60s cap)
   5. Deep health check prevents false positives from Plex restart sequence (port open but DB loading)
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 18-01: TBD
+- [ ] 18-01-PLAN.md --- TDD: Deep health check function using server.query('/identity')
+- [ ] 18-02-PLAN.md --- Manual health check task + active health probes in worker loop
 
 ### Phase 19: Recovery Detection & Automation
 **Goal**: Plugin automatically detects when Plex recovers from outage and drains pending queue without user interaction
