@@ -5,6 +5,12 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-02-15
+
+### Fixed
+
+- **Reconciliation Date Filter**: "Reconcile Library (Last 7 Days)" and "Reconcile Library (Last 24 Hours)" now filter by date added (`created_at`) instead of metadata update date (`updated_at`). Previously, scenes with recently edited metadata would be included even if they were added long ago, while newly added scenes with no metadata edits could be missed.
+
 ## [1.5.1] - 2026-02-15
 
 ### Fixed

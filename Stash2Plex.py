@@ -919,7 +919,8 @@ def handle_reconcile(scope: str):
         if not queue:
             log_warn("No queue available - running in detection-only mode")
 
-        scope_label = "all scenes" if scope == "all" else "recent scenes (last 24 hours)"
+        scope_labels = {"all": "all scenes", "recent": "scenes added in last 24 hours", "recent_7days": "scenes added in last 7 days"}
+        scope_label = scope_labels.get(scope, scope)
         log_info(f"Starting reconciliation: {scope_label}")
 
         engine = GapDetectionEngine(

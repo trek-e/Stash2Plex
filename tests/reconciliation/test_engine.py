@@ -288,11 +288,11 @@ def test_run_scope_recent(mock_stash, mock_config, tmp_data_dir, sample_scenes, 
         engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=None)
         result = engine.run(scope="recent")
 
-        # Verify find_scenes called with updated_at filter
+        # Verify find_scenes called with created_at filter (date added, not metadata update)
         assert mock_stash.find_scenes.called
         call_kwargs = mock_stash.find_scenes.call_args[1]
         assert 'f' in call_kwargs
-        assert 'updated_at' in call_kwargs['f']
+        assert 'created_at' in call_kwargs['f']
 
 
 def test_run_scope_all(mock_stash, mock_config, tmp_data_dir, sample_scenes, mock_plex_client):
