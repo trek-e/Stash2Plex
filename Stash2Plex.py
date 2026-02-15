@@ -283,8 +283,8 @@ def initialize(config_dict: dict = None):
         config_dict: Optional configuration dictionary. If not provided,
                      will attempt to read from environment variables.
 
-    Raises:
-        SystemExit: If configuration validation fails
+    Returns:
+        False if configuration validation fails, True otherwise
     """
     log_trace("initialize() called")
     global queue_manager, dlq, worker, config, sync_timestamps
@@ -309,11 +309,11 @@ def initialize(config_dict: dict = None):
         log_error(f"validate_config exception: {e}")
         import traceback
         traceback.print_exc()
-        raise
+        return False
 
     if error:
         log_error(f"Configuration error: {error}")
-        raise SystemExit(1)
+        return False
 
     config = validated_config
 
@@ -327,7 +327,7 @@ def initialize(config_dict: dict = None):
     # Check if plugin is disabled
     if not config.enabled:
         log_info("Plugin is disabled via configuration")
-        return
+        return True
 
     data_dir = get_plugin_data_dir()
 
@@ -362,14 +362,24 @@ def initialize(config_dict: dict = None):
         import fcntl
         _worker_lock_fd = open(lock_path, 'w')
         fcntl.flock(_worker_lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        worker.start()
-        log_info("Initialization complete (worker started)")
+        try:
+            worker.start()
+            log_info("Initialization complete (worker started)")
+        except Exception as e:
+            # Worker start failed - release lock before propagating error
+            log_error(f"Failed to start worker: {e}")
+            fcntl.flock(_worker_lock_fd.fileno(), fcntl.LOCK_UN)
+            _worker_lock_fd.close()
+            _worker_lock_fd = None
+            return False
     except (BlockingIOError, OSError):
         # Another plugin process already has the lock — just enqueue, don't drain
         if _worker_lock_fd:
             _worker_lock_fd.close()
             _worker_lock_fd = None
         log_info("Initialization complete (worker deferred — another process is draining)")
+
+    return True
 
 
 def shutdown():
@@ -919,7 +929,12 @@ def handle_reconcile(scope: str):
         if not queue:
             log_warn("No queue available - running in detection-only mode")
 
-        scope_labels = {"all": "all scenes", "recent": "scenes added in last 24 hours", "recent_7days": "scenes added in last 7 days"}
+        scope_labels = {
+            "all": "all scenes",
+            "recent": "scenes added in last 24 hours",
+            "recent_7days": "scenes added in last 7 days",
+            "7days": "scenes added in last 7 days",  # Alias for UI task handler
+        }
         scope_label = scope_labels.get(scope, scope)
         log_info(f"Starting reconciliation: {scope_label}")
 
@@ -1496,25 +1511,12 @@ def _is_already_synced(scene: dict, scene_id: int, timestamps: dict) -> bool:
 
 
 def is_scan_job_running(stash) -> bool:
-    """Check if a scan/generate job is running in Stash."""
-    if not stash:
-        return False
-    try:
-        # Stash Job type has: id, status, subTasks, description, progress, startTime, endTime, addTime
-        result = stash.call_GQL("""
-            query { jobQueue { status description } }
-        """)
-        jobs = result.get('jobQueue', []) if result else []
-        # Check description for scan-related keywords
-        scan_keywords = ['scan', 'auto tag', 'generate', 'identify']
-        for job in jobs:
-            status = (job.get('status') or '').upper()
-            description = (job.get('description') or '').lower()
-            if status in ('RUNNING', 'READY') and any(kw in description for kw in scan_keywords):
-                return True
-    except Exception:
-        pass
-    return False
+    """Check if a scan/generate job is running in Stash.
+
+    Delegates to hooks.handlers.is_scan_running to avoid duplication.
+    """
+    from hooks.handlers import is_scan_running
+    return is_scan_running(stash)
 
 
 def main():
@@ -1546,6 +1548,7 @@ def main():
         is_identification = 'stash_ids' in hook_input
         if hook_type != "Scene.Create.Post" and not is_identification and is_scan_job_running(temp_stash):
             # Scan running - exit immediately without initialization
+            # No lock acquired yet, safe to exit
             print(json.dumps({"output": "ok"}))
             return
 
@@ -1553,7 +1556,12 @@ def main():
     global queue_manager, config
     if queue_manager is None:
         config_dict = extract_config_from_input(input_data)
-        initialize(config_dict)
+        init_success = initialize(config_dict)
+        if not init_success:
+            # Initialization failed (config validation error)
+            # Lock was never acquired or was released, safe to exit
+            print(json.dumps({"error": "Configuration validation failed"}))
+            return
 
     # Check if plugin is disabled (config may have loaded but plugin disabled)
     if config and not config.enabled:
