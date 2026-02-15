@@ -61,12 +61,14 @@ class CircuitBreaker:
         failure_threshold: int = 5,
         recovery_timeout: float = 60.0,
         success_threshold: int = 1,
-        state_file: Optional[str] = None
+        state_file: Optional[str] = None,
+        outage_history: Optional['OutageHistory'] = None
     ):
         self._failure_threshold = failure_threshold
         self._recovery_timeout = recovery_timeout
         self._success_threshold = success_threshold
         self._state_file = state_file
+        self._outage_history = outage_history
 
         # Internal state
         self._state = CircuitState.CLOSED
@@ -230,6 +232,10 @@ class CircuitBreaker:
         self._success_count = 0
         log_info(f"Circuit breaker OPENED after {self._failure_threshold} consecutive failures")
         self._save_state_locked()
+
+        # Record outage start
+        if self._outage_history is not None:
+            self._outage_history.record_outage_start(self._opened_at)
 
     def _close(self) -> None:
         """Transition to CLOSED state."""

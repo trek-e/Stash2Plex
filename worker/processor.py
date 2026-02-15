@@ -98,6 +98,13 @@ class SyncWorker:
         self._jobs_since_dlq_log = 0
         self._dlq_log_interval = 10  # Log DLQ status every 10 jobs
 
+        # Outage history tracking
+        if data_dir is not None:
+            from worker.outage_history import OutageHistory
+            self._outage_history = OutageHistory(data_dir)
+        else:
+            self._outage_history = None
+
         # Circuit breaker for resilience during Plex outages
         from worker.circuit_breaker import CircuitBreaker
 
@@ -110,7 +117,8 @@ class SyncWorker:
             failure_threshold=5,
             recovery_timeout=60.0,
             success_threshold=1,
-            state_file=cb_state_file
+            state_file=cb_state_file,
+            outage_history=self._outage_history
         )
 
         # Health check state for active probes during OPEN circuit
@@ -126,7 +134,7 @@ class SyncWorker:
         # Check if recovery period is active from prior session (cross-restart continuity)
         if data_dir is not None:
             from worker.recovery import RecoveryScheduler
-            recovery_scheduler = RecoveryScheduler(data_dir)
+            recovery_scheduler = RecoveryScheduler(data_dir, outage_history=self._outage_history)
             recovery_state = recovery_scheduler.load_state()
             if recovery_state.recovery_started_at > 0:
                 # Recovery period was active before restart — resume from current position
@@ -378,7 +386,7 @@ class SyncWorker:
                     self._was_in_recovery = False
                     if self.data_dir is not None:
                         from worker.recovery import RecoveryScheduler
-                        scheduler = RecoveryScheduler(self.data_dir)
+                        scheduler = RecoveryScheduler(self.data_dir, outage_history=self._outage_history)
                         scheduler.clear_recovery_period()
                     log_info("Recovery period complete: normal processing speed resumed")
 
@@ -427,7 +435,7 @@ class SyncWorker:
                         # Persist recovery_started_at for cross-restart continuity
                         if self.data_dir is not None:
                             from worker.recovery import RecoveryScheduler
-                            scheduler = RecoveryScheduler(self.data_dir)
+                            scheduler = RecoveryScheduler(self.data_dir, outage_history=self._outage_history)
                             state = scheduler.load_state()
                             state.recovery_started_at = time.time()
                             scheduler.save_state(state)

@@ -41,9 +41,10 @@ class RecoveryScheduler:
 
     STATE_FILE = 'recovery_state.json'
 
-    def __init__(self, data_dir: str):
+    def __init__(self, data_dir: str, outage_history: Optional['OutageHistory'] = None):
         self.data_dir = data_dir
         self.state_path = os.path.join(data_dir, self.STATE_FILE)
+        self._outage_history = outage_history
 
     def load_state(self) -> RecoveryState:
         """Load recovery state from disk."""
@@ -117,6 +118,10 @@ class RecoveryScheduler:
                     state.recovery_started_at = time.time()
                     state.consecutive_successes = 0
                     log_info(f"Recovery detected: Plex is back online (recovery #{state.recovery_count})")
+
+                    # Record outage end
+                    if self._outage_history is not None:
+                        self._outage_history.record_outage_end(state.last_recovery_time)
             elif circuit_breaker.state == CircuitState.OPEN:
                 # Health check passed but circuit hasn't transitioned to HALF_OPEN yet
                 log_debug("Health check passed but circuit still OPEN (awaiting recovery_timeout)")
