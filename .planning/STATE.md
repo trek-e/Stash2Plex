@@ -10,12 +10,12 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Milestone: v1.5 Outage Resilience
-Phase: 21 of 22 (Outage Visibility & History)
-Plan: 2 of 2 in current phase
-Status: Complete
-Last activity: 2026-02-15 — Completed 21-02-PLAN.md (Status UI Integration)
+Phase: 22 of 22 (DLQ Recovery for Outage Jobs)
+Plan: 1 of 2 in current phase
+Status: In Progress
+Last activity: 2026-02-15 — Completed 22-01-PLAN.md (DLQ Recovery Module)
 
-Progress: [████████████] 100% (2 of 2 plans in phase 21 complete)
+Progress: [██████------] 50% (1 of 2 plans in phase 22 complete)
 
 ## Performance Metrics
 
@@ -41,11 +41,12 @@ Progress: [████████████] 100% (2 of 2 plans in phase 21 
 | 19-recovery-detection-automation | 2 | 5.77 min | 2.89 min |
 | 20-graduated-recovery-rate-limiting | 2 | 8.63 min | 4.32 min |
 
-**v1.5 Progress:** 10 of 10 plans complete across phases 17-21 (100%)
+**v1.5 Progress:** 11 of 12 plans complete across phases 17-22 (92%)
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 21-outage-visibility-history | 2 | 8.85 min | 4.43 min |
+| 22-dlq-recovery-outage-jobs | 1 | 5.33 min | 5.33 min |
 
 ## Accumulated Context
 
@@ -91,6 +92,10 @@ Recent decisions affecting current work:
 - [Phase 21-02]: jobs_affected passed as 0 for now (DLQ counting deferred to Phase 22)
 - [Phase 21-02]: outage_history defaults to None for backward compatibility
 - [Phase 21-02]: Enhanced queue status adds 3 new sections (not separate commands) for holistic view
+- [Phase 22-01]: Conservative default: only PlexServerDown errors recovered by default
+- [Phase 22-01]: Optional retry types (PlexTemporaryError, PlexNotFound) require user opt-in
+- [Phase 22-01]: Three-gate validation order: Plex health (abort early) → dedup → scene existence
+- [Phase 22-01]: In-memory batch deduplication prevents duplicate scene_ids within same recovery run
 
 ### Pending Todos
 
@@ -103,9 +108,9 @@ None yet. Research indicates zero new dependencies needed (stdlib + plexapi).
 ## Session Continuity
 
 Last session: 2026-02-15 (plan execution)
-Stopped at: Completed 21-02-PLAN.md (Status UI Integration)
+Stopped at: Completed 22-01-PLAN.md (DLQ Recovery Module)
 Resume file: None
-Next step: Begin Phase 22 (DLQ Recovery for Outage Jobs) — FINAL PHASE
+Next step: Execute 22-02-PLAN.md (Task Integration & Recovery UI) — FINAL PLAN
 
 ---
-*Last updated: 2026-02-15 after completing plan 21-02 (2 of 2 in phase 21 - phase complete)*
+*Last updated: 2026-02-15 after completing plan 22-01 (1 of 2 in phase 22)*
