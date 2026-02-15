@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 
 Milestone: v1.5 Outage Resilience
 Phase: 17 of 22 (Circuit Breaker Persistence)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-02-15 — v1.5 roadmap created with 6 phases
+Plan: 1 of 2 in current phase
+Status: In progress
+Last activity: 2026-02-15 — Completed 17-01-PLAN.md (circuit breaker persistence)
 
-Progress: [░░░░░░░░░░] 0% (0 of TBD plans in v1.5 complete)
+Progress: [██░░░░░░░░] 50% (1 of 2 plans in phase 17 complete)
 
 ## Performance Metrics
 
@@ -32,7 +32,13 @@ Progress: [░░░░░░░░░░] 0% (0 of TBD plans in v1.5 complete)
 | 15-manual-reconciliation | 1 | 3.38 min | 3.38 min |
 | 16-automated-reconciliation-reporting | 2 | 7.93 min | 3.97 min |
 
-**v1.5 Starting:** 6 phases (17-22), TBD plans
+**By Phase (v1.5):**
+
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| 17-circuit-breaker-persistence | 1 | 3 min | 3 min |
+
+**v1.5 Progress:** 1 of 2 plans complete in phase 17
 
 ## Accumulated Context
 
@@ -41,6 +47,9 @@ Progress: [░░░░░░░░░░] 0% (0 of TBD plans in v1.5 complete)
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
+- v1.5 (17-01): state_file=None default for 100% backward compatibility
+- v1.5 (17-01): Non-blocking advisory locking (LOCK_NB) makes save skippable, not blocking
+- v1.5 (17-01): Corrupted state defaults to CLOSED (safe, not stuck-open)
 - v1.4: Check-on-invocation pattern for auto-reconciliation (extends to recovery detection in v1.5)
 - v1.4: Lighter pre-check for gap detection (sync_timestamps lookup before matcher call)
 - v1.1: JSON file for timestamps (atomic write pattern with os.replace — reuse for circuit breaker state)
@@ -56,10 +65,10 @@ None yet. Research indicates zero new dependencies needed (stdlib + plexapi).
 
 ## Session Continuity
 
-Last session: 2026-02-15 (roadmap creation)
-Stopped at: v1.5 roadmap created with 6 phases, 100% requirement coverage validated
+Last session: 2026-02-15 (plan execution)
+Stopped at: Completed 17-01-PLAN.md (circuit breaker persistence)
 Resume file: None
-Next step: /gsd:plan-phase 17
+Next step: /gsd:execute-phase 17 (continue with plan 02)
 
 ---
-*Last updated: 2026-02-15 after v1.5 roadmap creation*
+*Last updated: 2026-02-15 after completing plan 17-01*
