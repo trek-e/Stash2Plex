@@ -7,7 +7,7 @@
 - ✅ **v1.2 Queue Management UI** - Phases 11-13 (shipped 2026-02-04) → [archived](milestones/v1.2-ROADMAP.md)
 - ✅ **v1.3 Production Stability** - Ad-hoc (shipped 2026-02-09)
 - ✅ **v1.4 Metadata Reconciliation** - Phases 14-16 (shipped 2026-02-14) → [archived](milestones/v1.4-ROADMAP.md)
-- 🚧 **v1.5 Outage Resilience** - Phases 17-22 (in progress)
+- ✅ **v1.5 Outage Resilience** - Phases 17-22 (shipped 2026-02-15)
 
 ## Phases
 
@@ -20,7 +20,7 @@
 
 </details>
 
-### 🚧 v1.5 Outage Resilience (In Progress)
+### ✅ v1.5 Outage Resilience — SHIPPED 2026-02-15
 
 **Milestone Goal:** Automatic recovery when Plex comes back online after downtime — queue drains without user interaction, circuit breaker state persists across restarts, and health monitoring provides visibility into outage/recovery status.
 
@@ -29,7 +29,7 @@
 - [x] **Phase 19: Recovery Detection & Automation** - Automatic Plex recovery detection with queue drain — completed 2026-02-15
 - [x] **Phase 20: Graduated Recovery & Rate Limiting** - Rate-limited queue draining prevents overwhelming recovered Plex — completed 2026-02-15
 - [x] **Phase 21: Outage Visibility & History** - Enhanced status UI with outage tracking and history — completed 2026-02-15
-- [ ] **Phase 22: DLQ Recovery for Outage Jobs** - Re-queue DLQ entries from outage windows
+- [x] **Phase 22: DLQ Recovery for Outage Jobs** - Re-queue DLQ entries from outage windows — completed 2026-02-15
 
 ## Phase Details
 
@@ -123,8 +123,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 22-01-PLAN.md --- TDD: DLQ recovery module with error classification, time-windowed queries, and idempotent recovery
-- [ ] 22-02-PLAN.md --- Wire recovery task into Stash UI with handler, registration, and tests
+- [x] 22-01-PLAN.md --- TDD: DLQ recovery module with error classification, time-windowed queries, and idempotent recovery
+- [x] 22-02-PLAN.md --- Wire recovery task into Stash UI with handler, registration, and tests
 
 ## Progress
 
@@ -141,7 +141,7 @@ Phases execute in numeric order: 17 → 18 → 19 → 20 → 21 → 22
 | 19. Recovery Detection & Automation | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
 | 20. Graduated Recovery & Rate Limiting | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
 | 21. Outage Visibility & History | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
-| 22. DLQ Recovery for Outage Jobs | v1.5 | 0/2 | Not started | - |
+| 22. DLQ Recovery for Outage Jobs | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
 
 ---
-*Last updated: 2026-02-15 after Phase 22 planning*
+*Last updated: 2026-02-15 after Phase 22 execution — v1.5 MILESTONE COMPLETE*

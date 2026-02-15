@@ -75,8 +75,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | VISB-02 | Phase 17 | Complete |
 | VISB-03 | Phase 21 | Complete |
 | VISB-04 | Phase 21 | Complete |
-| DLQM-01 | Phase 22 | Pending |
-| DLQM-02 | Phase 22 | Pending |
+| DLQM-01 | Phase 22 | Complete |
+| DLQM-02 | Phase 22 | Complete |
 
 **Coverage:**
 - v1.5 requirements: 15 total
@@ -93,4 +93,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-15*
-*Last updated: 2026-02-15 after roadmap creation (100% coverage validated)*
+*Last updated: 2026-02-15 after Phase 22 execution — all 15 requirements complete*
