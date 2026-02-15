@@ -118,6 +118,22 @@ class SyncWorker:
         self._health_check_interval: float = 5.0  # Initial: 5s
         self._consecutive_health_failures: int = 0
 
+        # Recovery rate limiter for graduated queue drain
+        from worker.rate_limiter import RecoveryRateLimiter
+        self._rate_limiter = RecoveryRateLimiter()
+        self._was_in_recovery = False
+
+        # Check if recovery period is active from prior session (cross-restart continuity)
+        if data_dir is not None:
+            from worker.recovery import RecoveryScheduler
+            recovery_scheduler = RecoveryScheduler(data_dir)
+            recovery_state = recovery_scheduler.load_state()
+            if recovery_state.recovery_started_at > 0:
+                # Recovery period was active before restart — resume from current position
+                self._rate_limiter.start_recovery_period(now=recovery_state.recovery_started_at)
+                self._was_in_recovery = True
+                log_info("Resuming recovery rate limiting from prior session")
+
     def start(self):
         """Start the background worker thread"""
         if self.running:
@@ -344,6 +360,28 @@ class SyncWorker:
                         time.sleep(0.5)
                     continue
 
+                # Rate limit during recovery period (graduated queue drain)
+                wait_time = self._rate_limiter.should_wait()
+                if wait_time > 0:
+                    if _dbg:
+                        log_info(f"[DEBUG] Recovery rate limit: waiting {wait_time:.2f}s (rate={self._rate_limiter.current_rate():.1f}/s)")
+                    # Sleep in small chunks so stop() can interrupt quickly
+                    remaining = wait_time
+                    while remaining > 0 and self.running:
+                        chunk = min(remaining, 0.5)
+                        time.sleep(chunk)
+                        remaining -= chunk
+                    continue
+
+                # Check if recovery period ended (ramp complete)
+                if not self._rate_limiter.is_in_recovery_period() and self._was_in_recovery:
+                    self._was_in_recovery = False
+                    if self.data_dir is not None:
+                        from worker.recovery import RecoveryScheduler
+                        scheduler = RecoveryScheduler(self.data_dir)
+                        scheduler.clear_recovery_period()
+                    log_info("Recovery period complete: normal processing speed resumed")
+
                 # Get next pending job (2 second timeout — short so stop() isn't blocked)
                 item = get_pending(self.queue, timeout=2)
                 if item is None:
@@ -375,8 +413,26 @@ class SyncWorker:
                     self._stats.record_success(_job_elapsed, confidence=confidence or 'high')
 
                     # Success: acknowledge job and record with circuit breaker
+                    previous_state = self.circuit_breaker.state
                     ack_job(self.queue, item)
                     self.circuit_breaker.record_success()
+
+                    # Record result with rate limiter for error monitoring
+                    self._rate_limiter.record_result(success=True)
+
+                    # Detect recovery: HALF_OPEN -> CLOSED transition starts recovery period
+                    if previous_state == CircuitState.HALF_OPEN and self.circuit_breaker.state == CircuitState.CLOSED:
+                        self._rate_limiter.start_recovery_period()
+                        self._was_in_recovery = True
+                        # Persist recovery_started_at for cross-restart continuity
+                        if self.data_dir is not None:
+                            from worker.recovery import RecoveryScheduler
+                            scheduler = RecoveryScheduler(self.data_dir)
+                            state = scheduler.load_state()
+                            state.recovery_started_at = time.time()
+                            scheduler.save_state(state)
+                        log_info("Recovery period started: graduated rate limiting enabled")
+
                     log_info(f"Job {pqid} completed")
 
                     # Brief pause between jobs to avoid overwhelming Plex
@@ -399,6 +455,10 @@ class SyncWorker:
                     # Nack job back to queue, circuit breaker pauses processing
                     nack_job(self.queue, item)
                     self.circuit_breaker.record_failure()
+
+                    # Record result with rate limiter for error monitoring
+                    self._rate_limiter.record_result(success=False)
+
                     if self.circuit_breaker.state == CircuitState.OPEN:
                         pending = self.queue.size
                         log_warn(f"Plex server is down — pausing, {pending} job(s) waiting")
@@ -407,6 +467,10 @@ class SyncWorker:
                     _job_elapsed = time.perf_counter() - _job_start
                     # Record failure with circuit breaker
                     self.circuit_breaker.record_failure()
+
+                    # Record result with rate limiter for error monitoring
+                    self._rate_limiter.record_result(success=False)
+
                     if self.circuit_breaker.state == CircuitState.OPEN:
                         log_warn(f"Circuit breaker OPENED after {type(e).__name__}: {e}")
 

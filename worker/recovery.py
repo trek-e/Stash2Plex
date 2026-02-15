@@ -29,6 +29,7 @@ class RecoveryState:
     consecutive_failures: int = 0          # consecutive failed checks
     last_recovery_time: float = 0.0        # when circuit last closed after outage
     recovery_count: int = 0                # total recoveries detected
+    recovery_started_at: float = 0.0       # when recovery period began (0.0 = not in recovery)
 
 
 class RecoveryScheduler:
@@ -113,6 +114,7 @@ class RecoveryScheduler:
                 if circuit_breaker.state == CircuitState.CLOSED:
                     state.recovery_count += 1
                     state.last_recovery_time = time.time()
+                    state.recovery_started_at = time.time()
                     state.consecutive_successes = 0
                     log_info(f"Recovery detected: Plex is back online (recovery #{state.recovery_count})")
             elif circuit_breaker.state == CircuitState.OPEN:
@@ -131,6 +133,16 @@ class RecoveryScheduler:
             # Log at debug level (expected during outage)
             log_debug(f"Health check failed during {circuit_breaker.state.value} state")
 
+        self.save_state(state)
+
+    def clear_recovery_period(self) -> None:
+        """Clear recovery period state.
+
+        Called when graduated rate limiting ramp completes.
+        Sets recovery_started_at to 0.0 and persists state.
+        """
+        state = self.load_state()
+        state.recovery_started_at = 0.0
         self.save_state(state)
 
 
