@@ -51,6 +51,10 @@ tasks:
     description: Check Plex server connectivity and circuit breaker status
     defaultArgs:
       mode: health_check
+  - name: Outage Summary Report
+    description: Show outage history, MTTR, MTBF, and availability statistics
+    defaultArgs:
+      mode: outage_summary
   - name: Reconcile Library (All)
     description: Detect and queue metadata gaps for all scenes (empty metadata, stale syncs, missing from Plex)
     defaultArgs:

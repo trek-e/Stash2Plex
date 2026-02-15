@@ -563,6 +563,93 @@ def handle_queue_status():
         except Exception as e:
             log_debug(f"Failed to load reconciliation status: {e}")
 
+        # Circuit Breaker Status (VISB-01)
+        try:
+            from worker.outage_history import format_duration, format_elapsed_since
+            cb_file = os.path.join(data_dir, 'circuit_breaker.json')
+
+            log_info("=== Circuit Breaker Status ===")
+            if os.path.exists(cb_file):
+                try:
+                    with open(cb_file, 'r') as f:
+                        cb_data = json.load(f)
+                    state_value = cb_data.get('state', 'closed')
+                    log_info(f"State: {state_value.upper()}")
+
+                    if state_value == 'open' and cb_data.get('opened_at'):
+                        opened_at = cb_data['opened_at']
+                        log_info(f"Opened: {format_elapsed_since(opened_at)}")
+                        log_info(f"Duration: {format_duration(time.time() - opened_at)}")
+                    elif state_value == 'half_open':
+                        log_info("Testing recovery...")
+                except Exception as e:
+                    log_info(f"State: UNKNOWN (corrupted state file: {e})")
+            else:
+                log_info("State: CLOSED (no state file)")
+        except Exception as e:
+            log_debug(f"Failed to load circuit breaker status: {e}")
+
+        # Recovery Status (VISB-01)
+        try:
+            from worker.recovery import RecoveryScheduler
+            from worker.outage_history import format_elapsed_since
+            recovery_scheduler = RecoveryScheduler(data_dir)
+            recovery_state = recovery_scheduler.load_state()
+
+            log_info("=== Recovery Status ===")
+            if recovery_state.last_check_time > 0:
+                log_info(f"Last health check: {format_elapsed_since(recovery_state.last_check_time)}")
+
+                # Show next check timing if circuit is OPEN
+                cb_file = os.path.join(data_dir, 'circuit_breaker.json')
+                if os.path.exists(cb_file):
+                    try:
+                        with open(cb_file, 'r') as f:
+                            cb_data = json.load(f)
+                        if cb_data.get('state') == 'open':
+                            elapsed = time.time() - recovery_state.last_check_time
+                            next_check_in = max(0, 5.0 - elapsed)
+                            log_info(f"Next check: in {next_check_in:.0f}s")
+                    except:
+                        pass
+            else:
+                log_info("No health checks yet")
+
+            if recovery_state.last_recovery_time > 0:
+                log_info(f"Last recovery: {format_elapsed_since(recovery_state.last_recovery_time)}")
+
+            log_info(f"Total recoveries: {recovery_state.recovery_count}")
+        except Exception as e:
+            log_debug(f"Failed to load recovery status: {e}")
+
+        # Recent Outages (VISB-01)
+        try:
+            from worker.outage_history import OutageHistory, format_duration
+
+            log_info("=== Recent Outages ===")
+            history = OutageHistory(data_dir)
+            records = history.get_history()
+
+            if records:
+                # Show last 3 outages
+                recent = records[-3:]
+                for record in recent:
+                    if record.ended_at is None:
+                        elapsed = time.time() - record.started_at
+                        log_info(f"ONGOING ({format_duration(elapsed)})")
+                    else:
+                        log_info(f"Duration: {format_duration(record.duration)}")
+
+                # Check for current ongoing outage
+                current = history.get_current_outage()
+                if current:
+                    elapsed = time.time() - current.started_at
+                    log_info(f"Current outage: {format_duration(elapsed)}")
+            else:
+                log_info("No outages recorded")
+        except Exception as e:
+            log_debug(f"Failed to load outage history: {e}")
+
     except Exception as e:
         log_error(f"Failed to get queue status: {e}")
         import traceback
@@ -867,8 +954,10 @@ def maybe_check_recovery():
 
         data_dir = get_plugin_data_dir()
         from worker.recovery import RecoveryScheduler
+        from worker.outage_history import OutageHistory
 
-        scheduler = RecoveryScheduler(data_dir)
+        outage_history = OutageHistory(data_dir)
+        scheduler = RecoveryScheduler(data_dir, outage_history=outage_history)
 
         if not scheduler.should_check_recovery(circuit_state):
             return
@@ -971,6 +1060,71 @@ def _run_auto_reconcile(scheduler, scope: str, is_startup: bool):
         log_warn(f"Auto-reconciliation failed: {e}")
 
 
+def handle_outage_summary():
+    """Display outage history and metrics (MTTR, MTBF, availability)."""
+    try:
+        data_dir = get_plugin_data_dir()
+
+        from worker.outage_history import (
+            OutageHistory,
+            calculate_outage_metrics,
+            format_duration,
+            format_elapsed_since
+        )
+
+        history = OutageHistory(data_dir)
+        records = history.get_history()
+
+        if not records:
+            log_info("No outages recorded")
+            return
+
+        # Calculate metrics
+        metrics = calculate_outage_metrics(records)
+
+        log_info("=== Outage Summary Report ===")
+        log_info(f"Total outages tracked: {len(records)}")
+        log_info(f"Completed outages: {metrics['outage_count']}")
+        log_info(f"Total downtime: {format_duration(metrics['total_downtime'])}")
+
+        if metrics['outage_count'] > 0:
+            log_info(f"MTTR (Mean Time To Repair): {format_duration(metrics['mttr'])}")
+
+        if metrics['mtbf'] > 0:
+            log_info(f"MTBF (Mean Time Between Failures): {format_duration(metrics['mtbf'])}")
+            log_info(f"Availability: {metrics['availability']:.2f}%")
+
+        # Check for ongoing outage
+        current = history.get_current_outage()
+        if current:
+            log_info(f"ONGOING: started {format_elapsed_since(current.started_at)}")
+
+        # Show last 10 outages
+        log_info("=== Recent Outages ===")
+        recent = records[-10:]
+        recent.reverse()
+
+        for idx, record in enumerate(recent, 1):
+            import datetime
+            start_dt = datetime.datetime.fromtimestamp(record.started_at)
+            start_str = start_dt.strftime('%Y-%m-%d %H:%M:%S')
+
+            if record.ended_at is None:
+                duration_str = "ONGOING"
+            else:
+                duration_str = format_duration(record.duration)
+
+            jobs_str = f", jobs_affected={record.jobs_affected}" if record.jobs_affected > 0 else ""
+            log_info(f"{idx}. {start_str} - {duration_str}{jobs_str}")
+
+        log_info("=== End Report ===")
+
+    except Exception as e:
+        log_error(f"Failed to generate outage summary: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def handle_health_check():
     """Check Plex server connectivity and circuit breaker status."""
     try:
@@ -1058,6 +1212,7 @@ _MANAGEMENT_HANDLERS = {
     'reconcile_recent': lambda args: handle_reconcile('recent'),
     'reconcile_7days': lambda args: handle_reconcile('recent_7days'),
     'health_check': lambda args: handle_health_check(),
+    'outage_summary': lambda args: handle_outage_summary(),
 }
 
 
@@ -1294,7 +1449,7 @@ def main():
     # Give worker time to process pending jobs before exiting
     # Worker thread is daemon, so it dies when main process exits
     # Skip for management tasks that don't enqueue work
-    management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status', 'process_queue', 'reconcile_all', 'reconcile_recent', 'reconcile_7days', 'health_check'}
+    management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status', 'process_queue', 'reconcile_all', 'reconcile_recent', 'reconcile_7days', 'health_check', 'outage_summary'}
     task_mode = args.get("mode", "") if not is_hook else ""
     if worker and queue_manager and task_mode not in management_modes:
         import time
