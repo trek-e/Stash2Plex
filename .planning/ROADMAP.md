@@ -120,10 +120,11 @@ Plans:
   3. Pre-recovery validation checks Plex current state and verifies scene still exists (prevents duplicates)
   4. Recovery operation is idempotent with deduplication tracking (safe to run multiple times)
   5. Conservative recovery defaults to PlexServerDown errors only (safe set), expandable to other types
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 22-01: TBD
+- [ ] 22-01-PLAN.md --- TDD: DLQ recovery module with error classification, time-windowed queries, and idempotent recovery
+- [ ] 22-02-PLAN.md --- Wire recovery task into Stash UI with handler, registration, and tests
 
 ## Progress
 
@@ -140,7 +141,7 @@ Phases execute in numeric order: 17 → 18 → 19 → 20 → 21 → 22
 | 19. Recovery Detection & Automation | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
 | 20. Graduated Recovery & Rate Limiting | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
 | 21. Outage Visibility & History | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
-| 22. DLQ Recovery for Outage Jobs | v1.5 | 0/TBD | Not started | - |
+| 22. DLQ Recovery for Outage Jobs | v1.5 | 0/2 | Not started | - |
 
 ---
-*Last updated: 2026-02-15 after Phase 21 completion*
+*Last updated: 2026-02-15 after Phase 22 planning*
