@@ -10,12 +10,12 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Milestone: v1.5 Outage Resilience
-Phase: 20 of 22 (Graduated Recovery & Rate Limiting)
-Plan: 2 of 2 in current phase
+Phase: 21 of 22 (Outage Visibility & History)
+Plan: 1 of 2 in current phase
 Status: Complete
-Last activity: 2026-02-15 — Completed 20-02-PLAN.md (Worker Loop Integration)
+Last activity: 2026-02-15 — Completed 21-01-PLAN.md (OutageHistory Manager with Metrics)
 
-Progress: [████████████] 100% (2 of 2 plans in phase 20 complete)
+Progress: [██████------] 50% (1 of 2 plans in phase 21 complete)
 
 ## Performance Metrics
 
@@ -41,7 +41,11 @@ Progress: [████████████] 100% (2 of 2 plans in phase 20 
 | 19-recovery-detection-automation | 2 | 5.77 min | 2.89 min |
 | 20-graduated-recovery-rate-limiting | 2 | 8.63 min | 4.32 min |
 
-**v1.5 Progress:** 8 of 8 plans complete across phases 17-20 (100%)
+**v1.5 Progress:** 9 of 10 plans complete across phases 17-21 (90%)
+
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| 21-outage-visibility-history | 1 | 2.6 min | 2.6 min |
 
 ## Accumulated Context
 
@@ -79,6 +83,10 @@ Recent decisions affecting current work:
 - [Phase 20-02]: Sleep in 0.5s chunks during rate limiting for quick interruption by stop()
 - [Phase 20-02]: Recovery period state persists to recovery_state.json for cross-restart continuity
 - [Phase 20-02]: Normal operation (circuit CLOSED, no recovery) has zero overhead from rate limiter
+- [Phase 21-01]: Circular buffer with maxlen=30 for automatic oldest-record eviction
+- [Phase 21-01]: Module-level formatting functions (format_duration, format_elapsed_since) for reusability
+- [Phase 21-01]: MTBF requires >= 2 outages (cannot calculate time-between-failures with single data point)
+- [Phase 21-01]: Availability defaults to 100% when MTBF=0 (avoids division by zero)
 
 ### Pending Todos
 
@@ -91,9 +99,9 @@ None yet. Research indicates zero new dependencies needed (stdlib + plexapi).
 ## Session Continuity
 
 Last session: 2026-02-15 (plan execution)
-Stopped at: Completed 20-02-PLAN.md (Worker Loop Integration)
+Stopped at: Completed 21-01-PLAN.md (OutageHistory Manager with Metrics)
 Resume file: None
-Next step: Begin Phase 21 (Outage Visibility & History)
+Next step: Execute 21-02-PLAN.md (Status UI Integration)
 
 ---
-*Last updated: 2026-02-15 after completing plan 20-02 (2 of 2 in phase 20)*
+*Last updated: 2026-02-15 after completing plan 21-01 (1 of 2 in phase 21)*
