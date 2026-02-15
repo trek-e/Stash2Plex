@@ -118,14 +118,17 @@ def find_plex_item_by_path(
     """
     Find Plex item matching a Stash file path.
 
+    NOTE: This function is unused in production code. All callers use
+    find_plex_items_with_confidence() instead. Kept for backward compatibility.
+
     Fast path: title search then verify filename.
     Slow fallback: scan all items by filename if title search fails.
 
     Args:
         library: Plex library section to search
         stash_path: File path from Stash
-        plex_path_prefix: Unused, kept for API compatibility
-        stash_path_prefix: Unused, kept for API compatibility
+        plex_path_prefix: Reserved for future use (path translation not implemented)
+        stash_path_prefix: Reserved for future use (path translation not implemented)
 
     Returns:
         Matching Plex item or None if not found / ambiguous
@@ -190,10 +193,11 @@ def find_plex_items_with_confidence(
     Args:
         library: Plex library section to search
         stash_path: File path from Stash
-        plex_path_prefix: Unused, kept for API compatibility
-        stash_path_prefix: Unused, kept for API compatibility
+        plex_path_prefix: Reserved for future use (path translation not implemented)
+        stash_path_prefix: Reserved for future use (path translation not implemented)
         library_cache: Optional PlexCache for library/search result caching
         match_cache: Optional MatchCache for path-to-key mapping caching
+        debug_logging: Enable verbose debug logging for troubleshooting
 
     Returns:
         Tuple of (confidence, best_match_or_none, all_candidates):

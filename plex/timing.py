@@ -2,6 +2,15 @@
 Timing utilities for performance measurement.
 
 Provides decorators to log operation duration and identify bottlenecks.
+
+NOTE: This module was created during Phase 7 (performance optimization) but is
+not currently used in production code. It provides infrastructure for future
+observability improvements. The module is tested and ready to use.
+
+To integrate timing into production:
+- Add @timed decorator to critical functions (matcher, sync, queue processing)
+- Use OperationTimer context manager in hot paths
+- Consider structured logging integration for timing data
 """
 
 import logging

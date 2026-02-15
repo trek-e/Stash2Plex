@@ -45,14 +45,8 @@ def _get_retriable_exceptions() -> Tuple[Type[Exception], ...]:
     )
 
 
-# Connection errors that warrant immediate retry
-# These are network-level failures that may resolve quickly
-# Lazily initialized to avoid import issues
-RETRIABLE_EXCEPTIONS: Tuple[Type[Exception], ...] = (
-    ConnectionError,
-    TimeoutError,
-    OSError,
-)
+# Connection errors tuple is built lazily via _get_retriable_exceptions()
+# to avoid importing requests at module load time
 
 
 class PlexClient:
@@ -88,12 +82,12 @@ class PlexClient:
         self,
         url: str,
         token: str,
-        connect_timeout: float = 5.0,
+        connect_timeout: float = 5.0,  # Unused - plexapi uses single timeout for both
         read_timeout: float = 30.0,
     ) -> None:
         self._url = url
         self._token = token
-        self._connect_timeout = connect_timeout
+        self._connect_timeout = connect_timeout  # Stored for API compatibility but not used
         self._read_timeout = read_timeout
         self._server: Optional["PlexServer"] = None
         self._session = None
@@ -215,3 +209,33 @@ class PlexClient:
                 section.update()
         except Exception as exc:
             raise translate_plex_exception(exc) from exc
+
+    def close(self) -> None:
+        """
+        Close the Plex client and release resources.
+
+        Closes the underlying requests.Session if one was created.
+        Safe to call multiple times.
+
+        Example:
+            >>> client = PlexClient(url="http://plex:32400", token="token")
+            >>> try:
+            ...     library = client.get_library("Movies")
+            ... finally:
+            ...     client.close()
+        """
+        if self._session is not None:
+            try:
+                self._session.close()
+            except Exception as e:
+                logger.debug(f"Error closing session: {e}")
+            finally:
+                self._session = None
+
+    def __enter__(self) -> "PlexClient":
+        """Context manager entry - returns self."""
+        return self
+
+    def __exit__(self, *args) -> None:
+        """Context manager exit - closes session."""
+        self.close()
