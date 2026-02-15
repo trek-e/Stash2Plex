@@ -2,18 +2,20 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-14)
+See: .planning/PROJECT.md (updated 2026-02-15)
 
 **Core value:** Reliable sync — when metadata changes in Stash, it eventually reaches Plex
-**Current focus:** Between milestones — ad-hoc improvements shipped as v1.4.1-v1.4.3
+**Current focus:** v1.5 Outage Resilience — automatic recovery when Plex returns after downtime
 
 ## Current Position
 
-Milestone: v1.4 Metadata Reconciliation — COMPLETE + post-milestone patches
-Status: v1.4.3 released 2026-02-14
-Last activity: 2026-02-14 — Released v1.4.3 (reconciliation PlexClient.connect fix)
+Milestone: v1.5 Outage Resilience
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-02-15 — Milestone v1.5 started
 
-Progress: [██████████] 100% (v1.4 complete + 3 patch releases)
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -34,7 +36,7 @@ Progress: [██████████] 100% (v1.4 complete + 3 patch release
 - Last 5 plans: 14-02 (6.00 min), 15-01 (3.38 min), 16-01 (4.08 min), 16-02 (3.85 min)
 - Trend: Phase 16 complete
 
-*Note: v1.0-v1.2 used GSD phases; v1.3 was ad-hoc. This is v1.4 milestone.*
+*Note: v1.0-v1.2 used GSD phases; v1.3 was ad-hoc. v1.4 milestone complete.*
 
 **Detailed Metrics:**
 
@@ -72,21 +74,11 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-14
-Stopped at: v1.4.3 released — bugfix for reconciliation
-
-### Work completed this session:
-- **v1.4.3**: Fixed reconciliation `'PlexClient' object has no attribute 'connect'` error
-  - Root cause: `reconciliation/engine.py` called `client.connect()` but PlexClient uses `.server` property
-  - Fixed engine code + updated test mocks to use `PropertyMock` on `.server`
-  - Released as v1.4.3 with GitHub release and updated plugin index
-
-### Stats:
-- 1000 tests passing, 85% coverage
-- 13 commits since v1.4.0
+Last session: 2026-02-15
+Stopped at: Starting milestone v1.5 — defining requirements
 
 Resume file: None
-Next action: `/gsd:new-milestone` to start next milestone
+Next action: Complete requirements definition and roadmap creation
 
 ---
-*Last updated: 2026-02-14*
+*Last updated: 2026-02-15*

@@ -85,7 +85,16 @@ Built on v1.0-v1.3 foundation:
 
 ### Active
 
-(None — planning next milestone)
+## Current Milestone: v1.5 Outage Resilience
+
+**Goal:** Automatic recovery when Plex comes back online after downtime — queue drains without user interaction, circuit breaker state persists across restarts, and health monitoring provides visibility into outage/recovery status.
+
+**Target features:**
+- Automatic queue drain when Plex recovers from outage
+- Circuit breaker state persistence across Stash process restarts
+- Plex health monitoring and recovery detection
+- DLQ recovery for outage-related failures
+- Enhanced outage visibility in queue status
 
 ### Out of Scope
 
@@ -135,6 +144,7 @@ Built on v1.0-v1.3 foundation:
 | v1.2 | Complete | 2026-02-04 | 3 phases, 3 plans, 15 commits |
 | v1.3 | Complete | 2026-02-09 | Ad-hoc, 28 commits, production-driven |
 | v1.4 | Complete | 2026-02-14 | 3 phases, 5 plans, metadata reconciliation |
+| v1.5 | Active | 2026-02-15 | Outage resilience |
 
 ---
-*Last updated: 2026-02-14 after v1.4 milestone completion*
+*Last updated: 2026-02-15 after v1.5 milestone start*
