@@ -69,10 +69,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HLTH-01 | Phase 18 | Pending |
 | HLTH-02 | Phase 18 | Pending |
 | HLTH-03 | Phase 18 | Pending |
-| STAT-01 | Phase 17 | Pending |
+| STAT-01 | Phase 17 | Complete |
 | STAT-02 | Phase 19 | Pending |
 | VISB-01 | Phase 21 | Pending |
-| VISB-02 | Phase 17 | Pending |
+| VISB-02 | Phase 17 | Complete |
 | VISB-03 | Phase 21 | Pending |
 | VISB-04 | Phase 21 | Pending |
 | DLQM-01 | Phase 22 | Pending |

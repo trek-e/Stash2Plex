@@ -24,7 +24,7 @@
 
 **Milestone Goal:** Automatic recovery when Plex comes back online after downtime — queue drains without user interaction, circuit breaker state persists across restarts, and health monitoring provides visibility into outage/recovery status.
 
-- [ ] **Phase 17: Circuit Breaker Persistence** - Circuit breaker state survives plugin restarts
+- [x] **Phase 17: Circuit Breaker Persistence** - Circuit breaker state survives plugin restarts — completed 2026-02-15
 - [ ] **Phase 18: Health Check Infrastructure** - Lightweight Plex connectivity validation
 - [ ] **Phase 19: Recovery Detection & Automation** - Automatic Plex recovery detection with queue drain
 - [ ] **Phase 20: Graduated Recovery & Rate Limiting** - Rate-limited queue draining prevents overwhelming recovered Plex
@@ -131,7 +131,7 @@ Phases execute in numeric order: 17 → 18 → 19 → 20 → 21 → 22
 | 14. Gap Detection Engine | v1.4 | 2/2 | ✓ Complete | 2026-02-14 |
 | 15. Manual Reconciliation | v1.4 | 1/1 | ✓ Complete | 2026-02-14 |
 | 16. Automated Reconciliation & Reporting | v1.4 | 2/2 | ✓ Complete | 2026-02-14 |
-| 17. Circuit Breaker Persistence | v1.5 | 0/2 | Not started | - |
+| 17. Circuit Breaker Persistence | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
 | 18. Health Check Infrastructure | v1.5 | 0/TBD | Not started | - |
 | 19. Recovery Detection & Automation | v1.5 | 0/TBD | Not started | - |
 | 20. Graduated Recovery & Rate Limiting | v1.5 | 0/TBD | Not started | - |
