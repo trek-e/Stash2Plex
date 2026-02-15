@@ -5,17 +5,17 @@
 See: .planning/PROJECT.md (updated 2026-02-15)
 
 **Core value:** Reliable sync — when metadata changes in Stash, it eventually reaches Plex — even if Plex was temporarily unavailable
-**Current focus:** v1.5 Outage Resilience (Phase 18: Health Check Infrastructure)
+**Current focus:** v1.5 Outage Resilience (Phase 19: Recovery Detection & Automation)
 
 ## Current Position
 
 Milestone: v1.5 Outage Resilience
-Phase: 18 of 22 (Health Check Infrastructure)
-Plan: 2 of 2 in current phase
-Status: Complete
-Last activity: 2026-02-15 — Completed 18-02-PLAN.md (manual health check task + active probes)
+Phase: 19 of 22 (Recovery Detection & Automation)
+Plan: 1 of 2 in current phase
+Status: In Progress
+Last activity: 2026-02-15 — Completed 19-01-PLAN.md (RecoveryScheduler with check-on-invocation pattern)
 
-Progress: [████████████] 100% (2 of 2 plans in phase 18 complete)
+Progress: [██████] 50% (1 of 2 plans in phase 19 complete)
 
 ## Performance Metrics
 
@@ -38,8 +38,9 @@ Progress: [████████████] 100% (2 of 2 plans in phase 18 
 |-------|-------|-------|----------|
 | 17-circuit-breaker-persistence | 2 | 4 min | 2 min |
 | 18-health-check-infrastructure | 2 | 7.42 min | 3.71 min |
+| 19-recovery-detection-automation | 1 | 2.9 min | 2.9 min |
 
-**v1.5 Progress:** 4 of 4 plans complete across phases 17-18 (COMPLETE)
+**v1.5 Progress:** 5 of 6 plans complete across phases 17-19 (IN PROGRESS)
 
 ## Accumulated Context
 
@@ -60,6 +61,9 @@ Recent decisions affecting current work:
 - v1.3: Debug logs as log_info with prefix (Stash filters out log_debug entirely)
 - [Phase 17-02]: Follow stats.json initialization pattern for circuit_breaker.json (consistency)
 - [Phase 17-02]: Integration tests simulate restart via multiple worker instances from same data_dir
+- [Phase 19-01]: Recovery health check interval is 5.0s (same as health check timeout)
+- [Phase 19-01]: Recovery detection only runs during OPEN/HALF_OPEN states, not CLOSED
+- [Phase 19-01]: Recovery logged at info level with count
 
 ### Pending Todos
 
@@ -72,9 +76,9 @@ None yet. Research indicates zero new dependencies needed (stdlib + plexapi).
 ## Session Continuity
 
 Last session: 2026-02-15 (plan execution)
-Stopped at: Completed 18-02-PLAN.md (manual health check task + active probes)
+Stopped at: Completed 19-01-PLAN.md (RecoveryScheduler with check-on-invocation pattern)
 Resume file: None
-Next step: Begin Phase 19 (Recovery Detection & Automation)
+Next step: Continue Phase 19 with plan 19-02 (Worker Loop Integration)
 
 ---
-*Last updated: 2026-02-15 after completing plan 18-02 (2 of 2 in phase 18 - PHASE COMPLETE)*
+*Last updated: 2026-02-15 after completing plan 19-01 (1 of 2 in phase 19)*
