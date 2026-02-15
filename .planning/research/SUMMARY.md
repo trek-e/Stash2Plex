@@ -1,348 +1,386 @@
 # Project Research Summary
 
-**Project:** PlexSync Improvements
-**Domain:** Stash-to-Plex metadata synchronization plugin
-**Researched:** 2026-01-24
+**Project:** PlexSync Outage Resilience Features (v1.5)
+**Domain:** Event-driven metadata sync with queue resilience
+**Researched:** 2026-02-15
 **Confidence:** HIGH
 
 ## Executive Summary
 
-PlexSync is a Stash plugin that synchronizes scene metadata to Plex Media Server. The research reveals that reliable metadata sync plugins require a fundamentally different architecture than the current synchronous approach. Expert practitioners use **queue-based, asynchronous architectures** with exponential backoff retry, persistent state management, and comprehensive error handling. The recommended approach separates event capture (hook handlers that return quickly) from processing (background workers with retry logic), using SQLite-backed persistent queues to survive crashes and Plex downtime.
+PlexSync needs automatic recovery when Plex comes back online after outages. The research reveals this is table stakes for production queue systems—AWS SQS, RabbitMQ, and Kafka all auto-resume after downstream recovery. PlexSync's unique constraint is the non-daemon architecture: Stash plugins exit after each invocation, so recovery detection must use the check-on-invocation pattern proven in v1.4's auto-reconciliation scheduler.
 
-The critical insight from research: **synchronous API calls in hook handlers are the root cause of reliability issues**. When Plex is down or slow, Stash blocks waiting for responses, sync operations are lost, and failures happen silently. The solution is a layered Hook-Queue-Worker architecture using lightweight, embedded technologies (tenacity for retries, persist-queue for SQLite-backed queues, pydantic for validation) that require no external dependencies beyond Python libraries.
+The recommended approach requires **zero new dependencies**. Extend the existing circuit breaker (worker/circuit_breaker.py) with JSON state persistence using stdlib patterns already validated in reconciliation/scheduler.py. Add active health checks using plexapi's server.query('/identity') endpoint. Wire recovery detection into the check-on-invocation pattern—on each plugin invocation, check if circuit breaker is OPEN and Plex has recovered. When Plex is healthy again, close the circuit and let the existing worker loop automatically drain the queue.
 
-The primary risk is implementing retry logic without idempotency and proper error classification. Research shows this creates cascading failures: retries duplicate metadata updates, permanent errors (404, 401) waste resources retrying endlessly, and thundering herd problems overwhelm recovering services. Mitigation requires designing idempotent operations from the start, classifying errors before implementing retry logic, and using exponential backoff with jitter as table stakes for any retry implementation.
+The critical risks are race conditions and thundering herd on recovery. Circuit breaker state transitions need file locking to prevent concurrent invocations from creating duplicate recovery attempts. Queue draining after recovery needs rate limiting to avoid overwhelming a just-recovered Plex server with hundreds of backlogged sync jobs. Both patterns have proven solutions in the research: fcntl-based advisory locking for state persistence, and graduated recovery with configurable rate limits.
 
 ## Key Findings
 
 ### Recommended Stack
 
-**Use lightweight, embedded solutions optimized for plugin architecture.** The research strongly recommends avoiding heavyweight task queues (Celery, RQ, Huey) that require external infrastructure like Redis. PlexSync's plugin context demands zero-config, embedded solutions that "just work" without separate server processes.
+**NO NEW DEPENDENCIES REQUIRED.** All capabilities exist in the current stack (Python stdlib + plexapi + persist-queue). This is the strongest finding—typical circuit breaker libraries (pybreaker) require Redis for persistence, but PlexSync's existing pattern (JSON + atomic write) is sufficient and already proven.
 
 **Core technologies:**
-- **Tenacity (9.1.2)**: Python retry library with exponential backoff and async support — industry standard with 1,034+ stars, actively maintained fork of deprecated retrying library
-- **persist-queue (1.1.0)**: SQLite-backed persistent queue with acknowledgment support — zero external dependencies, WAL mode for concurrent access, perfect for embedded plugin use
-- **Pydantic (2.12.5)**: Rust-backed input validation with type-hint native API — fastest in ecosystem, prevents bad data from reaching Plex API
-- **pybreaker (1.4.1)**: Circuit breaker for preventing cascading failures — production-stable, configurable thresholds, async support
-- **Python 3.11+**: Required by stashapi, provides best compatibility across the ecosystem
+- **json (stdlib)**: Circuit breaker state persistence — Already validated in reconciliation/scheduler.py. Atomic write pattern (write to .tmp, os.replace) prevents corruption on crashes. Human-readable for debugging. Zero dependencies.
+- **plexapi >=4.17.0**: Health check via server.query('/identity') — v4.18.0 installed. Lightweight XML endpoint validates Plex is reachable. Existing dependency, no additional installation needed.
+- **threading.Timer (stdlib)**: Check-on-invocation recovery trigger — Pattern validated in reconciliation/scheduler.py. Use is_due() pattern on each plugin invocation to check if queue drain should be attempted after circuit breaker recovery.
 
-**Key rejections:**
-- NOT Celery/RQ/Huey (require Redis/external broker, too heavyweight)
-- NOT python-plexapi (4.1MB library when only single PUT endpoint needed)
-- NOT in-memory queues (state lost on crashes, no durability)
+**What NOT to use:**
+- **pybreaker**: Requires Redis server (external dependency). PlexSync circuit_breaker.py already implements 3-state pattern in 140 lines.
+- **shelve**: Overkill for small state (5-10 fields). writeback=True caches all entries in memory, slow close().
+- **APScheduler**: Contradicts single-file plugin deployment model. Check-on-invocation handles recovery triggers without daemons.
 
 ### Expected Features
 
-**Must have (table stakes) — missing these makes plugin feel unreliable:**
-- **Exponential backoff retry**: Industry standard, reduces cascading failures by 83.5%
-- **Retry limits & budget**: Prevents infinite retry loops (typical: 3-5 retries for metadata sync)
-- **Idempotent operations**: Ensures safe retries without duplicates (use unique operation IDs, upsert patterns)
-- **Error-specific retry logic**: Retry network errors/5xx, don't retry 4xx client errors
-- **Explicit timeouts**: requests library has no default timeout, must set (3-4s connect, 10s read)
-- **Silent failure prevention**: Log ALL failures, alert on critical ones
-- **Dead letter queue pattern**: Store unprocessable messages for investigation (increases resiliency 40-60%)
-- **Operation status logging**: Users need visibility (success/pending/failed/retrying with timestamps)
-- **Input validation & sanitization**: Prevents bad data from causing failures
-- **Graceful degradation**: Queue updates when Plex unavailable, don't block Stash
+**Must have (table stakes):**
+- **Automatic queue drain on recovery** — Industry standard. Every production queue system (AWS SQS, RabbitMQ, Kafka) resumes automatically when downstream recovers. Users expect this.
+- **Health monitoring with retry** — All production systems probe downstream to detect recovery. Without this, users must manually hit "Process Queue" after every Plex outage.
+- **Outage visibility in status UI** — Users need to know WHY queue stopped and WHEN it will resume. Extend existing queue status task to show circuit state.
+- **Circuit breaker state logging** — State transitions (CLOSED → OPEN → HALF_OPEN) must be observable for debugging.
+- **Recovery notification** — Users need confirmation when system returns to normal after outage.
 
-**Should have (competitive differentiation):**
-- **Circuit breaker pattern**: Stops retry attempts when service confirmed down (reduces wasted effort)
-- **Late update detection**: Catches metadata changed after initial sync via polling or webhooks
-- **Confidence-based matching**: Fuzzy matching with confidence scores (90%+ auto-merge, 60-89% human review)
-- **Differential sync**: Only sync changed fields rather than full record updates
-- **Sync queue visibility**: Dashboard showing pending/failed/completed with manual retry
+**Should have (competitive differentiators):**
+- **Circuit breaker state persistence** — Survives plugin restarts during outages. Prevents reset to CLOSED and hammering Plex after Stash restart.
+- **Passive + active health checks** — Passive (monitor actual jobs) detects failure faster; active (periodic probe) detects recovery faster. Hybrid approach is best.
+- **Health check backoff** — Space out recovery probes to avoid hammering recovering service (1s → 2s → 4s → cap at 60s).
+- **Outage history tracking** — Log outage start/end times, duration, jobs affected for post-mortem analysis.
 
 **Defer (v2+):**
-- Observability integration (OpenTelemetry) — valuable but complex, standard logging sufficient for MVP
-- Batch sync optimization — optimization, not core reliability
-- Conflict resolution — not needed for uni-directional Stash → Plex sync
-- Adaptive retry strategy — advanced feature, standard backoff sufficient initially
+- **Outage-triggered reconciliation** — When Plex recovers after hours down, auto-reconcile to find gaps from events during outage. Depends on Phase 1 reconciliation engine first.
+- **DLQ recovery for outage jobs** — Jobs DLQ'd during outage (timeout, rate limit) can be re-queued when service recovers. Medium complexity, niche use case.
+
+**Anti-features (explicitly avoid):**
+- **Real-time push notifications** — Stash plugins run per-event, no daemon for push. External monitoring (Uptime Kuma, Healthchecks.io) solves this better.
+- **Automatic full reconciliation on recovery** — Expensive for large libraries (10K+ items). User-triggered with scope filter is safer.
+- **External health check endpoint** — Plugin can't serve HTTP. Plex has native health endpoints.
 
 ### Architecture Approach
 
-**Adopt a Layered Hook-Queue-Worker architecture** that separates event capture from retry logic and API execution. This maintains compatibility with Stash's hook-based plugin system while adding reliability through asynchronous processing and persistent state.
+PlexSync's event-driven, non-daemon architecture shapes all design decisions. The check-on-invocation pattern (proven in v1.4 reconciliation) extends naturally to recovery detection. New components focus on state persistence and health tracking, while existing components (circuit breaker, backoff, queue) require minimal modification.
 
 **Major components:**
-1. **Hook Handler (Event Capture)** — Non-blocking event capture that responds to Stash hooks in <100ms, validates hook context, queries scene metadata via GraphQL, enqueues jobs to persistent queue, returns immediately to Stash
-2. **Persistent Queue (SQLite Storage)** — Durable storage for sync jobs that survives crashes/restarts, uses WAL mode for concurrent access (hook writes while worker reads), tracks job state (pending/in_progress/completed/failed), includes Dead Letter Queue table for permanently failed jobs
-3. **Queue Processor (Background Worker)** — Polls queue every 30s for pending jobs, orchestrates retry logic with exponential backoff, updates job status, moves to DLQ after max retries, runs as scheduled task via Stash Task Scheduler (like FileMonitor plugin)
-4. **Plex API Client (Integration Layer)** — Handles Plex-specific logic (matching scenes by file path, updating metadata, error classification), uses tenacity for immediate retries (100ms, 200ms, 400ms) for network blips, raises PlexTemporaryError (retry) vs PlexPermanentError (DLQ)
-5. **Config Manager** — Centralized configuration from plugin YAML settings, external config file, or environment variables
+1. **resilience/recovery_detector.py (NEW)** — Detects Plex recovery after outage. Loads circuit breaker state, checks if recovery health check is due, coordinates with scheduler and health check components.
+2. **resilience/recovery_scheduler.py (NEW)** — Tracks recovery check timing using check-on-invocation pattern. Manages recovery_state.json with last_check_time, last_check_result, consecutive_successes.
+3. **plex/health.py (NEW)** — Lightweight Plex health checking. Stateless check using server.query('/identity'). Returns (is_healthy: bool, latency_ms: float).
+4. **worker/circuit_breaker.py (MODIFIED)** — Add state_file parameter, save_state()/load_state() methods. Save state on every transition. Atomic write pattern (tmp → rename).
+5. **Stash2Plex.py (MODIFIED)** — Add maybe_recovery_trigger() called after maybe_auto_reconcile(). Wire recovery detection into plugin lifecycle.
+6. **Task Dispatch (MODIFIED)** — Add health_check task mode for manual verification. Reports circuit state, Plex connectivity, recovery state, queue size.
 
-**Key patterns to follow:**
-- Exponential backoff with jitter: prevents thundering herd, formula `min(base_delay * 2^retry, max_delay) + jitter`
-- Dead Letter Queue: after max retries or permanent errors (401, 404), move to DLQ table for manual inspection
-- Separate event capture from processing: hook handler enqueues and returns quickly, worker processes in background
-- Idempotent operations: syncing same scene multiple times produces same result (safe retries, handles late updates)
-- Persistent queue with WAL: SQLite Write-Ahead Logging allows concurrent reads/writes
+**Key architectural patterns:**
+- **Check-on-invocation**: Read state, check if action due, execute if needed, update state. Proven in reconciliation scheduler.
+- **Persisted circuit breaker**: State survives process restarts via JSON + atomic write.
+- **Stateless health check**: No side effects, no persistent state. Scheduler tracks timing separately.
 
 ### Critical Pitfalls
 
-1. **Non-Idempotent Operations Leading to Duplicates** — Retry logic causes duplicate metadata updates (same tag multiple times, duplicate collections). **Prevention:** Implement idempotency keys for all operations, use PUT (update) not POST (additive), store completed operation hashes, design operations as "set rating to 4" not "increment rating"
+1. **Circuit Breaker Stale State Race Condition** — Multiple plugin invocations read stale state, all transition to HALF_OPEN simultaneously, thundering herd of test requests overwhelms Plex. **Prevention:** File-based distributed lock (fcntl) for state transitions, OR single-writer pattern (only worker modifies CB state, hooks read-only), OR idempotent transitions with cooldown timestamps.
 
-2. **Retry Without Exponential Backoff + Jitter** — Plugin overwhelms Plex when it comes back online, creating thundering herd that prevents recovery. **Prevention:** Implement exponential backoff (1s, 2s, 4s, 8s capped at 5min), add jitter (randomness ±25%), respect 429 Retry-After headers, different strategies for different errors (429 vs 503 vs 5xx)
+2. **Health Check False Positive from Plex Restart Sequence** — Health check detects port 32400 open but Plex still loading database (returns 503 for metadata requests). Circuit closes prematurely, queue drains with failures. **Prevention:** Deep health check using sentinel request (server.query('/identity') with DB access verification), NOT shallow TCP connect. Add grace period or require N consecutive successes.
 
-3. **Silent Failures (No Observability)** — Sync operations fail without indication, metadata missing in Plex with no error logs. **Prevention:** Heartbeat monitoring (emit "still alive" signals), structured logging with correlation IDs, track operation states (QUEUED → IN_PROGRESS → COMPLETED/FAILED), Dead Letter Queue for inspection, sync health dashboard (success rate, queue depth, failed items)
+3. **Thundering Herd on Automatic Recovery Trigger** — Plex recovers, 500+ queued jobs drain at max rate, CPU spikes, slow responses cause new failures, circuit reopens. Metastable failure loop. **Prevention:** Graduated recovery with rate limiting (5 jobs/sec → 10 → 20 → normal over 5-10 minutes). Monitor error rate, back off if failures increase. Prioritize recent jobs over stale backlog.
 
-4. **Database-as-Queue Anti-Pattern** — Using database table as queue causes performance degradation, lock contention, difficulty with queue semantics. **Prevention:** Use persist-queue (SQLite-backed queue library) or in-memory queue with disk persistence, if database unavoidable use SELECT FOR UPDATE SKIP LOCKED and separate table from main schema
+4. **DLQ Recovery Without Deduplication** — User recovers 200 DLQ jobs, 150 already resolved manually, creates 150 duplicate syncs. **Prevention:** Pre-recovery validation (check Plex current state, verify scene still exists, check if already in queue). Idempotent recovery with deduplication tracking. Reconciliation-aware recovery (only recover confirmed gaps).
 
-5. **Retrying Non-Transient Errors** — System wastes resources retrying operations that will never succeed (missing Plex library, invalid credentials). **Prevention:** Classify errors before retrying — TRANSIENT (503, timeouts, network errors) retry with backoff, PERMANENT (401, 403, 404, 400) move to DLQ immediately, validate before queuing (scene has file path, Plex library exists, credentials valid)
+5. **Check-on-Invocation Race Condition with Concurrent Hooks** — Two hooks fire simultaneously, both see reconciliation is due, both trigger gap detection. **Prevention:** Atomic check-and-set with file locking (fcntl.flock), cooldown window with randomized delay, single-threaded reconciliation via worker queue, OR idempotent reconciliation with run ID.
 
 ## Implications for Roadmap
 
-Based on research, suggested phase structure follows a **foundation-first approach** that builds reliability infrastructure before adding advanced features. The dependency analysis reveals that retry logic requires idempotency to be safe, observability must exist before queue mechanisms for debuggability, and error classification prevents wasted retries.
+Based on research, suggested phase structure:
 
-### Phase 1: Persistent Queue Foundation
-**Rationale:** Foundation for all reliability improvements, testable in isolation without touching existing sync code. Research shows queue persistence is critical — in-memory queues lose state on crashes, causing silent data loss.
+### Phase 1: Circuit Breaker State Persistence (Foundation)
 
-**Delivers:** SQLite database with sync_queue and dlq_queue tables, queue operations (enqueue, get_pending, update_status, move_to_dlq), config manager for settings, persistence across process restarts
+**Rationale:** Circuit breaker persistence is the foundation for recovery detection. Without it, recovery detector can't check "is circuit OPEN?" without worker running. Must come first because all other phases depend on durable circuit state.
+
+**Delivers:** Circuit breaker state survives plugin restarts. State persists to `circuit_breaker.json` using atomic write pattern.
 
 **Addresses:**
-- Graceful degradation (queue updates when Plex down)
-- State management without persistence pitfall (survives crashes)
-- Dead letter queue pattern (table stakes feature)
+- Must-have: Circuit breaker state persistence (prevents reset-to-CLOSED after Stash restart)
+- Anti-pattern avoidance: Prevents retry exhaustion after restart during outages
 
 **Avoids:**
-- Database-as-queue anti-pattern (uses proper queue library)
-- State management without persistence (SQLite durability)
+- Critical Pitfall 1: Race conditions via file locking with fcntl (POSIX advisory locks)
+- Technical debt: Skip file locking = race conditions with concurrent invocations (NEVER acceptable)
 
-**Research flag:** Standard pattern, skip research-phase. Well-documented SQLite + WAL mode usage.
+**Stack elements:** json (stdlib), atomic write pattern (os.replace)
+
+**Research flag:** STANDARD PATTERNS — JSON persistence pattern proven in reconciliation/scheduler.py. No additional research needed.
 
 ---
 
-### Phase 2: Hook Handler (Non-Blocking Event Capture)
-**Rationale:** Enables end-to-end flow (Stash event → queue) without requiring Plex integration yet. Builds on Phase 1 queue infrastructure. Research emphasizes hook handlers must return in <100ms — current synchronous Plex calls violate this.
+### Phase 2: Plex Health Check Implementation (Independent)
 
-**Delivers:** Parse Stash hook context, query Stash GraphQL for scene metadata, input validation/sanitization (pydantic models), enqueue jobs to persistent queue, measure and ensure <100ms response time
+**Rationale:** Health checking is independent of circuit breaker persistence. Can develop in parallel with Phase 1. Needed before recovery detection (Phase 4) but provides immediate value as manual task.
+
+**Delivers:** Lightweight Plex connectivity check. Manual "Health Check" task available in Stash UI.
 
 **Addresses:**
-- Synchronous blocking sync anti-pattern (async via queue)
-- Input validation & sanitization (table stakes feature)
-- Operation status logging (visibility into sync state)
+- Must-have: Health monitoring (foundation for automatic recovery)
+- Must-have: Outage visibility in status UI (health check shows current state)
 
 **Avoids:**
-- No input validation/sanitization pitfall (pydantic validation early)
-- Synchronous API call in hook handler anti-pattern (queue instead)
+- Critical Pitfall 2: False positives from shallow checks. Use server.query('/identity') with DB access verification.
 
-**Research flag:** Standard pattern, skip research-phase. Hook-to-queue is well-documented pattern.
+**Stack elements:** plexapi server.query('/identity'), existing PlexClient
+
+**Research flag:** STANDARD PATTERNS — Plex /identity endpoint well-documented. Health check pattern proven in multiple systems.
 
 ---
 
-### Phase 3: Error Classification & Validation
-**Rationale:** Must happen BEFORE retry logic implementation. Research shows classifying errors first prevents wasting resources retrying permanent failures. This phase is cheap (mostly configuration) but critical for Phase 4 success.
+### Phase 3: Recovery Scheduler Implementation (State Management)
 
-**Delivers:** Error classification logic (transient vs permanent), validation rules for metadata (pydantic schemas), sanitization functions (character limits, special char handling), pre-queue validation (required fields, data types)
+**Rationale:** Recovery scheduler manages check timing using check-on-invocation pattern. Independent component, can develop after Phase 1's persistence patterns are proven. Needed before Phase 4 integration.
+
+**Delivers:** Recovery check timing and state tracking. Persists to `recovery_state.json`.
 
 **Addresses:**
-- Error-specific retry logic (table stakes feature)
-- Input validation & sanitization (table stakes feature)
+- Should-have: Health check backoff (adaptive interval, reduces load on recovering service)
 
 **Avoids:**
-- Retrying non-transient errors pitfall (classify before retry)
-- No input validation pitfall (validation before queue)
+- Critical Pitfall 5: Check-on-invocation races via atomic check-and-set with file locking
 
-**Research flag:** Standard pattern, skip research-phase. HTTP error code classification is well-established.
+**Stack elements:** json (stdlib), check-on-invocation pattern from reconciliation/scheduler.py
+
+**Research flag:** STANDARD PATTERNS — Reuses reconciliation scheduler pattern. No new research needed.
 
 ---
 
-### Phase 4: Plex API Client with Immediate Retry
-**Rationale:** Implements Plex integration with tenacity for sub-second retries (network blips). Testable independently against real/mock Plex before wiring up queue processor. Phase 3 error classification feeds into this layer.
+### Phase 4: Recovery Detector Integration (Orchestration)
 
-**Delivers:** Plex authentication (token from config), scene matching logic (file path → Plex item), metadata update via Plex API, tenacity decorator for immediate retries (100ms, 200ms, 400ms), error handling (raise PlexTemporaryError vs PlexPermanentError), timeout configuration (3-4s connect, 10s read)
+**Rationale:** Integrates all previous phases (circuit breaker persistence, health check, recovery scheduler) into cohesive recovery detection. Depends on Phases 1-3 completion.
+
+**Delivers:** Automatic Plex recovery detection. Creates `resilience/recovery_detector.py` that coordinates state, health checks, and scheduling.
 
 **Addresses:**
-- Explicit timeouts (table stakes feature — requests has no default)
-- Idempotent operations (metadata updates naturally idempotent via PUT)
-- Matching logic improvements (file path primary, fuzzy fallback)
+- Must-have: Automatic queue drain on recovery (core feature)
+- Must-have: Recovery notification (log when circuit closes)
 
 **Avoids:**
-- No timeout configuration pitfall (explicit timeouts on all requests)
-- Poor matching logic pitfall (multi-strategy with fallback)
+- Integration complexity by reusing proven components from Phases 1-3
 
-**Research flag:** Needs research-phase. Plex API behavior, undocumented rate limits, matching strategies need investigation during implementation.
+**Stack elements:** All components from Phases 1-3
+
+**Research flag:** INTEGRATION PHASE — Test with real Plex outage/recovery cycles. Verify state persistence + health check + scheduler coordination.
 
 ---
 
-### Phase 5: Queue Processor with Exponential Backoff
-**Rationale:** Integration point requiring both queue (Phase 1) and Plex client (Phase 4) working. Implements the core retry orchestration that distinguishes reliable sync from current approach. Research shows this is most complex phase with highest failure risk.
+### Phase 5: Entry Point Wiring (Automatic Recovery)
 
-**Delivers:** Polling loop (get pending jobs every 30s), exponential backoff calculation (5s → 10s → 20s → 40s → 80s with jitter), retry orchestration (call Plex client, handle errors, update job status), DLQ movement (after 5 max retries or permanent errors), background worker scheduling via Stash Task Scheduler
+**Rationale:** Wires recovery detection into plugin lifecycle. Adds `maybe_recovery_trigger()` to Stash2Plex.py main(). Completes automatic recovery MVP.
+
+**Delivers:** Recovery detection runs on every plugin invocation. Queue automatically drains when Plex recovers.
 
 **Addresses:**
-- Exponential backoff retry (table stakes feature, reduces cascading failures 83.5%)
-- Retry limits & budget (table stakes feature, prevents infinite loops)
-- Dead letter queue pattern (table stakes feature, 40-60% resiliency increase)
-- Silent failure prevention (logging with correlation IDs)
+- Must-have: Automatic queue drain (completes core feature)
+- Must-have: Enhanced logging for state transitions
 
 **Avoids:**
-- Retry without exponential backoff + jitter pitfall (core implementation)
-- Silent failures pitfall (structured logging, health checks)
-- Infinite retries without DLQ pitfall (max 5 attempts, then DLQ)
+- Hook handler latency impact (check is <10ms when circuit CLOSED)
+- Cascading failures via graceful error handling
 
-**Research flag:** Needs research-phase. Stash Task Scheduler integration, background worker patterns need investigation.
+**Stack elements:** Integration with existing plugin lifecycle
+
+**Research flag:** STANDARD PATTERNS — Follows maybe_auto_reconcile() pattern. Test with concurrent hook invocations.
 
 ---
 
-### Phase 6: Observability & Health Monitoring
-**Rationale:** Post-MVP reliability enhancement. Makes system debuggable and measurable. Research shows observability should come before advanced features — can't optimize what you can't measure.
+### Phase 6: Graduated Recovery & Rate Limiting (Production Hardening)
 
-**Delivers:** Structured logging with correlation IDs (trace request lifecycle), sync health dashboard (success rate, average completion time, queue depth), heartbeat monitoring (detect silent failures), metrics tracking (operations per hour, retry rate, DLQ growth), alerting on absence (no successful syncs in N hours)
+**Rationale:** Prevents thundering herd when draining large backlogs after extended outages. Should come AFTER Phase 5 MVP so automatic recovery works, THEN add rate limiting based on real-world testing.
+
+**Delivers:** Rate-limited queue draining during recovery period. Graduated scaling (5 jobs/sec → 10 → 20 → normal over 5-10 minutes).
 
 **Addresses:**
-- Silent failure prevention (comprehensive monitoring)
-- Operation status logging (user visibility)
+- Should-have: Backpressure-aware recovery
+- Advanced: Adaptive concurrency limits based on error rate
 
 **Avoids:**
-- Silent failures pitfall (monitoring catches absence of events)
-- Not logging enough context pitfall (correlation IDs, structured logs)
+- Critical Pitfall 3: Thundering herd overwhelming just-recovered Plex server
+- Performance trap: No backpressure during recovery (Plex CPU spikes)
 
-**Research flag:** Standard pattern, skip research-phase. Structured logging with Python logging library is well-documented.
+**Stack elements:** Existing backoff.py logic, worker rate limiting
+
+**Research flag:** NEEDS TESTING — Test with 500+ job backlogs after simulated outages. Monitor Plex CPU, error rates, queue drain time.
 
 ---
 
-### Phase 7: Advanced Features (Post-MVP)
-**Rationale:** Competitive differentiators built on solid reliability foundation. Can be implemented in any order based on user feedback.
+### Phase 7: Outage History & Advanced Monitoring (Observability)
 
-**Delivers:**
-- Circuit breaker pattern (pybreaker, stops attempts when Plex confirmed down)
-- Late update detection (polling fallback: 1min, 5min, 15min, 1hr after initial sync)
-- Confidence-based matching (90%+ auto-merge, 60-89% review queue, multi-strategy pipeline)
-- Rate limiting (client-side token bucket, respect 429 headers)
+**Rationale:** Adds observability for post-mortem analysis. Lower priority than core recovery (Phases 1-5) and production hardening (Phase 6). Provides value for debugging recurring outages.
+
+**Delivers:** Outage history tracking (start/end times, duration, jobs affected). Display in queue status UI.
 
 **Addresses:**
-- Circuit breaker pattern (differentiator feature)
-- Late update detection (differentiator feature, solves Stash indexing delay)
-- Confidence-based matching (differentiator feature, reduces false negatives)
+- Should-have: Outage history tracking for post-mortem
+- Should-have: Enhanced status UI (show last outage details)
 
 **Avoids:**
-- Ignoring rate limits pitfall (client-side rate limiter)
-- Webhook reliability assumptions pitfall (polling fallback)
+- Unbounded DLQ growth via outage history (identify patterns, set policies)
 
-**Research flag:** Needs research-phase for late update detection (Stash GraphQL polling patterns) and confidence-based matching (fuzzy matching libraries). Circuit breaker and rate limiting are standard patterns.
+**Stack elements:** JSON state persistence pattern, queue status task extension
+
+**Research flag:** STANDARD PATTERNS — Extends existing state persistence and task dispatch patterns.
+
+---
+
+### Phase 8: DLQ Recovery for Outage Jobs (Advanced Management)
+
+**Rationale:** Advanced feature for recovering jobs DLQ'd during outages. Depends on validation logic and reconciliation integration. Lowest priority—most jobs already retry via PlexServerDown = 999 retries.
+
+**Delivers:** "Recover Outage Jobs" task. Re-queues DLQ entries with transient errors from last outage window.
+
+**Addresses:**
+- Should-have: DLQ recovery for outage jobs (niche but valuable)
+- Should-have: Per-error-type DLQ recovery
+
+**Avoids:**
+- Critical Pitfall 4: DLQ duplicates via pre-recovery validation (check Plex state, verify scene exists, deduplicate)
+
+**Stack elements:** Existing DLQ management, reconciliation engine integration
+
+**Research flag:** NEEDS RESEARCH — DLQ recovery patterns vary by error type. Need to classify which errors are safe to retry. Test with mixed DLQ (resolved + unresolved items).
 
 ---
 
 ### Phase Ordering Rationale
 
-**Why this order:**
-- **Queue first** because all reliability features depend on persistent state
-- **Hook handler second** because it enables testing event → queue flow without Plex
-- **Error classification third** because retry logic needs it (prevents wasted retries on permanent failures)
-- **Plex client fourth** because it's testable independently and feeds into queue processor
-- **Queue processor fifth** because it integrates queue + Plex client (highest complexity, highest risk)
-- **Observability sixth** because it makes the system debuggable before adding advanced features
-- **Advanced features last** because they build on solid foundation
+**Dependency-driven order:**
+1. Phase 1 (Circuit Breaker Persistence) is foundation—enables recovery detection without worker running
+2. Phases 2-3 (Health Check, Scheduler) are independent—can develop in parallel
+3. Phase 4 (Recovery Detector) integrates Phases 1-3
+4. Phase 5 (Entry Point Wiring) completes automatic recovery MVP
+5. Phase 6 (Rate Limiting) hardens MVP based on real-world testing
+6. Phases 7-8 (Observability, DLQ) add advanced management features
 
-**Why this grouping:**
-- Phases 1-2 establish architecture (queue + event capture)
-- Phases 3-5 implement core reliability (validation + retry + orchestration)
-- Phase 6 adds observability (makes system measurable)
-- Phase 7 adds competitive features (differentiation)
+**Risk mitigation order:**
+- Phases 1-5 address ALL must-have features (table stakes)
+- Phase 6 addresses Critical Pitfall 3 (thundering herd)—production blocker
+- Phases 7-8 add should-have features (competitive but not launch-blocking)
 
-**How this avoids pitfalls:**
-- Idempotency designed in from Phase 4 (before retry logic in Phase 5)
-- Error classification exists before retry (Phase 3 before Phase 5)
-- Observability infrastructure ready before queue mechanisms (logging from Phase 2)
-- Validation gates prevent bad data from entering queue (Phase 3 sanitization)
+**Architecture alignment:**
+- Phases 1-3 build independent components (loose coupling)
+- Phase 4 integrates components (orchestration layer)
+- Phase 5 wires into plugin lifecycle (minimal surface area)
+- Phases 6-8 enhance existing components (no new architecture)
+
+**Testing strategy:**
+- Phase 1: Test state persistence with concurrent invocations (race conditions)
+- Phase 2: Test health check against real Plex restart (false positives)
+- Phase 3: Test scheduler with rapid invocations (check-on-invocation timing)
+- Phase 4: Integration tests (state + health + scheduler coordination)
+- Phase 5: End-to-end tests (full recovery flow)
+- Phase 6: Load tests (500+ job backlogs, Plex CPU monitoring)
+- Phase 7: Observability validation (outage history accuracy)
+- Phase 8: DLQ recovery validation (deduplication, pre-validation)
 
 ### Research Flags
 
-Phases likely needing deeper research during planning:
-- **Phase 4 (Plex API Client):** Plex API behavior undocumented, rate limits unknown, matching strategies need experimentation
-- **Phase 5 (Queue Processor):** Stash Task Scheduler integration specifics, background worker lifecycle management
-- **Phase 7 (Late Update Detection):** Stash GraphQL polling patterns, change detection mechanisms
-- **Phase 7 (Confidence-Based Matching):** Fuzzy matching library evaluation, threshold tuning, false positive/negative tradeoffs
+**Phases with standard patterns (skip research-phase):**
+- **Phase 1:** Circuit breaker persistence — pattern proven in reconciliation/scheduler.py
+- **Phase 2:** Health check — Plex /identity endpoint well-documented, plexapi usage established
+- **Phase 3:** Recovery scheduler — reuses reconciliation scheduler pattern
+- **Phase 5:** Entry point wiring — follows maybe_auto_reconcile() pattern
 
-Phases with standard patterns (skip research-phase):
-- **Phase 1 (Persistent Queue):** SQLite + WAL mode well-documented, persist-queue library has clear examples
-- **Phase 2 (Hook Handler):** Hook-to-queue pattern standard in event-driven systems
-- **Phase 3 (Error Classification):** HTTP status code classification well-established (transient vs permanent)
-- **Phase 6 (Observability):** Python structured logging with logging library standard practice
-- **Phase 7 (Circuit Breaker):** pybreaker library well-documented, pattern well-established
-- **Phase 7 (Rate Limiting):** Token bucket algorithm standard, implementation examples abundant
+**Phases needing integration testing (not research, just validation):**
+- **Phase 4:** Recovery detector integration — test state + health + scheduler coordination with real Plex outages
+- **Phase 6:** Rate limiting — test with large backlogs (500+ jobs), monitor Plex CPU/error rates
+
+**Phases needing deeper research during planning:**
+- **Phase 8 (DLQ Recovery):** Error classification logic needs research. Which errors are safe to retry? How to validate pre-recovery? Need to study DLQ patterns for transient vs. permanent failures. Research available, but needs domain-specific decisions.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | All libraries verified from PyPI and GitHub, versions and compatibility confirmed, alternatives evaluated with clear rationale |
-| Features | HIGH | Table stakes vs differentiators well-researched from retry pattern literature (AWS, ByteByteGo, Microsoft), backed by 2026 sources with production examples |
-| Architecture | MEDIUM-HIGH | Layered Hook-Queue-Worker pattern verified from webhook best practices and event-driven architecture sources, but Stash-specific implementation needs validation (Task Scheduler integration) |
-| Pitfalls | HIGH | Well-documented patterns from authoritative sources (AWS Builders Library, ByteByteGo, HackerOne), backed by 2026 sources with specific examples from production systems |
+| Stack | HIGH | All capabilities exist in current stack (stdlib + plexapi). No new dependencies needed. Patterns proven in v1.4 reconciliation. |
+| Features | HIGH | Feature expectations verified with industry patterns (AWS SQS, RabbitMQ, Kafka). Must-have vs. should-have validated with current 2026 sources. |
+| Architecture | HIGH | Check-on-invocation pattern proven in v1.4. Circuit breaker exists (140 lines). Components cleanly separated. Integration points well-defined. |
+| Pitfalls | HIGH | All critical pitfalls verified with recent sources (Feb 2026). Race conditions, thundering herd, false positives all have proven solutions. Testing strategies identified. |
 
 **Overall confidence:** HIGH
 
-Research is strong across all areas. Stack recommendations are verified with official sources (PyPI, GitHub), features are grounded in industry best practices from authoritative sources (AWS, Microsoft, ByteByteGo), architecture patterns are validated from webhook and event-driven literature, and pitfalls are drawn from production failure case studies.
-
-The one area requiring validation during implementation is Stash-specific plugin architecture (Task Scheduler, hook execution model), but the general patterns (queue-based async processing, retry with backoff) are well-established and transferable.
+The research is comprehensive and actionable. No gaps that block roadmap creation. Stack choices are conservative (reuse existing), architecture extends proven patterns (check-on-invocation), features align with industry standards (automatic recovery is table stakes), and pitfalls have known prevention strategies.
 
 ### Gaps to Address
 
-**Stash plugin execution model specifics:**
-- How Stash Task Scheduler works in practice (FileMonitor plugin is reference, but needs hands-on validation)
-- Whether background threads are stable or if scheduled tasks are preferred
-- Plugin lifecycle management (startup, shutdown, reload scenarios)
-- **Mitigation:** Phase 5 research-phase will investigate Stash plugin patterns, potentially prototype background worker before full implementation
+**During Phase 1 (Circuit Breaker Persistence):**
+- File locking strategy decision: fcntl advisory locks vs. single-writer pattern vs. optimistic concurrency. Need to test which works best with Stash plugin invocation patterns. **Recommendation:** Start with single-writer (only worker modifies state, hooks read-only)—aligns with existing architecture where worker manages circuit breaker.
 
-**Plex API undocumented behavior:**
-- Rate limits not officially documented, anecdotal evidence suggests permissive for local API
-- Metadata field length limits not specified
-- Error response formats may vary
-- **Mitigation:** Phase 4 research-phase will test against real Plex instance, document observed behavior, implement defensive validation
+**During Phase 2 (Health Check):**
+- Exact health check implementation: server.query('/identity') vs. library.sections() sentinel request. Need to test against real Plex restart sequence to verify which detects "database loaded" reliably. **Recommendation:** Start with /identity (lightweight), add library check if false positives occur in testing.
 
-**Optimal retry parameters:**
-- Research provides formulas (exponential backoff, jitter) but not domain-specific tuning
-- What's the right balance between fast recovery and not overwhelming Plex?
-- How many retries before DLQ for different error types?
-- **Mitigation:** Start with conservative defaults from research (5 retries, 5s base, 300s max, 25% jitter), tune based on observability data in Phase 6
+**During Phase 6 (Rate Limiting):**
+- Rate limit tuning: 5 jobs/sec starting rate may be too conservative for powerful servers, too aggressive for RPi. Need configurable rate with adaptive adjustment based on error rate. **Recommendation:** Make rate configurable, default 5 jobs/sec, increase if error rate <1%.
 
-**Matching strategy confidence thresholds:**
-- Research suggests 90%+ auto-merge, 60-89% review, but these are guidelines not validated for media files
-- What fuzzy matching algorithm works best for scene filenames?
-- **Mitigation:** Phase 7 research-phase will evaluate matching libraries (fuzzywuzzy, thefuzz, rapidfuzz), prototype against real Stash/Plex data, empirically determine thresholds
+**During Phase 8 (DLQ Recovery):**
+- Error classification: Which error types are safe to retry after outage? PlexServerDown yes, but what about Timeout (could be network vs. Plex performance)? Need to study DLQ error patterns. **Recommendation:** Phase 8 starts with conservative recovery (PlexServerDown only), expand to other errors based on validation.
+
+**No blocking gaps.** All gaps have clear resolution strategies. Can proceed to roadmap creation with confidence.
 
 ## Sources
 
 ### Primary (HIGH confidence)
 
-**Technology Stack:**
-- [Tenacity GitHub](https://github.com/jd/tenacity) — v9.1.2, Apr 2025, verified retry library
-- [Tenacity PyPI](https://pypi.org/project/tenacity/) — Official package repository
-- [persist-queue PyPI](https://pypi.org/project/persist-queue/) — v1.1.0, Oct 2025, SQLite-backed queue
-- [Pydantic PyPI](https://pypi.org/project/pydantic/) — v2.12.5, Nov 2025, Rust-backed validation
-- [pybreaker PyPI](https://pypi.org/project/pybreaker/) — v1.4.1, Sep 2025, circuit breaker
-- [stashapi PyPI](https://pypi.org/project/stashapi/) — v0.1.3, Dec 2025, Stash integration
+**Stack Research:**
+- [Python JSON Documentation](https://docs.python.org/3/library/json.html) — stdlib, version 2.0.9, basic serialization
+- [PlexAPI Server Documentation](https://python-plexapi.readthedocs.io/en/latest/modules/server.html) — server.query() method, timeout parameter
+- Existing codebase: `reconciliation/scheduler.py` save_state()/load_state() pattern (JSON + atomic write) — validated
+- Existing codebase: `worker/circuit_breaker.py` (3-state pattern validated, 999 tests)
 
-**Architecture Patterns:**
-- [Webhook Retry Best Practices - Svix](https://www.svix.com/resources/webhook-best-practices/retries/) — Authoritative guide, exponential backoff + jitter
-- [Timeouts, retries and backoff with jitter - AWS Builders Library](https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/) — Industry standard reference
-- [A Guide to Retry Pattern in Distributed Systems - ByteByteGo](https://blog.bytebytego.com/p/a-guide-to-retry-pattern-in-distributed) — Comprehensive retry patterns
-- [persist-queue GitHub](https://github.com/peter-wangxu/persist-queue) — SQLite queue implementation details
+**Feature Research:**
+- [Outage recovery scenarios in Amazon SQS](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/designing-for-outage-recovery-scenarios.html) — AWS best practices for failover, message handling
+- [Avoiding insurmountable queue backlogs](https://aws.amazon.com/builders-library/avoiding-insurmountable-queue-backlogs/) — AWS Builders Library on backpressure, retry strategies
+- [Reliability Guide | RabbitMQ](https://www.rabbitmq.com/docs/reliability) — durability, acknowledgment, recovery patterns
+- [How to Implement Dead Letter Queue Patterns](https://oneuptime.com/blog/post/2026-02-09-dead-letter-queue-patterns/view) — Recent (Feb 2026), recovery strategies
 
-**Critical Pitfalls:**
-- [Designing retry logic that doesn't create data duplicates - Medium, Jan 2026](https://medium.com/@backend.bao/designing-retry-logic-that-doesnt-create-data-duplicates-99a784500931) — Idempotency patterns
-- [Mastering Idempotency: Building Reliable APIs - ByteByteGo](https://blog.bytebytego.com/p/mastering-idempotency-building-reliable) — Production examples
-- [Building A Monitoring System That Catches Silent Failures - Vincent Lakatos](https://www.vincentlakatos.com/blog/building-a-monitoring-system-that-catches-silent-failures/) — Detection patterns
-- [Database-as-IPC - Wikipedia](https://en.wikipedia.org/wiki/Database-as-IPC) — Anti-pattern analysis
+**Architecture Research:**
+- [Circuit Breaker - Martin Fowler](https://martinfowler.com/bliki/CircuitBreaker.html) — authoritative pattern definition
+- [Health Check Pattern - Microsoft](https://learn.microsoft.com/en-us/azure/architecture/patterns/health-endpoint-monitoring) — health check best practices
+- [Atomic File Writes in Python](https://docs.python.org/3/library/os.html#os.replace) — os.replace() atomicity guarantees
+- Existing PlexSync: `reconciliation/scheduler.py` (lines 47-150) — proven check-on-invocation implementation
+
+**Pitfalls Research:**
+- [Building Resilient Systems: Circuit Breakers and Retry Patterns](https://dasroot.net/posts/2026/01/building-resilient-systems-circuit-breakers-retry-patterns/) — integration with retry logic
+- [Implementing health checks — AWS Builders Library](https://aws.amazon.com/builders-library/implementing-health-checks/) — dependency health check false positives
+- [Retry Storm Antipattern — Azure Architecture Center](https://learn.microsoft.com/en-us/azure/architecture/antipatterns/retry-storm/) — thundering herd prevention
+- [How to Avoid Cascading Failures in Distributed Systems](https://www.infoq.com/articles/anatomy-cascading-failure/) — cascade failure prevention
 
 ### Secondary (MEDIUM confidence)
 
-**Stash Plugin Architecture:**
-- [Plugin Development - DeepWiki](https://deepwiki.com/stashapp/CommunityScripts/6.2-plugin-development) — Community documentation
-- [CommunityScripts - GitHub](https://github.com/stashapp/CommunityScripts) — Plugin repository
-- [FileMonitor Plugin](https://github.com/stashapp/CommunityScripts/blob/main/plugins/FileMonitor/README.md) — Background worker reference
+**Stack Research:**
+- [DiskCache vs persist-queue comparison](https://github.com/grantjenks/python-diskcache) — feature comparison, use cases
+- [Plex API Documentation — Server Identity](https://plexapi.dev/api-reference/server/get-server-capabilities) — /identity endpoint structure
+- [pms-docker healthcheck.sh](https://github.com/plexinc/pms-docker/blob/master/root/healthcheck.sh) — official Docker healthcheck uses /identity endpoint
 
-**Feature Landscape:**
-- [Understanding Idempotency in Data Pipelines - Airbyte](https://airbyte.com/data-engineering-resources/idempotency-in-data-pipelines) — Data sync patterns
-- [Circuit Breaker Pattern - Azure Architecture Center](https://learn.microsoft.com/en-us/azure/architecture/patterns/circuit-breaker) — Microsoft reference
-- [Fuzzy Matching 101 - Match Data Pro](https://matchdatapro.com/fuzzy-matching-101-a-complete-guide-for-2026/) — Matching strategies
+**Feature Research:**
+- [How to Configure Circuit Breaker Patterns](https://oneuptime.com/blog/post/2026-02-02-circuit-breaker-patterns/view) — Recent (Feb 2026) guide on three-state pattern
+- [Mastering APISIX Health Checks: Active and Passive Monitoring Strategies](https://api7.ai/blog/health-check-ensures-high-availability) — active vs passive tradeoffs
+- [Apache Kafka Dead Letter Queue: A Comprehensive Guide](https://www.confluent.io/learn/kafka-dead-letter-queue/) — when to DLQ vs retry
+
+**Architecture Research:**
+- [Event-Driven Architecture Patterns](https://aws.amazon.com/event-driven-architecture/) — event-driven patterns for non-daemon systems
+- [JSON State Persistence Best Practices](https://realpython.com/python-json/) — JSON serialization patterns
+
+**Pitfalls Research:**
+- [Understanding Back Pressure in Message Queues](https://akashrajpurohit.com/blog/understanding-back-pressure-in-message-queues-a-guide-for-developers/) — backpressure patterns
+- [The Thundering Herd Problem and Its Solutions](https://www.nottldr.com/SystemSage/the-thundering-herd-problem-and-its-solutions-0ie2hx3) — thundering herd solutions
+- [Handling Race Condition in Distributed System — GeeksforGeeks](https://www.geeksforgeeks.org/computer-networks/handling-race-condition-in-distributed-system/) — race condition patterns
+- [Dead Letter Queues (DLQ): The Complete, Developer-Friendly Guide](https://swenotes.com/2025/09/25/dead-letter-queues-dlq-the-complete-developer-friendly-guide/) — DLQ recovery patterns
 
 ### Tertiary (LOW confidence)
 
-**Plex API Behavior:**
-- [Plex Forums - 503 Service Unavailable discussions](https://forums.plex.tv/t/503-service-unavailable/768874) — Anecdotal evidence of Plex maintenance windows
-- Community reports suggest Plex API rate limits are permissive for local calls but undocumented
+**Stack Research:**
+- [Plex Healthcheck Gist](https://gist.github.com/dimo414/aaaee1c639d292a64b72f4644606fbf0) — community pattern, not official docs
+
+**Feature Research:**
+- [IT Monitoring Trends 2026](https://blog.paessler.com/it-monitoring-trends-2026-from-multi-cloud-chaos-to-unified-visibility) — general trends, AI-powered anomaly detection
+- [Cloud outages expected to be the new normal in 2026](https://www.techtarget.com/searchCloudComputing/feature/Cloud-outages-expected-to-be-the-new-normal-in-2026) — context for why outage resilience matters
+
+**Pitfalls Research:**
+- [Storage resilience: atomic writes](https://github.com/anomalyco/opencode/issues/7733) — temp + fsync + rename pattern (GitHub issue, not authoritative)
+- [Registry corruption after crash during atomic rename](https://github.com/openclaw/openclaw/issues/1469) — real-world JSON corruption example
 
 ---
-*Research completed: 2026-01-24*
-*Ready for roadmap: yes*
+
+**Research completed:** 2026-02-15
+**Ready for roadmap:** YES
+
+This research provides a complete foundation for roadmap creation. All must-have features identified, stack choices validated, architecture approach proven, and critical pitfalls mapped to prevention strategies. Phase suggestions are dependency-ordered and risk-prioritized. Proceed to requirements definition with confidence.

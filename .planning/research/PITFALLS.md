@@ -1,604 +1,665 @@
-# Domain Pitfalls: Sync/Integration Plugins
+# Pitfalls Research: Outage Resilience Features
 
-**Domain:** Metadata Sync Plugins (Stash to Plex)
-**Researched:** 2026-01-24
-**Focus:** Retry logic, queue mechanisms, and reliability improvements
+**Domain:** Adding Outage Resilience to Event-Driven Sync System
+**Researched:** 2026-02-15
+**Confidence:** HIGH
+
+**Context:** PlexSync is an event-driven Stash plugin (NOT a daemon) adding automatic recovery when Plex returns, circuit breaker persistence, health monitoring, and DLQ recovery. The existing system has in-memory circuit breaker, 999-retry PlexServerDown, and check-on-invocation scheduling.
+
+---
 
 ## Critical Pitfalls
 
-Mistakes that cause rewrites or major issues.
+Mistakes that cause cascading failures, data corruption, or require rewrites.
 
-### Pitfall 1: Non-Idempotent Operations Leading to Duplicates
-**What goes wrong:** Retry logic causes duplicate metadata updates - for example, applying the same tag multiple times, creating duplicate collections, or incrementing view counts repeatedly when the same request is retried after network timeouts.
+### Pitfall 1: Circuit Breaker Stale State Race Condition
 
-**Why it happens:** Developers design retry logic without constraints, assuming failure is binary (succeeded/failed). The system retries requests without tracking which operations actually completed, leading to duplicate side effects on the target system (Plex).
+**What goes wrong:**
+Multiple plugin invocations read stale circuit breaker state from disk, all simultaneously transition to HALF_OPEN, and send a thundering herd of test requests to Plex. The recovering Plex server gets overwhelmed and crashes again, creating a metastable failure loop.
 
-**Consequences:**
-- Plex metadata becomes corrupted with duplicate entries
-- Collections contain the same item multiple times
-- View counts and watch history become inaccurate
-- Manual cleanup required in Plex
-- User trust in sync reliability erodes
+**Why it happens:**
+Event-driven plugins are invoked per-hook (scene.update, task.process_queue), NOT long-running daemons. Each invocation loads circuit breaker state from JSON file, checks if it's due for transition (OPEN→HALF_OPEN after timeout), and saves updated state. But between load-check-save, other invocations can occur. Without distributed locking, multiple instances race:
 
-**Prevention:**
-- Implement idempotency keys for all sync operations - include a unique identifier (e.g., `stash_scene_id + operation_type + timestamp`) in requests
-- Before applying metadata changes, check current Plex state to detect if operation already completed
-- Use Plex's update operations (PUT) rather than additive operations (POST) where possible
-- Store completed operation hashes to prevent re-application of identical changes
-- Design operations to be naturally idempotent: "set rating to 4" not "increment rating"
+```
+Time  | Invocation A                | Invocation B                | Invocation C
+------|----------------------------|----------------------------|----------------------------
+T+0   | Load state: OPEN, opened_at=T-60 | (not started)         | (not started)
+T+1   | Check: elapsed=61s > 60s timeout | Load state: OPEN, opened_at=T-60 | (not started)
+T+2   | Transition to HALF_OPEN    | Check: elapsed=62s > 60s timeout | Load state: OPEN (stale)
+T+3   | Send test request to Plex  | Transition to HALF_OPEN    | Check: stale, transition HALF_OPEN
+T+4   | (writing state...)         | Send test request to Plex  | Send test request to Plex
+T+5   | Write state: HALF_OPEN     | Write state: HALF_OPEN (overwrites A) | Write state: HALF_OPEN (overwrites B)
+```
 
-**Detection:**
-- Monitor for duplicate tags/collections appearing in Plex
-- Log requests with correlation IDs to trace retry chains
-- Alert when same scene_id appears in sync queue multiple times within short timeframe
-- Track operation counts per scene and flag anomalies (e.g., 5+ sync attempts)
+Result: 3 test requests sent simultaneously instead of 1.
 
-**Sources:**
-- [Designing retry logic that doesn't create data duplicates (Medium, 2026)](https://medium.com/@backend.bao/designing-retry-logic-that-doesnt-create-data-duplicates-99a784500931)
-- [Preventing Duplicate Operations in APIs with Idempotent Keys (Medium)](https://medium.com/@anas.mdhat/preventing-duplicate-operations-in-apis-with-idempotent-keys-f67c3bf6117a)
-- [Mastering Idempotency: Building Reliable APIs (ByteByteGo)](https://blog.bytebytego.com/p/mastering-idempotency-building-reliable)
+**How to avoid:**
 
----
+1. **File-based distributed lock with PID tracking:**
+   ```python
+   import fcntl
+   import os
 
-### Pitfall 2: Retry Without Exponential Backoff + Jitter
-**What goes wrong:** When Plex becomes unavailable (during backup, restart, or under load), the plugin retries immediately and repeatedly, overwhelming Plex when it comes back online and potentially triggering cascading failures.
+   class CircuitBreakerStateLock:
+       def __init__(self, lock_path):
+           self.lock_path = lock_path
+           self.lock_file = None
 
-**Why it happens:** Developers implement simple retry logic with fixed delays or immediate retries. When multiple sync operations fail simultaneously (e.g., Plex goes down), they all retry at the same time, creating a "thundering herd" that prevents Plex from recovering.
+       def acquire(self, timeout=5.0):
+           """Acquire exclusive lock or timeout."""
+           self.lock_file = open(self.lock_path, 'w')
+           try:
+               fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+               self.lock_file.write(f"{os.getpid()}\n")
+               self.lock_file.flush()
+               return True
+           except BlockingIOError:
+               # Lock held by another process
+               return False
 
-**Consequences:**
-- Plex server remains overloaded even after recovery
-- Retry storms prevent successful operations from completing
-- Other Plex clients experience degraded performance
-- Sync operations continue failing despite Plex being "up"
-- Plugin banned/rate-limited by Plex
+       def release(self):
+           if self.lock_file:
+               fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_UN)
+               self.lock_file.close()
+   ```
 
-**Prevention:**
-- Implement exponential backoff: 1s, 2s, 4s, 8s, 16s (capped at reasonable maximum like 5 minutes)
-- Add jitter (randomness) to backoff intervals: `backoff_time = base_delay * (2^attempt) + random(0, 1000ms)`
-- Set maximum retry attempts (e.g., 5-7 attempts) before marking operation as permanently failed
-- Different error types require different strategies:
-  - 429 (rate limit): Use `Retry-After` header value if provided, otherwise exponential backoff
-  - 503 (service unavailable): Exponential backoff with jitter
-  - 4xx errors (except 429): Don't retry - these are client errors
-  - 5xx errors: Retry with backoff
-- Implement circuit breaker pattern: after N consecutive failures, stop attempting for a cooldown period
+2. **Optimistic concurrency control with version numbers:**
+   ```json
+   {
+     "state": "OPEN",
+     "version": 42,
+     "opened_at": 1707926400.0
+   }
+   ```
+   Before writing, check version matches what was read. If mismatch, reload and retry logic.
 
-**Detection:**
-- Log retry attempt counts and intervals
-- Monitor request timestamps to detect synchronized retry patterns
-- Alert when retry intervals are suspiciously uniform (indicates missing jitter)
-- Track 429 responses from Plex API
+3. **Single-writer pattern via daemon thread:**
+   - Circuit breaker transitions happen ONLY in worker daemon thread (already exists)
+   - Hook invocations READ circuit breaker state but don't modify it
+   - State file becomes read-only for hooks, read-write for worker
+   - **RECOMMENDED:** Aligns with existing architecture where worker already manages circuit breaker in memory
 
-**Sources:**
-- [Retrying and Exponential Backoff: Smart Strategies for Robust Software (HackerOne)](https://www.hackerone.com/blog/retrying-and-exponential-backoff-smart-strategies-robust-software)
-- [Timeouts, retries and backoff with jitter (AWS Builders Library)](https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/)
-- [A Guide to Retry Pattern in Distributed Systems (ByteByteGo)](https://blog.bytebytego.com/p/a-guide-to-retry-pattern-in-distributed)
+4. **Idempotent state transitions:**
+   - Make HALF_OPEN→test request idempotent with cooldown
+   - Track `last_test_request_at` timestamp
+   - Only send test request if >10s since last attempt
+   - Multiple invocations reading stale HALF_OPEN state won't duplicate test requests
 
----
+**Warning signs:**
+- Multiple "Circuit breaker transitioned to HALF_OPEN" log entries within same second
+- Plex server receives burst of requests after recovery timeout expires
+- Circuit breaker state file has multiple rapid writes (check mtime changes)
+- Plex goes down again immediately after circuit opens→half-open transition
 
-### Pitfall 3: Silent Failures (No Observability)
-**What goes wrong:** Sync operations fail without any indication to the user or administrator. Metadata changes in Stash never reach Plex, but there's no error message, no log entry, no alert - just absence of expected updates.
-
-**Why it happens:** The system tracks what happened (successful operations) but not what should have happened (expected operations). A missed sync isn't logged as an event because it's the absence of an event. Additionally, alerts may be configured but fail silently due to delivery chain issues.
-
-**Consequences:**
-- Users discover sync failures weeks later when metadata is missing
-- No data to debug why syncs failed
-- Cannot distinguish between "never attempted" and "attempted but failed"
-- Cannot measure sync reliability metrics
-- Trust in sync system completely eroded
-
-**Prevention:**
-- **Heartbeat monitoring:** Emit "still alive" signals at regular intervals; alert if heartbeat stops
-- **Expected event tracking:** Log when sync should have been triggered (e.g., on Stash scene.update event), then track completion
-- **Structured logging with correlation IDs:** Every sync operation gets a unique ID that flows through the entire pipeline:
-  ```python
-  correlation_id = f"{scene_id}_{operation}_{timestamp}"
-  log.info(f"[{correlation_id}] Sync initiated", extra={"scene_id": scene_id})
-  log.info(f"[{correlation_id}] Plex API called", extra={"api_endpoint": "/library/sections"})
-  log.error(f"[{correlation_id}] Sync failed", extra={"error": str(e)})
-  ```
-- **Operation state tracking:** Maintain states: QUEUED → IN_PROGRESS → COMPLETED/FAILED/PERMANENTLY_FAILED
-- **Sync health dashboard:** Track metrics like:
-  - Success rate (last hour, last day)
-  - Average time to completion
-  - Queue depth
-  - Permanently failed items count
-- **Dead letter queue (DLQ):** Items that exceed max retries go to DLQ for manual inspection
-- **Alert on absence:** If no successful syncs in last N hours, send alert (assumes at least some Stash activity)
-
-**Detection:**
-- User reports missing metadata
-- Sync queue grows without shrinking
-- No log entries for sync operations
-- Success rate drops to 0%
-- Correlation IDs stop appearing in logs
-
-**Sources:**
-- [Building A Monitoring System That Catches Silent Failures (Vincent Lakatos)](https://www.vincentlakatos.com/blog/building-a-monitoring-system-that-catches-silent-failures/)
-- [Agentforce Studio's New Health Monitoring Tool Aims to Catch 'Silent Failures' (Salesforce Blog, 2026)](https://www.salesforce.com/blog/agent-monitoring/?bc=OTH)
-- [The Silent Failure: When Monitoring Doesn't Wake the Right People (OnPage)](https://www.onpage.com/the-silent-failure-when-monitoring-doesnt-wake-the-right-people/)
+**Phase to address:**
+**Phase 17 (Circuit Breaker Persistence)** — Add file locking BEFORE implementing state persistence. Test with concurrent plugin invocations (simulate rapid hook events).
 
 ---
 
-### Pitfall 4: Database-as-Queue Anti-Pattern
-**What goes wrong:** Using Stash's database (or a separate SQLite/Postgres table) as a queue for retry operations leads to performance degradation, lock contention, and difficulty implementing proper queue semantics (FIFO, priority, etc.).
+### Pitfall 2: Health Check False Positive from Plex Restart Sequence
 
-**Why it happens:** Databases are familiar and already available, so it seems convenient to add a `sync_queue` table with columns like `status`, `retry_count`, `next_retry_at`. But databases aren't designed for high-frequency queue operations - they're designed for ACID transactions on structured data.
+**What goes wrong:**
+Health check detects Plex is "up" (port 32400 responds to TCP connect), declares server healthy, circuit breaker closes, and queue processing resumes. But Plex is still initializing its database and returns 503 Service Unavailable for all metadata requests. Queue drains with hundreds of failures, circuit breaker reopens immediately, retry counters increment wastefully.
 
-**Consequences:**
-- Polling the database for "ready to retry" items causes constant load
-- Row-level locks during updates create contention between workers
-- Cannot easily implement backpressure or flow control
-- Difficult to prioritize certain operations (e.g., new scenes vs updates)
-- Database size grows with queue depth
-- Cannot easily implement distributed workers
+**Why it happens:**
+Plex server startup sequence has multiple stages:
+1. Process starts, binds to port 32400 (TCP connect succeeds)
+2. HTTP server starts, returns 503 for requests (database loading)
+3. Database loads, server transitions to ready state
+4. Metadata API endpoints start responding with 200
 
-**Prevention:**
-- **For lightweight needs (single-instance plugin):** In-memory queue with persistent backup:
-  - Python's `queue.PriorityQueue` for active items
-  - Pickle to disk periodically for crash recovery
-  - Suitable when: single process, moderate volume (<1000 queued items)
-- **For production/multi-instance needs:** Dedicated queue system:
-  - Redis with sorted sets (can persist to disk): `ZADD sync_queue {timestamp} {scene_id}`
-  - RabbitMQ or similar message broker for complex workflows
-  - AWS SQS for cloud deployments
-- **If database is unavoidable:**
-  - Use `SELECT ... FOR UPDATE SKIP LOCKED` to prevent lock contention (Postgres)
-  - Index on `(status, next_retry_at)` for efficient queries
-  - Separate table from main Stash schema to avoid locking core tables
-  - Archive completed items regularly
-- **Hybrid approach:** Fast path (in-memory) for first retry, slow path (persistent storage) for extended retries
+Simple health checks (TCP connect, HTTP GET `/`) succeed at stage 2-3 but server can't process real requests. This is a **partial availability** scenario - server appears healthy but isn't functionally ready.
 
-**Detection:**
-- Database CPU spikes correlating with queue polling
-- Lock wait times increasing
-- Sync operations taking longer as queue depth grows
-- Workers spending time waiting for locks rather than processing
+**How to avoid:**
 
-**Sources:**
-- [Microservice Antipatterns: The Queue Explosion (Charlie Pitman)](https://cpitman.github.io/microservices/2018/03/25/microservice-antipattern-queue-explosion.html)
-- [Database-as-IPC (Wikipedia)](https://en.wikipedia.org/wiki/Database-as-IPC)
-- [Using a database as a queue is a well known anti pattern (Hacker News)](https://news.ycombinator.com/item?id=18774559)
+1. **Deep health check with sentinel request:**
+   ```python
+   def is_plex_healthy(plex_client, library_id):
+       """Check if Plex can handle real metadata requests."""
+       try:
+           # Don't just ping, make a lightweight real request
+           sections = plex_client.library.sections()
+           target_section = plex_client.library.section(library_id)
+           # If we can fetch library sections, server is truly ready
+           return True
+       except plexapi.exceptions.ServiceUnavailable:
+           return False  # Server up but not ready
+       except Exception:
+           return False  # Server down or other error
+   ```
 
----
+2. **Health check with state verification:**
+   ```python
+   def verify_plex_ready(plex_client):
+       """Verify Plex has finished database initialization."""
+       try:
+           # Check server identity (requires DB access)
+           identity = plex_client.machineIdentifier
+           # Check library accessibility
+           libraries = plex_client.library.sections()
+           # If both succeed, database is loaded
+           return len(libraries) > 0
+       except Exception as e:
+           log_debug(f"Plex health check failed: {e}")
+           return False
+   ```
 
-### Pitfall 5: Retrying Non-Transient Errors
-**What goes wrong:** The system retries operations that will never succeed - like attempting to sync a scene when the corresponding Plex library doesn't exist, or when required metadata fields are missing from Stash. This wastes resources and delays detection of real problems.
+3. **Grace period after health check success:**
+   ```python
+   # Don't close circuit immediately on first success
+   # Require N consecutive successful health checks
+   success_threshold = 3  # Circuit breaker already supports this
 
-**Why it happens:** Retry logic treats all failures the same, without distinguishing between transient errors (Plex temporarily unavailable) and permanent errors (invalid API key, missing required field).
+   # Add grace period: wait 30s after "healthy" before resuming
+   if circuit_breaker.state == CircuitState.HALF_OPEN:
+       if health_check_success():
+           time.sleep(30)  # Let Plex stabilize
+           if health_check_success():  # Double-check
+               circuit_breaker.record_success()
+   ```
 
-**Consequences:**
-- Queue fills with items that will never succeed
-- Resources wasted on pointless retries
-- Real transient failures get delayed waiting for permanent failures to exhaust retries
-- Difficult to identify which failures need code fixes vs operational intervention
+4. **Graduated recovery with canary requests:**
+   ```python
+   # When transitioning HALF_OPEN → CLOSED:
+   # 1. Send 1 canary request, wait for success
+   # 2. Send 5 requests, check 80% success rate
+   # 3. Send 20 requests, check 90% success rate
+   # 4. Fully open queue processing
+   # Catches partial availability scenarios
+   ```
 
-**Prevention:**
-- **Classify errors before retrying:**
-  - **TRANSIENT (retry):** Network timeouts, 503 Service Unavailable, 429 Rate Limited, connection refused
-  - **PERMANENT (don't retry):** 401 Unauthorized, 403 Forbidden, 404 Not Found (library), 400 Bad Request (malformed data)
-  - **AMBIGUOUS (retry cautiously):** 500 Internal Server Error (could be transient or permanent)
-- **Implement error classification:**
-  ```python
-  TRANSIENT_ERRORS = {503, 429, 502, 504}
-  PERMANENT_ERRORS = {400, 401, 403, 404, 422}
+**Warning signs:**
+- Health checks report "healthy" but sync requests fail with 503
+- Circuit breaker rapidly cycles HALF_OPEN → CLOSED → OPEN
+- Burst of 503 errors immediately after circuit closes
+- Plex logs show requests arriving before "Database opened" message
 
-  if response.status_code in PERMANENT_ERRORS:
-      mark_as_permanently_failed(item)
-      send_alert(f"Permanent failure: {error}")
-      return  # Don't retry
-  elif response.status_code in TRANSIENT_ERRORS:
-      schedule_retry_with_backoff(item)
-  ```
-- **Validate before queuing:** Check that required data exists before adding to queue:
-  - Scene has file path
-  - Target Plex library exists
-  - API credentials valid
-- **Max retry with inspection:** Even transient failures shouldn't retry forever - after max attempts, move to DLQ for human review
-
-**Detection:**
-- Same items appearing in queue repeatedly with same error
-- Queue depth growing despite active processing
-- Error logs showing repeated 4xx errors
-- DLQ filling with items that have validation errors
-
-**Sources:**
-- [Retrying and Exponential Backoff: Smart Strategies (HackerOne)](https://www.hackerone.com/blog/retrying-and-exponential-backoff-smart-strategies-robust-software)
-- [A Guide to Retry Pattern in Distributed Systems (ByteByteGo)](https://blog.bytebytego.com/p/a-guide-to-retry-pattern-in-distributed)
+**Phase to address:**
+**Phase 18 (Health Monitoring)** — Implement deep health check (sentinel request) NOT shallow check (TCP connect). Test against real Plex restart to verify initialization stages.
 
 ---
 
-## Moderate Pitfalls
+### Pitfall 3: Thundering Herd on Automatic Recovery Trigger
 
-Mistakes that cause delays or technical debt.
+**What goes wrong:**
+Plex comes back online after 2-hour outage. Automatic recovery triggers reconciliation, detecting 500+ stale scenes. All 500 sync jobs enqueue simultaneously, worker attempts to drain queue at maximum rate, Plex gets overwhelmed (CPU spikes, slow responses), and new failures occur. Circuit breaker reopens, recovery fails, and the cycle repeats creating metastable failure.
 
-### Pitfall 6: No Input Validation/Sanitization
-**What goes wrong:** Stash metadata contains special characters, extremely long strings, or malformed data that causes Plex API errors or corrupts Plex's database when synced without sanitization.
+**Why it happens:**
+Recovery assumes "Plex is healthy = can handle full load immediately." But recovering systems have reduced capacity:
+- Database caches are cold (disk reads slower than memory)
+- Connection pools are rebuilding
+- OS buffers not warmed up
+- Plex may be catching up on its own background tasks (library scanning, thumbnail generation)
 
-**Prevention:**
-- Validate all data before sending to Plex:
-  - **Length limits:** Tag names, titles, descriptions (Plex has undocumented limits)
-  - **Character encoding:** Remove or escape special characters that break Plex's XML/JSON parsing
-  - **Required fields:** Ensure non-empty values for mandatory fields
-  - **Data types:** Ratings are floats 0-10, dates are ISO8601, etc.
-- Use allowlist approach where possible: known-good patterns rather than blocklist
-- Sanitize file paths: Remove characters invalid in filesystem paths
-- Escape special characters for API calls: HTML entities, URL encoding
-- Example validation:
-  ```python
-  def sanitize_tag(tag: str) -> str:
-      # Plex tags have ~255 char limit
-      tag = tag[:255]
-      # Remove problematic characters
-      tag = re.sub(r'[<>&"]', '', tag)
-      # Ensure not empty after sanitization
-      return tag.strip() or "untagged"
-  ```
+The existing queue has 500+ jobs with `next_retry_at` timestamps in the past. When circuit closes, worker loop processes ALL ready jobs immediately (no artificial throttling).
 
-**Detection:**
-- Plex API returns 400 Bad Request with validation errors
-- Plex UI shows garbled text or missing metadata
-- Sync succeeds but data appears corrupted in Plex
+**How to avoid:**
 
-**Sources:**
-- [Input Validation - OWASP Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html)
-- [Input Validation and Sanitization: Ensuring API Security (Software Patterns Lexicon)](https://softwarepatternslexicon.com/cloud-computing/api-management-and-integration-services/input-validation-and-sanitization/)
-- [API Security Risks and Trends for 2026 (CybelAngel)](https://cybelangel.com/blog/api-security-risks/)
+1. **Backpressure-aware recovery with rate limiting:**
+   ```python
+   class RecoveryManager:
+       def __init__(self, max_recovery_rate=5):  # 5 jobs/sec during recovery
+           self.max_recovery_rate = max_recovery_rate
+           self.recovery_mode = False
+           self.recovery_started_at = None
 
----
+       def enter_recovery_mode(self):
+           """Called when circuit transitions HALF_OPEN → CLOSED."""
+           self.recovery_mode = True
+           self.recovery_started_at = time.time()
+           log_info(f"Entering recovery mode: max {self.max_recovery_rate} jobs/sec")
 
-### Pitfall 7: Poor Matching Logic (False Negatives)
-**What goes wrong:** Sync fails to find the correct Plex item for a Stash scene, even when it exists in Plex, requiring manual intervention. This happens due to filename mismatches, path differences, or overly strict matching criteria.
+       def should_process_job(self):
+           """Rate limit during recovery period (first 5 minutes)."""
+           if not self.recovery_mode:
+               return True
 
-**Prevention:**
-- **Multi-strategy matching with fallback:**
-  1. Exact file path match (fastest, most reliable)
-  2. Filename match (handle different mount points: `/mnt/media` vs `D:\media`)
-  3. Fuzzy filename match (handle encoding differences, extra spaces)
-  4. Metadata match (duration + file size within tolerance)
-  5. Manual match table (user-provided scene_id → plex_id mappings)
-- **Normalize before comparing:**
-  - Convert to lowercase
-  - Remove special characters/punctuation
-  - Normalize Unicode (NFD vs NFC)
-  - Trim whitespace
-- **Handle common path translation issues:**
-  - Stash sees `/mnt/media/video.mp4`
-  - Plex sees `D:\media\video.mp4` (Windows vs Linux mount points)
-  - Solution: Allow configurable path prefix mappings
-- **Tolerate minor differences:**
-  - File duration within 2 seconds (encoding differences)
-  - File size within 1% (metadata differences)
-  - Fuzzy string matching with 95% similarity threshold
-- **Log match confidence:** Track which strategy succeeded, alert on low confidence
-- **Balance precision vs recall:**
-  - High precision (strict matching): Fewer false positives, more false negatives (manual work)
-  - High recall (loose matching): More false positives (wrong matches), fewer false negatives
-  - For sync plugins, false negatives are usually acceptable (scene just doesn't sync); false positives corrupt data
-  - **Recommendation:** Prefer precision, provide UI for manual matching on failures
+           elapsed = time.time() - self.recovery_started_at
+           if elapsed > 300:  # 5 minutes
+               self.recovery_mode = False
+               log_info("Exiting recovery mode: normal rate resumed")
+               return True
 
-**Detection:**
-- User reports metadata not syncing despite scene existing in both systems
-- Logs show "Plex item not found" for scenes that should match
-- Manual match table grows rapidly
+           # Throttle to max_recovery_rate
+           time.sleep(1.0 / self.max_recovery_rate)
+           return True
+   ```
 
-**Sources:**
-- [The Myth of Perfect Metadata Matching (Crossref)](https://www.crossref.org/blog/the-myth-of-perfect-metadata-matching/)
-- [Fuzzy Matching 101: Accurate Data Matching (Data Ladder)](https://dataladder.com/fuzzy-matching-101/)
-- [How Good Is Your Matching? (ROR)](https://ror.org/blog/2024-11-06-how-good-is-your-matching/)
+2. **Graduated queue draining with observation windows:**
+   ```python
+   # Phase 1 (0-2 min): Process 5 jobs/sec, monitor error rate
+   # Phase 2 (2-5 min): If error rate <5%, increase to 10 jobs/sec
+   # Phase 3 (5-10 min): If error rate <5%, increase to 20 jobs/sec
+   # Phase 4 (10+ min): Resume normal rate (config.poll_interval)
 
----
+   def calculate_recovery_rate(elapsed_seconds, error_rate):
+       if error_rate > 0.05:  # >5% errors
+           return 2  # Slow down
+       elif elapsed_seconds < 120:
+           return 5
+       elif elapsed_seconds < 300:
+           return 10
+       elif elapsed_seconds < 600:
+           return 20
+       else:
+           return None  # Normal rate
+   ```
 
-### Pitfall 8: Ignoring Rate Limits
-**What goes wrong:** Plugin makes too many API requests to Plex too quickly, gets rate limited (429 responses), and either fails to handle this gracefully or enters a retry loop that makes the problem worse.
+3. **Prioritize recent jobs over stale jobs:**
+   ```python
+   # Don't process queue FIFO during recovery
+   # Sort by recency: jobs enqueued in last hour first
+   # Old jobs (2+ hours) deferred to after recovery period
 
-**Prevention:**
-- **Respect Plex's rate limits:**
-  - Undocumented but generally permissive for local API calls
-  - More strict for Plex.tv authentication endpoints
-  - Can be triggered by rapid-fire requests (hundreds per second)
-- **Implement client-side rate limiting:**
-  - Token bucket algorithm: Start with N tokens, consume 1 per request, refill at fixed rate
-  - Sliding window counter: Track requests in last N seconds
-  - Example with token bucket:
-    ```python
-    from threading import Lock
-    import time
+   def get_recovery_batch(queue, batch_size=10):
+       all_pending = get_pending_jobs(queue)
+       now = time.time()
 
-    class RateLimiter:
-        def __init__(self, max_requests, window_seconds):
-            self.max_requests = max_requests
-            self.window = window_seconds
-            self.tokens = max_requests
-            self.last_refill = time.time()
-            self.lock = Lock()
+       # Split by age
+       recent = [j for j in all_pending if now - j['enqueued_at'] < 3600]
+       stale = [j for j in all_pending if now - j['enqueued_at'] >= 3600]
 
-        def acquire(self):
-            with self.lock:
-                self._refill()
-                if self.tokens >= 1:
-                    self.tokens -= 1
-                    return True
-                return False
+       # Prioritize recent, limit stale
+       batch = recent[:batch_size] + stale[:max(0, batch_size - len(recent))]
+       return batch
+   ```
 
-        def _refill(self):
-            now = time.time()
-            elapsed = now - self.last_refill
-            new_tokens = elapsed * (self.max_requests / self.window)
-            self.tokens = min(self.max_requests, self.tokens + new_tokens)
-            self.last_refill = now
-    ```
-- **Handle 429 responses:**
-  - Check for `Retry-After` header (seconds or HTTP date)
-  - If present, wait that duration before retrying
-  - If absent, use exponential backoff
-  - Don't count 429 against max retry attempts (it's expected)
-- **Batch operations:** Instead of updating each tag individually, batch multiple changes into single API call
-- **Prioritize operations:** New scene sync is higher priority than metadata update
+4. **Adaptive concurrency limits (Little's Law):**
+   ```python
+   # Measure: avg_latency (time per sync) and error_rate
+   # Calculate: optimal_concurrency = target_latency / avg_latency
+   # Adjust: decrease if error_rate rising, increase if stable
 
-**Detection:**
-- 429 responses in logs
-- Plex returns errors about too many requests
-- Sync latency spikes during bulk operations
+   if error_rate > 0.1:  # 10% errors
+       max_concurrent_jobs -= 1
+   elif error_rate < 0.01 and avg_latency < target_latency:
+       max_concurrent_jobs += 1
+   ```
 
-**Sources:**
-- [API Rate Limiting: Understanding Request Throttling (Postman)](https://blog.postman.com/what-is-api-rate-limiting/)
-- [10 Best Practices for API Rate Limiting and Throttling (Knit)](https://www.getknit.dev/blog/10-best-practices-for-api-rate-limiting-and-throttling)
-- [Rate Limiting Best Practices (Cloudflare)](https://developers.cloudflare.com/waf/rate-limiting-rules/best-practices/)
+**Warning signs:**
+- Circuit breaker repeatedly transitions CLOSED→OPEN during recovery
+- Plex server CPU spikes to 100% when circuit closes
+- First 50 jobs succeed, then failures start occurring
+- Error rate increases over time during queue draining
+- Plex web UI becomes unresponsive after recovery
+
+**Phase to address:**
+**Phase 19 (Automatic Recovery Triggers)** — Implement graduated recovery with rate limiting BEFORE automatic reconciliation. Test with large backlogs (500+ jobs) after simulated outage.
 
 ---
 
-### Pitfall 9: No Timeout Configuration
-**What goes wrong:** Requests to Plex API hang indefinitely when Plex is unresponsive (but not completely down), blocking the sync worker thread and preventing other operations from processing.
+### Pitfall 4: DLQ Recovery Without Deduplication
 
-**Prevention:**
-- **Set timeouts on all HTTP requests:**
-  ```python
-  # Bad: can hang forever
-  response = requests.get(plex_url)
+**What goes wrong:**
+User triggers "Recover DLQ" task to reprocess 200 failed jobs. Unknown to user, 150 of those jobs already succeeded on manual retry (via "Sync Scene" task) but stayed in DLQ due to timing/accounting bug. Recovery reprocesses all 200, creating 150 duplicate sync operations and corrupting Plex metadata.
 
-  # Good: fails fast
-  response = requests.get(plex_url, timeout=(5, 30))  # (connect, read) timeouts
-  ```
-- **Appropriate timeout values:**
-  - Connect timeout: 3-5 seconds (establishing connection)
-  - Read timeout: 15-30 seconds (waiting for response)
-  - Longer for operations known to be slow (searching large libraries)
-- **Timeout hierarchy:**
-  - HTTP request timeout < Operation timeout < Worker timeout
-  - Example: Request timeout 30s, operation timeout 60s, worker timeout 120s
-- **Handle timeout errors as transient:** Retry with backoff, don't mark as permanent failure
+**Why it happens:**
+DLQ is write-only: jobs enter when max retries exhausted, but nothing removes them when manually resolved. No reconciliation between "job in DLQ" and "job actually failed in Plex." DLQ recovery assumes all DLQ items are valid retry candidates without verification.
 
-**Detection:**
-- Sync operations never complete
-- Worker threads stuck waiting
-- No error logs, just absence of completion
+**How to avoid:**
 
-**Sources:**
-- [Timeouts, retries and backoff with jitter (AWS)](https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/)
-- Common pattern across all API integration best practices guides
+1. **Pre-recovery validation with Plex state check:**
+   ```python
+   def validate_dlq_item(dlq_item, plex_client, stash_client):
+       """Check if DLQ item still needs recovery."""
+       scene_id = dlq_item['scene_id']
 
----
+       # Check 1: Does scene still exist in Stash?
+       try:
+           scene = stash_client.find_scene(scene_id)
+           if not scene:
+               log_info(f"Scene {scene_id} deleted from Stash, skip recovery")
+               return False
+       except Exception:
+           return False
 
-### Pitfall 10: State Management Without Persistence
-**What goes wrong:** Plugin crashes or restarts, losing all in-memory queue state. Pending sync operations disappear, and there's no way to recover which scenes needed syncing.
+       # Check 2: Is Plex metadata already current?
+       try:
+           plex_item = plex_matcher.find_plex_item(scene)
+           if plex_item and is_metadata_current(plex_item, scene):
+               log_info(f"Scene {scene_id} already synced, skip recovery")
+               return False
+       except PlexNotFound:
+           # Item not in Plex, needs sync
+           return True
 
-**Prevention:**
-- **Persist queue state:**
-  - Option 1: Save to disk on every queue change (slow but safe)
-  - Option 2: Save periodically (every 30s or 100 ops) + on graceful shutdown
-  - Option 3: Use persistent queue (Redis, database) from start
-- **Track operation state in durable storage:**
-  - Maintain `last_sync_attempt` timestamp per scene
-  - Track `sync_status`: pending/in_progress/completed/failed
-  - Store `retry_count` and `next_retry_at`
-- **Crash recovery on startup:**
-  - Load persisted queue state
-  - Find operations in "in_progress" state (crashed while processing)
-  - Reset them to "pending" for retry
-  - Resume from last checkpoint
-- **Graceful shutdown handling:**
-  ```python
-  import signal
-  import sys
+       # Check 3: Is scene already in active queue?
+       if is_in_queue(scene_id):
+           log_info(f"Scene {scene_id} already queued, skip recovery")
+           return False
 
-  def graceful_shutdown(signum, frame):
-      logger.info("Shutdown signal received, saving state...")
-      queue.persist_to_disk()
-      sys.exit(0)
+       return True  # Needs recovery
+   ```
 
-  signal.signal(signal.SIGTERM, graceful_shutdown)
-  signal.signal(signal.SIGINT, graceful_shutdown)
-  ```
+2. **Idempotent recovery with deduplication tracking:**
+   ```python
+   # Track recovered DLQ items to prevent double-recovery
+   recovered_dlq_items = set()  # Persist to disk
 
-**Detection:**
-- Operations disappear after plugin restart
-- Users report syncs not completing after Stash restart
-- Queue depth resets to 0 on restart
+   def recover_dlq_item(item):
+       item_key = f"{item['scene_id']}_{item['update_type']}"
 
----
+       if item_key in recovered_dlq_items:
+           log_debug(f"Item {item_key} already recovered, skip")
+           return
 
-## Minor Pitfalls
+       if validate_dlq_item(item):
+           enqueue(item)
+           recovered_dlq_items.add(item_key)
+           save_recovered_items(recovered_dlq_items)
+   ```
 
-Mistakes that cause annoyance but are fixable.
+3. **DLQ item expiration policy:**
+   ```python
+   # Remove DLQ items older than 30 days
+   # Assumption: if not manually recovered in 30 days, likely not important
+   def purge_stale_dlq_items(dlq, max_age_days=30):
+       cutoff = time.time() - (max_age_days * 86400)
 
-### Pitfall 11: Logging Sensitive Data
-**What goes wrong:** Logs contain Plex API tokens, authentication credentials, or user file paths, creating security risks when logs are shared for debugging.
+       stale_items = []
+       for item in dlq.iterate():
+           if item.get('failed_at', 0) < cutoff:
+               stale_items.append(item)
 
-**Prevention:**
-- Redact sensitive data before logging:
-  - API tokens: Show first/last 4 chars only (`sk_abc...xyz`)
-  - Passwords: Never log, even hashed
-  - File paths: Consider privacy - may reveal user's library organization
-  - User IDs: Hash or pseudonymize
-- Example:
-  ```python
-  def redact_token(token: str) -> str:
-      if len(token) < 12:
-          return "***"
-      return f"{token[:4]}...{token[-4:]}"
+       for item in stale_items:
+           dlq.delete(item)
+           log_info(f"Purged stale DLQ item: {item['scene_id']}")
+   ```
 
-  log.info(f"Calling Plex API with token {redact_token(api_token)}")
-  ```
-- Use structured logging to separate sensitive fields:
-  ```python
-  log.info("API call successful", extra={
-      "endpoint": "/library/sections",
-      "token": redact_token(token),  # Redacted in logs
-      "duration_ms": elapsed
-  })
-  ```
+4. **Reconciliation-aware DLQ recovery:**
+   ```python
+   # Before recovering DLQ, run gap detection
+   # Only recover items that gap detection confirms are missing/stale
 
-**Detection:**
-- Security audit finds tokens in log files
-- User shares debug logs containing credentials
+   def smart_dlq_recovery(dlq, gap_detector):
+       gaps = gap_detector.detect_all_gaps()
+       gap_scene_ids = {g['scene_id'] for g in gaps}
+
+       for dlq_item in dlq.iterate():
+           if dlq_item['scene_id'] in gap_scene_ids:
+               enqueue(dlq_item)  # Confirmed gap
+           else:
+               log_debug(f"DLQ item {dlq_item['scene_id']} not in gaps, skip")
+   ```
+
+**Warning signs:**
+- Same scene syncs twice after DLQ recovery
+- Plex metadata shows duplicate tags/collections after recovery
+- DLQ recovery logs show "Item already in queue" warnings
+- Users report "DLQ recovery made things worse"
+
+**Phase to address:**
+**Phase 20 (DLQ Recovery UI)** — Add pre-recovery validation BEFORE implementing recovery task. Test with DLQ containing mix of valid failures and already-resolved items.
 
 ---
 
-### Pitfall 12: Not Logging Enough Context
-**What goes wrong:** Error logs say "Sync failed" without indicating which scene, what operation, or why it failed, making debugging impossible.
+### Pitfall 5: Check-on-Invocation Race Condition with Concurrent Hooks
 
-**Prevention:**
-- Include context in every log message:
-  - Scene ID, file path, operation type
-  - Correlation ID for tracing
-  - Error details (status code, error message)
-  - Timing information
-- Example:
-  ```python
-  log.error(
-      f"[{correlation_id}] Sync failed for scene {scene_id}",
-      extra={
-          "scene_id": scene_id,
-          "scene_path": scene.path,
-          "operation": "update_tags",
-          "plex_library_id": library_id,
-          "error_type": type(e).__name__,
-          "error_message": str(e),
-          "duration_ms": elapsed,
-          "retry_count": retry_count
-      }
-  )
-  ```
-- Log successful operations too (at INFO level):
-  - Confirms system is working
-  - Helps measure performance
-  - Useful for audit trail
+**What goes wrong:**
+Two scene.update hooks fire simultaneously (user bulk-edits 50 scenes). Both invocations check reconciliation state: `last_run_time=T-86400, interval=daily`. Both calculate "24 hours elapsed, trigger reconciliation now." Both trigger reconciliation, scanning Plex library twice simultaneously, creating duplicate gap detection jobs.
 
-**Detection:**
-- Developers unable to debug issues from logs
-- "Need more information" responses on bug reports
+**Why it happens:**
+Check-on-invocation pattern reads state, makes decision, then acts. No atomicity between "check if due" and "mark as running." Multiple concurrent invocations see same state and all decide to act.
+
+```python
+# VULNERABLE CODE:
+def on_hook(hook_event):
+    scheduler = ReconciliationScheduler(data_dir)
+
+    if scheduler.is_due(interval='daily'):  # Multiple invocations all see "true"
+        trigger_reconciliation()  # All trigger simultaneously
+        scheduler.record_run(...)  # Race: last write wins
+```
+
+**How to avoid:**
+
+1. **Atomic check-and-set with file locking:**
+   ```python
+   import fcntl
+
+   def try_trigger_reconciliation(scheduler, interval):
+       """Atomically check if due and mark as running."""
+       lock_path = os.path.join(scheduler.data_dir, 'reconciliation.lock')
+
+       try:
+           lock_file = open(lock_path, 'w')
+           # Non-blocking acquire
+           fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+           try:
+               # Inside lock: check if still due
+               if scheduler.is_due(interval):
+                   # Mark as in-progress BEFORE releasing lock
+                   state = scheduler.load_state()
+                   state.last_run_time = time.time()  # Prevent other invocations
+                   scheduler.save_state(state)
+
+                   # Now safe to trigger (lock released)
+                   trigger_reconciliation()
+                   return True
+               return False
+           finally:
+               fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+               lock_file.close()
+       except BlockingIOError:
+           # Another invocation holds lock, skip
+           log_debug("Reconciliation already in progress, skip")
+           return False
+   ```
+
+2. **Cooldown window with timestamp precision:**
+   ```python
+   def is_due_with_cooldown(scheduler, interval, cooldown_seconds=300):
+       """Require 5-minute cooldown between runs to prevent races."""
+       state = scheduler.load_state()
+       now = time.time()
+
+       # Check interval
+       interval_secs = INTERVAL_SECONDS[interval]
+       if now - state.last_run_time < interval_secs:
+           return False
+
+       # Check cooldown (prevents concurrent invocations)
+       if now - state.last_run_time < interval_secs + cooldown_seconds:
+           # We're in the window where multiple invocations might trigger
+           # Add randomized delay to desynchronize
+           time.sleep(random.uniform(0, 5))
+           # Reload state (another invocation may have updated)
+           state = scheduler.load_state()
+           if now - state.last_run_time < interval_secs:
+               return False  # Another invocation triggered
+
+       return True
+   ```
+
+3. **Single-threaded reconciliation via worker queue:**
+   ```python
+   # Instead of triggering reconciliation directly from hooks:
+   # 1. Hook checks if due
+   # 2. If due, enqueue special "reconciliation" job
+   # 3. Worker processes reconciliation jobs sequentially
+
+   def on_hook(hook_event):
+       if scheduler.is_due('daily'):
+           enqueue_reconciliation_job()  # Worker deduplicates
+
+   def worker_loop():
+       job = queue.get()
+       if job['type'] == 'reconciliation':
+           # Only one worker, sequential processing
+           run_reconciliation()
+       elif job['type'] == 'sync':
+           sync_scene(job['scene_id'])
+   ```
+
+4. **Idempotent reconciliation with run ID:**
+   ```python
+   # Track current reconciliation run ID
+   # Multiple invocations enqueue gaps with same run_id
+   # Deduplicate at queue level
+
+   state.current_run_id = f"recon_{int(time.time())}"
+
+   for gap in detected_gaps:
+       job = {
+           'scene_id': gap['scene_id'],
+           'reconciliation_run_id': state.current_run_id
+       }
+       enqueue(job)  # Queue deduplicates by (scene_id, run_id)
+   ```
+
+**Warning signs:**
+- Multiple "Starting reconciliation" log entries within seconds
+- Gap detection runs twice, finding same gaps
+- Reconciliation state file shows rapid updates (multiple mtimes/second)
+- Queue receives duplicate jobs for same scenes
+
+**Phase to address:**
+**Phase 19 (Automatic Recovery Triggers)** — Add file locking for check-on-invocation BEFORE implementing automatic reconciliation. Test with concurrent hook events (bulk scene updates).
 
 ---
 
-### Pitfall 13: Webhook Reliability Assumptions
-**What goes wrong:** Assuming Stash's plugin hooks fire reliably for every scene update. Webhooks can be missed, duplicated, or delayed, leading to missed syncs or duplicate syncs.
+## Technical Debt Patterns
 
-**Prevention:**
-- **Don't rely solely on webhooks:** Supplement with periodic full scans
-  - Webhook handles 99% of cases (immediate sync)
-  - Hourly/daily scan catches missed updates
-- **Handle duplicate webhook events:** Use idempotency to prevent duplicate syncs
-- **Handle delayed webhooks:** If webhook arrives 10 minutes late, check if sync already happened
-- **Implement webhook validation:** Verify webhook authenticity if Stash provides signatures
+Shortcuts that seem reasonable but create long-term problems.
 
-**Detection:**
-- Scenes updated in Stash don't sync to Plex
-- Same scene syncs multiple times from single update
-
-**Sources:**
-- [SaaS Integration Best Practices: Webhooks (Skyvia)](https://blog.skyvia.com/saas-integration-best-practices/)
-- [11 Common Integration Challenges (BindBee)](https://www.bindbee.dev/blog/overcome-integration-challenges)
+| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
+|----------|-------------------|----------------|-----------------|
+| Skip file locking for state persistence | Simpler code, no lock contention handling | Race conditions with concurrent invocations, duplicate reconciliation runs | NEVER (PlexSync has concurrent hooks) |
+| Use shallow health check (TCP connect) | Fast response, simple implementation | False positives during Plex startup, premature queue draining | Only if combined with grace period or graduated recovery |
+| Recover entire DLQ without validation | Simple "replay all" logic | Duplicate syncs if items already resolved manually | Only for small DLQs (<10 items) where duplicates are acceptable |
+| Hard-code recovery rate limits | No adaptive logic needed | Can't handle varying Plex capacity (beefy server vs. RPi) | Acceptable for MVP if config-overrideable |
+| Store circuit breaker state only in memory | No file I/O overhead | State lost on crash, circuit reopens unnecessarily | NEVER (defeats purpose of persistence) |
+| Poll Plex health every 10 seconds during outage | Fast recovery detection | Wastes resources during long outages, Plex sees failed requests | Only if adaptive (slow down after N failures) |
 
 ---
 
-## Phase-Specific Warnings
+## Integration Gotchas
 
-Based on the PlexSync improvement roadmap, here are pitfalls mapped to likely implementation phases:
+Common mistakes when connecting to external services.
 
-| Phase Topic | Likely Pitfall | Mitigation |
-|-------------|---------------|------------|
-| Retry Logic Implementation | Pitfall 2: Missing exponential backoff + jitter | Start with exponential backoff library (e.g., `tenacity` for Python) rather than rolling your own |
-| Queue Mechanism | Pitfall 4: Database-as-queue anti-pattern | Use in-memory queue with disk persistence for simplicity, or Redis for production |
-| Late Update Detection | Pitfall 13: Webhook reliability assumptions | Implement both webhook listeners AND periodic reconciliation scans |
-| Input Sanitization | Pitfall 6: No validation leading to corrupted Plex data | Create validation functions early, before implementing sync logic |
-| Idempotency Implementation | Pitfall 1: Duplicates from retries | Design operations to be idempotent from start, not as afterthought |
-| Observability/Logging | Pitfall 3: Silent failures with no monitoring | Implement structured logging and health checks before deploying retry logic |
-| Error Classification | Pitfall 5: Retrying permanent errors | Create error classification logic before implementing retry - saves debugging time |
-| Rate Limiting | Pitfall 8: Overwhelming Plex API | Add client-side rate limiter wrapper around Plex API client early |
+| Integration | Common Mistake | Correct Approach |
+|-------------|----------------|------------------|
+| Plex Health Check | Assume port 32400 open = server ready | Make sentinel request to metadata API, verify DB loaded |
+| Circuit Breaker Persistence | Write state file without atomic rename | Use temp file + fsync + rename pattern to prevent corruption |
+| Automatic Recovery | Close circuit immediately on first health check success | Require N consecutive successes (half-open threshold) |
+| DLQ Recovery | Replay all items blindly | Validate items still need recovery (check Plex current state) |
+| Reconciliation Scheduling | Check interval based on wall-clock time | Use elapsed time since last run + cooldown to prevent races |
+| Queue Draining | Process all ready jobs at max rate | Rate-limit during recovery period (graduated draining) |
 
-## Research Confidence
+---
 
-| Area | Confidence | Notes |
-|------|------------|-------|
-| Retry patterns | HIGH | Well-documented patterns from AWS, ByteByteGo, Microsoft, backed by 2026 sources |
-| Queue anti-patterns | HIGH | Multiple authoritative sources (Temporal, industry blogs) with specific examples |
-| Idempotency | HIGH | Recent 2026 sources from payment/fintech domains with production examples |
-| Observability | MEDIUM | Good 2026 sources but less specific to sync plugins vs general distributed systems |
-| Metadata matching | MEDIUM | Good academic/industry sources but focused on scholarly metadata vs media files |
-| Rate limiting | HIGH | Authoritative sources from API gateway providers (Cloudflare, AWS, Atlassian) |
-| Plex API specifics | LOW | No official Plex API documentation found; recommendations based on general API best practices |
+## Performance Traps
 
-## Key Takeaways
+Patterns that work at small scale but fail as usage grows.
 
-**Don't underestimate:**
-1. **Silent failures** - Absence of events is harder to detect than presence of errors
-2. **Idempotency** - Easier to design in from start than bolt on after problems arise
-3. **Error classification** - Not all failures should retry; distinguish transient vs permanent early
+| Trap | Symptoms | Prevention | When It Breaks |
+|------|----------|------------|----------------|
+| Health check polling every second | Plex logs fill with /identity requests, CPU waste | Adaptive interval: 1s during HALF_OPEN, 60s during OPEN | >30 minute outages (1800+ unnecessary health checks) |
+| No backpressure during recovery | Plex CPU spikes to 100%, queue draining stalls | Rate limit to 5-10 jobs/sec for first 5 minutes | Backlogs >100 jobs |
+| File lock contention on every hook | Hook latency increases with concurrent events | Use lock only for reconciliation trigger, not every hook | >10 concurrent hook invocations |
+| Unbounded DLQ growth | DLQ inspection becomes slow, memory issues | Expire items >30 days old, cap DLQ at 1000 items | DLQ >10,000 items |
+| Gap detection on every startup | Stash startup delayed 30+ seconds | Only run if >1 hour since last startup | Libraries >5,000 scenes |
 
-**Do prioritize:**
-1. **Exponential backoff + jitter** - Non-negotiable for production retry logic
-2. **Structured logging** - Invest early, debugging will be 10x easier
-3. **Health checks** - Monitor both success (operations completing) and absence (operations missing)
+---
 
-**Sequence matters:**
-1. Implement idempotency BEFORE retry logic (prevents duplicates from retries)
-2. Implement logging/observability BEFORE queue mechanism (makes debugging queue issues possible)
-3. Implement error classification BEFORE exponential backoff (prevents wasted retries)
+## "Looks Done But Isn't" Checklist
+
+Things that appear complete but are missing critical pieces.
+
+- [ ] **Circuit Breaker Persistence:** Persists state to disk, BUT no file locking → race conditions with concurrent invocations
+- [ ] **Health Monitoring:** Checks Plex port 32400, BUT doesn't verify database loaded → false positives during startup
+- [ ] **Automatic Recovery:** Triggers reconciliation when circuit closes, BUT no rate limiting → thundering herd
+- [ ] **DLQ Recovery:** UI to replay failed jobs, BUT no pre-validation → duplicate syncs for already-resolved items
+- [ ] **Reconciliation Scheduling:** Check-on-invocation pattern, BUT no atomic check-and-set → duplicate runs
+- [ ] **Queue Draining:** Processes backlog after recovery, BUT FIFO order → starves recent jobs during recovery
+
+---
+
+## Recovery Strategies
+
+When pitfalls occur despite prevention, how to recover.
+
+| Pitfall | Recovery Cost | Recovery Steps |
+|---------|---------------|----------------|
+| Thundering herd overwhelmed Plex | MEDIUM | 1. Manually pause queue processing 2. Restart Plex 3. Clear retry timestamps 4. Resume with rate limit |
+| Stale circuit breaker state race | LOW | 1. Stop all plugin processes 2. Delete state file 3. Restart with lock enabled |
+| DLQ duplicates corrupted metadata | HIGH | 1. Identify affected scenes (query DLQ timestamps) 2. Manually fix Plex metadata 3. Re-sync scenes |
+| False positive health check | LOW | 1. Circuit opens automatically after failures 2. Implement deep health check 3. Deploy update |
+| Concurrent reconciliation runs | MEDIUM | 1. Check for duplicate gaps in queue 2. Deduplicate by scene_id 3. Add file locking |
+| Health check polling storm | LOW | 1. Increase poll interval in config 2. Restart plugin 3. Verify Plex CPU normal |
+
+---
+
+## Pitfall-to-Phase Mapping
+
+How roadmap phases should address these pitfalls.
+
+| Pitfall | Prevention Phase | Verification |
+|---------|------------------|--------------|
+| Circuit breaker race condition | Phase 17 (Circuit Breaker Persistence) | Test with 10 concurrent hook invocations, verify single HALF_OPEN transition |
+| Health check false positive | Phase 18 (Health Monitoring) | Test against real Plex restart, verify circuit doesn't close during initialization |
+| Thundering herd on recovery | Phase 19 (Automatic Recovery) | Simulate 500-job backlog, verify graduated draining with <5% error rate |
+| DLQ recovery duplicates | Phase 20 (DLQ Recovery UI) | Create DLQ with resolved items, verify recovery validates before enqueue |
+| Check-on-invocation race | Phase 19 (Automatic Recovery) | Trigger 5 concurrent hooks at reconciliation boundary, verify single run |
+| Queue drain backpressure | Phase 19 (Automatic Recovery) | Monitor Plex CPU during 500-job recovery, verify <80% utilization |
+
+---
 
 ## Sources
 
-### Retry & Resilience Patterns
-- [Designing retry logic that doesn't create data duplicates (Medium, Jan 2026)](https://medium.com/@backend.bao/designing-retry-logic-that-doesnt-create-data-duplicates-99a784500931)
-- [Retrying and Exponential Backoff: Smart Strategies for Robust Software (HackerOne)](https://www.hackerone.com/blog/retrying-and-exponential-backoff-smart-strategies-robust-software)
-- [Timeouts, retries and backoff with jitter (AWS Builders Library)](https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/)
-- [A Guide to Retry Pattern in Distributed Systems (ByteByteGo)](https://blog.bytebytego.com/p/a-guide-to-retry-pattern-in-distributed)
-- [Better Retries with Exponential Backoff and Jitter (Baeldung)](https://www.baeldung.com/resilience4j-backoff-jitter)
+### Circuit Breaker Patterns & Persistence
+- [Building Resilient Systems: Circuit Breakers and Retry Patterns](https://dasroot.net/posts/2026/01/building-resilient-systems-circuit-breakers-retry-patterns/)
+- [How to Configure Circuit Breaker Patterns](https://oneuptime.com/blog/post/2026-02-02-circuit-breaker-patterns/view)
+- [The Complete Guide to Resilience Patterns in Distributed Systems](https://technori.com/2026/02/24230-the-complete-guide-to-resilience-patterns-in-distributed-systems/gabriel/)
+- [Circuit Breaker Pattern for Serverless Applications](https://resources.fenergo.com/engineering-at-fenergo/circuit-breaker-pattern-for-serverless-applications) — MemoryDB persistence for stateless functions
+- [Distributed Circuit Breakers in Event-Driven Architectures on AWS](https://sodkiewiczm.medium.com/distributed-circuit-breakers-in-event-driven-architectures-on-aws-95774da2ce7e)
 
-### Idempotency & Duplicate Prevention
-- [Preventing Duplicate Operations in APIs with Idempotent Keys (Medium)](https://medium.com/@anas.mdhat/preventing-duplicate-operations-in-apis-with-idempotent-keys-f67c3bf6117a)
-- [Mastering Idempotency: Building Reliable APIs (ByteByteGo)](https://blog.bytebytego.com/p/mastering-idempotency-building-reliable)
-- [Implementing Idempotency Keys in REST APIs (Zuplo)](https://zuplo.com/learning-center/implementing-idempotency-keys-in-rest-apis-a-complete-guide)
-- [Understanding Idempotency in Data Pipelines (Airbyte)](https://airbyte.com/data-engineering-resources/idempotency-in-data-pipelines)
+### Health Check Anti-Patterns
+- [How to Implement Health Check Design](https://oneuptime.com/blog/post/2026-01-30-health-check-design/view)
+- [Implementing health checks — AWS Builders Library](https://aws.amazon.com/builders-library/implementing-health-checks/) — Dependency health check false positives, fail-open pattern
+- [Microservices Pattern: Health Check API](https://microservices.io/patterns/observability/health-check-api.html)
 
-### Queue Systems & Anti-patterns
-- [Microservice Antipatterns: The Queue Explosion (Charlie Pitman)](https://cpitman.github.io/microservices/2018/03/25/microservice-antipattern-queue-explosion.html)
-- [Database-as-IPC (Wikipedia)](https://en.wikipedia.org/wiki/Database-as-IPC)
-- [Queue-Based Exponential Backoff: Resilient Retry Pattern (DEV Community)](https://dev.to/andreparis/queue-based-exponential-backoff-a-resilient-retry-pattern-for-distributed-systems-37f3)
+### Thundering Herd & Recovery Triggers
+- [Mastering Exponential Backoff in Distributed Systems](https://betterstack.com/community/guides/monitoring/exponential-backoff/)
+- [Retry Storm Antipattern — Azure Architecture Center](https://learn.microsoft.com/en-us/azure/architecture/antipatterns/retry-storm/)
+- [Distributed Systems Horror Stories: The Thundering Herd Problem](https://encore.dev/blog/thundering-herd-problem)
+- [The Thundering Herd Problem and Its Solutions](https://www.nottldr.com/SystemSage/the-thundering-herd-problem-and-its-solutions-0ie2hx3)
 
-### Observability & Silent Failures
-- [Building A Monitoring System That Catches Silent Failures (Vincent Lakatos)](https://www.vincentlakatos.com/blog/building-a-monitoring-system-that-catches-silent-failures/)
-- [Agentforce Studio's New Health Monitoring Tool Aims to Catch 'Silent Failures' (Salesforce, 2026)](https://www.salesforce.com/blog/agent-monitoring/?bc=OTH)
-- [We Caught 92% of Outages Before Users Noticed: Synthetic Monitoring (Medium, Jan 2026)](https://medium.com/@yashbatra11111/we-caught-92-of-outages-before-users-noticed-why-synthetic-monitoring-beats-reactive-alerting-1f4cfeb0d770)
-- [Effective Logging Strategies for Better Observability and Debugging (Medium)](https://juliofalbo.medium.com/effective-logging-strategies-for-better-observability-and-debugging-4b90decefdf1)
+### Queue Backpressure & Recovery
+- [Avoiding insurmountable queue backlogs — AWS Builders Library](https://aws.amazon.com/builders-library/avoiding-insurmountable-queue-backlogs/)
+- [How to Implement Backpressure Handling in OpenTelemetry Pipelines](https://oneuptime.com/blog/post/2026-02-06-backpressure-handling-opentelemetry-pipelines/view)
+- [Understanding Back Pressure in Message Queues](https://akashrajpurohit.com/blog/understanding-back-pressure-in-message-queues-a-guide-for-developers/)
+- [Backpressure explained — the resisted flow of data through software](https://medium.com/@jayphelps/backpressure-explained-the-flow-of-data-through-software-2350b3e77ce7)
 
-### Integration Best Practices
-- [SaaS Integration Best Practices: A Comprehensive Guide (Skyvia, 2026)](https://blog.skyvia.com/saas-integration-best-practices/)
-- [Common Integration Style Pitfalls and Design Best Practices (Oracle)](https://docs.oracle.com/en/cloud/paas/integration-cloud/integrations-user/common-integration-style-pitfalls-and-design-best-practices.html)
-- [11 Common Integration Challenges And How to Overcome Them (BindBee)](https://www.bindbee.dev/blog/overcome-integration-challenges)
+### DLQ & Poison Message Handling
+- [Dead Letter Queue (DLQ): What It Is and How to Implement It in a Node.js Application](https://devdiaryacademy.medium.com/dead-letter-queue-dlq-what-it-is-and-how-to-implement-it-in-a-node-js-application-3c6d4b6a9400)
+- [Message reprocessing: How to implement the dead letter queue](https://www.redpanda.com/blog/reliable-message-processing-with-dead-letter-queue)
+- [Apache Kafka Dead Letter Queue: A Comprehensive Guide](https://www.confluent.io/learn/kafka-dead-letter-queue/)
+- [Dead Letter Queues (DLQ): The Complete, Developer-Friendly Guide](https://swenotes.com/2025/09/25/dead-letter-queues-dlq-the-complete-developer-friendly-guide/)
 
-### API Security & Validation
-- [Input Validation - OWASP Cheat Sheet Series](https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html)
-- [Input Validation and Sanitization: Ensuring API Security (Software Patterns Lexicon)](https://softwarepatternslexicon.com/cloud-computing/api-management-and-integration-services/input-validation-and-sanitization/)
-- [API Security Risks and Trends for 2026 (CybelAngel)](https://cybelangel.com/blog/api-security-risks/)
+### Cascade Failure Prevention
+- [How to Avoid Cascading Failures in Distributed Systems](https://www.infoq.com/articles/anatomy-cascading-failure/)
+- [Circuit Breakers: Preventing Cascade Failures in Distributed Systems](https://medium.com/towardsdev/circuit-breakers-preventing-cascade-failures-in-distributed-systems-7a3a921636c3)
+- [What are Cascading Failures? — BMC Software](https://www.bmc.com/blogs/cascading-failures/)
 
-### Rate Limiting & Throttling
-- [API Rate Limiting: Understanding Request Throttling (Postman)](https://blog.postman.com/what-is-api-rate-limiting/)
-- [10 Best Practices for API Rate Limiting and Throttling (Knit)](https://www.getknit.dev/blog/10-best-practices-for-api-rate-limiting-and-throttling)
-- [Rate Limiting Best Practices (Cloudflare)](https://developers.cloudflare.com/waf/rate-limiting-rules/best-practices/)
+### Event-Driven Architecture & State Persistence
+- [Common Pitfalls in Event-Driven Architectures](https://medium.com/insiderengineering/common-pitfalls-in-event-driven-architectures-de84ad8f7f25)
+- [Persistence in Event Driven Architectures](https://dzone.com/articles/persistence-in-event-driven-architectures)
+- [Exploring event-driven architecture in microservices: patterns, pitfalls and best practices](https://www.researchgate.net/publication/388709044_Exploring_event-driven_architecture_in_microservices-_patterns_pitfalls_and_best_practices)
 
-### Metadata Matching
-- [The Myth of Perfect Metadata Matching (Crossref)](https://www.crossref.org/blog/the-myth-of-perfect-metadata-matching/)
-- [Fuzzy Matching 101: Accurate Data Matching (Data Ladder)](https://dataladder.com/fuzzy-matching-101/)
-- [How Good Is Your Matching? (ROR, Nov 2024)](https://ror.org/blog/2024-11-06-how-good-is-your-matching/)
+### Race Conditions & Distributed Locking
+- [Handling Race Condition in Distributed System — GeeksforGeeks](https://www.geeksforgeeks.org/computer-networks/handling-race-condition-in-distributed-system/)
+- [The Art of Staying in Sync: How Distributed Systems Avoid Race Conditions](https://medium.com/@alexglushenkov/the-art-of-staying-in-sync-how-distributed-systems-avoid-race-conditions-f59b58817e02)
+- [Race Conditions in a Distributed System](https://medium.com/hippo-engineering-blog/race-conditions-in-a-distributed-system-ea6823ee2548)
+- [Distributed Locking and Race Condition Prevention](https://dzone.com/articles/distributed-locking-and-race-condition-prevention)
+
+### File Corruption & Atomic Writes
+- [Storage resilience: atomic writes, safer temp cleanup, repair/restore tools](https://github.com/anomalyco/opencode/issues/7733) — Temp + fsync + rename pattern
+- [Registry corruption (empty array) after crash during atomic rename](https://github.com/openclaw/openclaw/issues/1469) — Real-world JSON corruption
+
+---
+
+*Pitfalls research for: PlexSync outage resilience features (v1.5 milestone)*
+*Researched: 2026-02-15*
+*Focus: Event-driven architecture constraints, non-daemon process state management, concurrent invocation safety*

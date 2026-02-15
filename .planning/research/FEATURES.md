@@ -1,275 +1,438 @@
-# Feature Landscape: Sync/Integration Plugin Reliability
+# Feature Research: Outage Resilience for Queue Systems
 
-**Domain:** Data synchronization and integration plugins
-**Researched:** 2026-01-24
+**Domain:** Outage resilience in sync/queue systems (metadata sync plugin context)
+**Researched:** 2026-02-15
 **Confidence:** HIGH
+
+## Context
+
+PlexSync already has:
+- Persistent SQLite queue with crash recovery
+- Exponential backoff with jitter (PlexServerDown = 999 retries, never DLQ'd)
+- Circuit breaker (5 failures → OPEN → 60s → HALF_OPEN)
+- Check-on-invocation scheduling (not a daemon)
+- Manual "Process Queue" button
+- Queue status display
+
+**Gap:** When Plex recovers from outage, nothing triggers automatic queue drain. User must manually hit "Process Queue" or wait for coincidental hook event.
+
+**Research focus:** What features do users expect for automatic recovery, health monitoring, and outage reporting?
+
+---
 
 ## Table Stakes
 
-Features users expect from reliable sync/integration plugins. Missing = product feels incomplete or unreliable.
+Features users expect. Missing these = product feels incomplete.
 
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| **Exponential Backoff Retry** | Industry standard for handling transient failures; reduces cascading failures by 83.5% in production | Medium | Use Python tenacity library (gold standard for 2026). Wait formula: `min(base_delay * 2^attempt, max_delay)` with jitter to prevent thundering herd |
-| **Retry Limits & Budget** | Prevents infinite retry loops from overwhelming recovering services | Low | Define max attempts based on criticality. Typical: 3-5 retries for metadata sync operations |
-| **Idempotent Operations** | Ensures safe retries without creating duplicates; automation reduces data loss by up to 90% | Medium | Use unique operation IDs. Upsert pattern for metadata updates. Critical for retry logic to work safely |
-| **Error-Specific Retry Logic** | Not all errors should be retried (e.g., auth errors vs network timeouts) | Low | Retry: network errors, 5xx, 429. Don't retry: 4xx client errors, validation failures |
-| **Explicit Timeouts** | Requests library has no default timeout - requests can hang indefinitely without this | Low | Use tuple format: `(connect_timeout, read_timeout)`. Recommended: (3-4s, 10s) for API calls |
-| **Silent Failure Prevention** | Silent failures erode trust and can go undetected for months | Medium | Log ALL failures. Alert on critical failures. Never fail silently - even if retry will be attempted |
-| **Dead Letter Queue Pattern** | Stores messages that cannot be processed after max retries for later investigation | Medium | Increases resiliency by 40-60%. Allows recovery without data loss. Retention should exceed source queue |
-| **Operation Status Logging** | Users need visibility into sync state: success, pending, failed, retrying | Low | Log timestamps, attempt counts, error details. Required for troubleshooting |
-| **Input Validation & Sanitization** | Prevents bad data from reaching destination API; reduces retry failures from data issues | Medium | Validate before sending. Sanitize special characters. Use controlled vocabularies where possible |
-| **Graceful Degradation** | System should continue functioning when destination is unavailable | Medium | Queue updates for later. Provide user feedback. Don't block source system operations |
+| Feature | Why Expected | Complexity | Dependencies |
+|---------|--------------|------------|--------------|
+| **Automatic queue drain on recovery** | Industry standard: queues resume automatically when downstream recovers | MEDIUM | Requires recovery detection mechanism |
+| **Health monitoring with retry** | All production queue systems probe downstream to detect recovery | LOW | Active health check with configurable interval |
+| **Outage visibility in status UI** | Users need to know *why* queue stopped and *when* it will resume | LOW | Extend existing queue status task |
+| **Circuit breaker state logging** | State transitions (CLOSED → OPEN → HALF_OPEN) must be observable | LOW | Already exists, just needs better logging |
+| **Recovery notification** | Users need confirmation when system returns to normal | LOW | Log when circuit closes after outage |
+
+---
 
 ## Differentiators
 
-Features that set reliable plugins apart. Not expected, but highly valued when present.
+Features that set product apart. Not expected, but valuable.
 
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| **Circuit Breaker Pattern** | Stops retry attempts when service is confirmed down; reduces wasted effort and faster recovery | High | Open circuit after threshold failures. Half-open state for testing recovery. Requires state management |
-| **Late Update Detection** | Catches metadata that changed after initial sync (Stash indexing delay scenario) | Medium | Implement change detection via polling or webhooks. Hybrid approach most reliable: webhook primary, polling fallback |
-| **Confidence-Based Matching** | Fuzzy matching with confidence scores reduces false negatives and false positives | High | Use multiple matching strategies. Auto-merge at 90%+ confidence. Human review queue for 60-89% |
-| **Differential Sync** | Only syncs changed fields rather than full record updates | Medium | Reduces API calls, bandwidth, and downstream processing. Requires tracking what changed |
-| **Sync Queue Visibility** | Dashboard showing pending/failed/completed syncs with manual retry capability | High | Transparency builds user trust. Allows manual intervention when automated retry insufficient |
-| **Adaptive Retry Strategy** | Adjusts retry timing based on error type and service behavior | High | 503 errors retry aggressively, 429 respects rate limits. Learns from patterns over time |
-| **Observability Integration** | OpenTelemetry instrumentation providing metrics, logs, and traces | Medium | Industry standard for 2026. Enables correlation of failures across systems. Reduces MTTR |
-| **Conflict Resolution** | Handles cases where both systems modified data | High | Only needed for bi-directional sync. PlexSync is uni-directional (Stash → Plex) so lower priority |
-| **Batch Sync Optimization** | Groups multiple updates into batches to reduce API overhead | Medium | Balances freshness vs efficiency. Good for bulk updates after Stash library scan |
-| **Dry Run Mode** | Test sync operations without actually modifying destination | Low | Critical for debugging matching logic and validation rules |
+| Feature | Value Proposition | Complexity | Dependencies |
+|---------|-------------------|------------|--------------|
+| **Passive + active health checks** | Passive (monitor actual jobs) detects failure faster; active (periodic probe) detects recovery faster | MEDIUM | Circuit breaker already does passive; add active probe |
+| **Circuit breaker state persistence** | Survives plugin restarts during outages (doesn't reset to CLOSED and hammer Plex) | LOW | JSON state file like reconciliation scheduler |
+| **Outage-triggered reconciliation** | When Plex recovers after hours down, auto-reconcile to find gaps from events during outage | MEDIUM | Requires reconciliation engine (Phase 1) + outage detection |
+| **DLQ recovery for outage jobs** | Jobs DLQ'd during outage (timeout, rate limit) can be re-queued when service recovers | MEDIUM | DLQ already tracks error types; add "recover by type" command |
+| **Health check backoff** | Space out recovery probes to avoid hammering recovering service (1s → 2s → 4s → cap at 60s) | LOW | Apply existing backoff logic to health checks |
+| **Outage history tracking** | Log outage start/end times, duration, jobs affected for post-mortem analysis | LOW | Extend reconciliation state file pattern |
+
+---
 
 ## Anti-Features
 
-Features to explicitly NOT build. Common mistakes in this domain.
+Features to explicitly NOT build.
 
-| Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| **Infinite Retry Without Backoff** | Creates thundering herd problem, overwhelms recovering service, causes cascading failures | Always use exponential backoff with jitter. Always have max retry limits |
-| **Retry All Errors Equally** | Wastes resources retrying permanent failures (auth errors, validation errors) | Classify errors: transient (retry) vs permanent (DLQ/alert). Only retry transient |
-| **Synchronous Blocking Sync** | Freezes source system (Stash) while waiting for destination (Plex) response | Use async operations or background jobs. Source system should never wait for sync completion |
-| **No Timeout on API Calls** | Requests hang indefinitely if Plex doesn't respond, blocking other operations | Always set explicit timeouts. Requests library has no default - this is critical |
-| **Aggressive Polling Without Rate Limiting** | Hammers APIs unnecessarily, triggers rate limits, wastes resources | Use exponential backoff between polls. Respect cache headers. Prefer webhooks where available |
-| **Silent Success Assumption** | Assumes sync worked if no error thrown; misses partial failures or data corruption | Verify response status codes. Validate response payloads. Log successful operations too |
-| **Immediate Fail on First Error** | Gives up too easily on transient issues; reduces reliability | Implement retry logic. Only fail permanently after exhausting retries |
-| **Over-Matching with Fuzzy Logic** | Creates false positives - wrong items get matched and have metadata overwritten | Use confidence thresholds. Cross-check with unique identifiers. Human review for medium confidence |
-| **Stateless Retry Logic** | Retries same operation identically; doesn't learn from patterns or adjust strategy | Track retry history. Adjust based on error patterns. Implement circuit breaker for known-bad states |
-| **Missing Idempotency Keys** | Retries create duplicate records or duplicate updates | Generate unique operation IDs. Check for existing operations before processing |
+| Anti-Feature | Why Requested | Why Avoid | What to Do Instead |
+|--------------|---------------|-----------|-------------------|
+| **Real-time push notifications** | "Alert me immediately when Plex is down" | Stash plugins run per-event, no daemon for push notifications; external monitoring (Uptime Kuma, Healthchecks.io) solves this better | Log outage clearly, extend queue status to show "Circuit OPEN since [time]" |
+| **Automatic full reconciliation on recovery** | "Sync everything that changed during outage" | Expensive: 10K+ items after 8hr backup outage; may re-queue already-queued jobs | User-triggered reconciliation with "since last outage" scope filter |
+| **Multi-tiered circuit breakers** | "Different thresholds for temporary vs permanent failures" | Over-engineering: PlexServerDown already gets special handling (999 retries); circuit breaker handles burst failures | Single circuit breaker with error-specific retry limits (existing) |
+| **External health check endpoint** | "I want to monitor Plex through this plugin" | Plugin can't serve HTTP; Plex has native health endpoints (`/identity`, `/servers`); dedicated monitoring tools exist | Document how to monitor Plex directly + queue status task shows derived health |
+| **Automatic failover to backup Plex server** | "Switch to secondary server during outage" | Complex: config management, metadata sync conflicts, race conditions on recovery | Manual failover via config change is safer; most users have single Plex |
+
+---
 
 ## Feature Dependencies
 
 ```
-Core Foundation (must implement first):
-├─ Explicit Timeouts (enables all other features to function correctly)
-├─ Error-Specific Retry Logic (prevents wasting retries on permanent failures)
-└─ Idempotent Operations (makes retries safe)
-    ↓
-Retry Infrastructure (builds on foundation):
-├─ Exponential Backoff Retry (requires idempotency + error classification)
-├─ Retry Limits & Budget (prevents infinite loops)
-└─ Silent Failure Prevention (logging/alerting)
-    ↓
-Advanced Resilience (optional enhancements):
-├─ Dead Letter Queue Pattern (requires retry limits)
-├─ Circuit Breaker Pattern (requires retry logic + state tracking)
-└─ Adaptive Retry Strategy (requires retry infrastructure + metrics)
-    ↓
-Domain-Specific (PlexSync use cases):
-├─ Late Update Detection (requires core sync working reliably)
-├─ Confidence-Based Matching (independent - can implement anytime)
-└─ Input Validation & Sanitization (should implement early, but not blocking)
+[Automatic Queue Drain]
+    └──requires──> [Recovery Detection] (health monitoring)
+    └──requires──> [Event-Driven Trigger] (mechanism to resume processing)
+
+[Recovery Detection]
+    ├──uses──> [Active Health Check] (periodic probe during OPEN state)
+    ├──uses──> [Circuit Breaker HALF_OPEN] (existing test-on-timeout)
+    └──enhances──> [Passive Health Check] (existing: job success/failure)
+
+[Event-Driven Trigger]
+    ├──option1──> [Hook-Based Resume] (emit fake hook event to trigger processing)
+    ├──option2──> [Scheduler Integration] (check-on-invocation: "is circuit closed + queue not empty?")
+    └──option3──> [Direct Worker Call] (worker.process_next() after health check succeeds)
+
+[Circuit Breaker State Persistence]
+    └──pattern──> [ReconciliationScheduler] (existing JSON state file pattern)
+    └──data──> {state: "open"|"closed"|"half_open", opened_at: timestamp, ...}
+
+[Outage-Triggered Reconciliation]
+    └──requires──> [Reconciliation Engine] (Phase 1)
+    └──requires──> [Outage History] (track outage windows)
+    └──enhances──> [Automatic Recovery] (reconcile after drain completes)
+
+[DLQ Recovery]
+    └──requires──> [Error Type Classification] (existing: PlexServerDown, Timeout, etc.)
+    └──enhances──> [DLQ Management] (existing: clear, purge tasks)
+    └──new task──> "Recover Outage Jobs" (re-queue DLQ entries with transient errors)
+
+[Health Check Backoff]
+    └──uses──> [Exponential Backoff Logic] (existing: worker/backoff.py)
+    └──applies to──> [Active Health Check Interval]
+
+[Outage History]
+    └──pattern──> [ReconciliationScheduler State] (existing JSON persistence)
+    └──data──> [{start: timestamp, end: timestamp, duration_secs: N, jobs_affected: N}, ...]
 ```
 
-## MVP Recommendation
+---
 
-For PlexSync improvements, prioritize reliability fundamentals:
+## MVP Definition (Outage Resilience Phase)
 
-### Phase 1: Core Reliability (Table Stakes)
-1. **Explicit Timeouts** - Critical missing piece; blocks indefinitely without this
-2. **Error-Specific Retry Logic** - Foundation for all retry features
-3. **Exponential Backoff Retry** - Industry standard using Python tenacity library
-4. **Retry Limits & Budget** - Prevents runaway retries
-5. **Silent Failure Prevention** - Log all failures, alert on critical ones
+### Phase 1: Automatic Recovery Core
 
-### Phase 2: Data Safety & Visibility
-1. **Idempotent Operations** - Makes retries safe via unique operation IDs
-2. **Input Validation & Sanitization** - Prevents bad data from causing failures
-3. **Operation Status Logging** - Users need visibility into what's happening
+**Goal:** Queue drains automatically when Plex recovers.
 
-### Phase 3: Advanced Features (Post-MVP)
-1. **Dead Letter Queue Pattern** - Handle permanently failed operations gracefully
-2. **Late Update Detection** - Solve Stash indexing delay scenario via polling/webhooks
-3. **Confidence-Based Matching** - Reduce false negatives in matching logic
-4. **Circuit Breaker Pattern** - Advanced resilience for known failure scenarios
+**Launch With:**
 
-### Defer to Future
-- **Observability Integration** - Valuable but complex; standard logging sufficient for MVP
-- **Batch Sync Optimization** - Optimization, not core reliability
-- **Conflict Resolution** - Not needed for uni-directional Stash → Plex sync
-- **Adaptive Retry Strategy** - Advanced AI-powered feature; standard backoff sufficient initially
+- [ ] **Active Health Check During OPEN State**
+  - When circuit opens, start periodic health probe (every 60s)
+  - Probe: lightweight Plex API call (`/identity` endpoint check)
+  - Success → transition to HALF_OPEN (existing logic) → test job → CLOSED
+  - Failure → stay OPEN, retry after backoff interval
+  - Complexity: LOW (reuse existing circuit breaker state machine)
 
-## Implementation Notes for PlexSync
+- [ ] **Automatic Queue Processing on Recovery**
+  - When circuit transitions CLOSED (after HALF_OPEN success), trigger queue drain
+  - Mechanism: Call `worker.process_next()` in loop until queue empty or circuit reopens
+  - Rate limiting: Respect existing worker throttling (avoid hammering just-recovered Plex)
+  - Complexity: LOW (worker already has process loop)
 
-### Python-Specific Recommendations
+- [ ] **Enhanced Logging for State Transitions**
+  - CLOSED → OPEN: "Circuit breaker opened after 5 consecutive failures. Queue processing paused."
+  - OPEN → HALF_OPEN: "Testing recovery after 60s timeout..."
+  - HALF_OPEN → CLOSED: "Plex recovered! Resuming queue processing. [N] jobs pending."
+  - HALF_OPEN → OPEN: "Recovery test failed. Circuit re-opened."
+  - Complexity: LOW (add log statements to existing circuit breaker)
 
-**Retry Library:**
-- Use `tenacity` (2026 gold standard for Python retry logic)
-- Reduces failure rates by up to 97% in AI pipelines
-- Built-in exponential backoff with jitter
-- Decorator-based API simplifies implementation
+- [ ] **Outage Status in Queue UI**
+  - Extend `handle_queue_status()` task to show circuit state
+  - Display: "Circuit: OPEN (since [time], recovery test in [seconds])" when not CLOSED
+  - Display: "Circuit: CLOSED" when healthy (normal operation)
+  - Complexity: LOW (read circuit breaker state property)
+
+**Defer to Phase 2:**
+
+- Circuit breaker state persistence (survives restarts)
+- Health check interval backoff
+- Outage history tracking
+- DLQ recovery for outage-related failures
+
+### Phase 2: State Persistence & Advanced Health
+
+**Goal:** Outage resilience survives plugin restarts. Smarter recovery probing.
+
+**Add After Phase 1 Proven:**
+
+- [ ] **Circuit Breaker State Persistence**
+  - Save state to `circuit_breaker_state.json` on every transition
+  - Load on plugin init: restore OPEN state if plugin restarted during outage
+  - Prevents: Reset to CLOSED after Stash restart → hammering still-down Plex
+  - Complexity: LOW (pattern already exists in ReconciliationScheduler)
+
+- [ ] **Health Check Backoff**
+  - Initial probe: 5s after opening
+  - Exponential backoff: 5s → 10s → 20s → 40s → cap at 60s
+  - Prevents: Constant 60s probes during long outages (e.g., 8hr Plex backup)
+  - Complexity: LOW (reuse worker/backoff.py logic)
+
+- [ ] **Passive + Active Health Check Hybrid**
+  - Passive (existing): Job failures update circuit breaker immediately
+  - Active (new): Periodic probes detect recovery when queue is idle
+  - Benefit: Fast failure detection + fast recovery detection
+  - Complexity: MEDIUM (coordinate active probe timer with worker loop)
+
+- [ ] **Outage History Tracking**
+  - Log each outage: start time, end time, duration, jobs affected
+  - Store in `outage_history.json` (last 30 outages, ring buffer)
+  - Display in queue status: "Last outage: [date], [duration], [jobs affected]"
+  - Complexity: LOW (extend state persistence pattern)
+
+**Defer to Phase 3:**
+
+- Outage-triggered reconciliation
+- DLQ recovery for outage jobs
+- Outage summary reports
+
+### Phase 3: Advanced Outage Management
+
+**Goal:** Auto-heal metadata gaps from outage windows. Recover DLQ'd jobs.
+
+**Future Considerations:**
+
+- [ ] **Outage-Triggered Reconciliation** (Depends on Phase 1 reconciliation engine)
+  - When circuit closes after extended outage (>1hr), trigger reconciliation
+  - Scope: "scenes updated during outage window [outage_start to outage_end]"
+  - Rationale: Hook events missed during outage → queue never populated
+  - Complexity: MEDIUM (requires outage history + reconciliation engine)
+
+- [ ] **DLQ Recovery for Outage Jobs**
+  - Task: "Recover Outage Jobs" re-queues DLQ entries with transient errors
+  - Filter: Jobs failed with PlexServerDown, Timeout, 503 during last outage window
+  - Safety: Dry-run mode shows what would be recovered before re-queuing
+  - Complexity: MEDIUM (DLQ query + error type classification)
+
+- [ ] **Per-Error-Type DLQ Recovery**
+  - Granular recovery: "Re-queue all PlexServerDown jobs" vs "Re-queue all Timeout jobs"
+  - Use case: Network blip caused timeouts; safe to retry after stability confirmed
+  - Complexity: LOW (extend DLQ query filtering)
+
+- [ ] **Outage Summary Report**
+  - Task: "View Outage History" shows last 30 outages with stats
+  - Metrics: duration, jobs affected, recovery time, jobs succeeded after recovery
+  - Helps: Post-mortem analysis, identify recurring issues
+  - Complexity: LOW (format existing outage history data)
+
+---
+
+## Feature Prioritization Matrix
+
+| Feature | User Value | Complexity | Phase | Notes |
+|---------|------------|------------|-------|-------|
+| Active health check (OPEN state) | HIGH | LOW | P1 | Core automatic recovery |
+| Auto queue drain on recovery | HIGH | LOW | P1 | Core automatic recovery |
+| Enhanced state transition logging | HIGH | LOW | P1 | Observability is table stakes |
+| Outage status in queue UI | HIGH | LOW | P1 | Users need to see *why* queue paused |
+| Circuit breaker state persistence | MEDIUM | LOW | P2 | Prevents restart issues during outages |
+| Health check backoff | MEDIUM | LOW | P2 | Reduces load on recovering service |
+| Passive + active health hybrid | MEDIUM | MEDIUM | P2 | Optimization, not critical path |
+| Outage history tracking | MEDIUM | LOW | P2 | Nice for post-mortem, not urgent |
+| Outage-triggered reconciliation | MEDIUM | MEDIUM | P3 | Depends on reconciliation engine first |
+| DLQ recovery for outage jobs | LOW | MEDIUM | P3 | Niche use case (most jobs retry anyway) |
+| Per-error-type DLQ recovery | LOW | LOW | P3 | Enhancement, not core need |
+| Outage summary report | LOW | LOW | P3 | Analytics, not operational |
+
+**Priority Key:**
+- **P1 (Phase 1):** Must have for automatic recovery MVP
+- **P2 (Phase 2):** Should have for production resilience
+- **P3 (Phase 3):** Nice to have, advanced management
+
+---
+
+## Implementation Patterns (Non-Daemon Context)
+
+### Challenge: Stash Plugins Are Not Daemons
+
+Stash plugins are invoked per-event (hook, task, startup), then exit. No long-running process for timers/polling.
+
+**Implications for health checks:**
+
+| Pattern | Feasibility | Notes |
+|---------|-------------|-------|
+| **Continuous polling loop** | NO | Plugin exits after hook/task completes. Can't run background poller. |
+| **Threading.Timer (daemon thread)** | YES | Worker already uses daemon thread. Can add health check timer to worker thread. |
+| **Check-on-invocation** | YES | On each hook/task, check "is circuit OPEN + time for health check?" |
+| **Task-triggered health check** | YES | User clicks "Test Plex Connection" task, runs health check immediately. |
+
+**Recommended Approach (Phase 1):**
+
+1. **Health check in worker thread loop** (when circuit is OPEN)
+   - Worker already runs in daemon thread
+   - When circuit opens, worker pauses job processing
+   - Add: Every 60s while OPEN, run health probe
+   - If probe succeeds → transition to HALF_OPEN → test real job → CLOSED
+
+2. **Manual health check task** (for user verification)
+   - Task: "Test Plex Connection"
+   - Runs health probe, logs result
+   - Does NOT change circuit state (read-only test)
+   - Useful: "Is Plex up? Should I Process Queue?"
+
+**Alternative Approach (Phase 2):**
+
+- **Check-on-invocation health check**
+  - On every hook/task invocation, check: "circuit OPEN + >60s since last probe?"
+  - If yes, run health check
+  - Pro: No timer needed
+  - Con: If no events occur during outage, no recovery detection until user action
+  - Verdict: Supplement worker-based checks, don't replace
+
+### Event-Driven Queue Drain Pattern
+
+**Goal:** When Plex recovers, trigger queue processing without user intervention.
+
+**Options:**
+
+| Option | How It Works | Pros | Cons | Verdict |
+|--------|-------------|------|------|---------|
+| **Direct worker call** | Health check → circuit closes → `worker.process_next()` loop | Simple, direct | Tightly couples health check to worker | **RECOMMENDED** |
+| **Emit fake hook event** | Health check → circuit closes → synthesize Scene.Update.Post hook | Reuses existing hook handler | Hacky, needs valid scene ID | Not recommended |
+| **Scheduler trigger** | Check-on-invocation: "circuit closed + queue not empty? → process" | Leverages existing pattern | Requires every hook to check queue state | Overcomplicated |
+| **Worker auto-resume** | Worker loop: "if circuit closed and queue not empty, keep processing" | Self-healing | Worker already does this when running | **ALREADY EXISTS** |
+
+**Implementation (Phase 1):**
+
+Worker already has processing loop. When circuit closes:
 
 ```python
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-
-@retry(
-    stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=1, min=4, max=60),
-    retry=retry_if_exception_type((ConnectionError, TimeoutError))
-)
-def sync_to_plex(metadata):
-    response = requests.post(plex_api, json=metadata, timeout=(3, 10))
-    response.raise_for_status()
-    return response
+# In worker._worker_loop() or health check callback
+if self.circuit_breaker.state == CircuitState.CLOSED:
+    # Circuit just closed, resume processing
+    while self.queue.qsize() > 0 and self.circuit_breaker.can_execute():
+        self._process_next()
 ```
 
-**Timeout Best Practices:**
-- Always use tuple format: `timeout=(connect_timeout, read_timeout)`
-- Recommended for Plex API calls: `timeout=(3, 10)` - 3s connect, 10s read
-- Connection timeout should be slightly larger than multiple of 3 (TCP retransmission window)
-- Never use `timeout=None` or omit timeout parameter
+No special triggering needed. Worker naturally resumes when circuit closes.
 
-**Error Classification:**
+### Health Check Implementation
+
+**Lightweight Plex probe:**
+
 ```python
-# Retry these (transient failures):
-RETRYABLE_ERRORS = (
-    ConnectionError,
-    TimeoutError,
-    requests.exceptions.Timeout,
-    requests.exceptions.ConnectionError
-)
-
-RETRYABLE_STATUS_CODES = (429, 500, 502, 503, 504)
-
-# Don't retry these (permanent failures):
-PERMANENT_STATUS_CODES = (400, 401, 403, 404, 422)  # Client errors, auth, validation
+def _health_check(self) -> bool:
+    """Check if Plex server is reachable. Returns True if healthy."""
+    try:
+        # Lightweight endpoint: /identity (no auth required, fast)
+        response = requests.get(
+            f"{self.config.plex_url}/identity",
+            timeout=5.0
+        )
+        return response.status_code == 200
+    except (requests.RequestException, ConnectionError, TimeoutError):
+        return False
 ```
 
-### Late Update Detection Pattern
+**Active check interval (Phase 1: fixed, Phase 2: backoff):**
 
-**Problem:** Stash indexes files asynchronously. Initial sync may have no metadata. Later updates don't trigger re-sync.
+```python
+# Phase 1: Fixed 60s interval when OPEN
+if self.circuit_breaker.state == CircuitState.OPEN:
+    if time.time() - self._last_health_check > 60.0:
+        if self._health_check():
+            # Trigger HALF_OPEN transition
+            self.circuit_breaker.record_success()  # Test with real job next
+```
 
-**Solutions (in priority order):**
+**Passive check (already exists via circuit breaker):**
 
-1. **Polling Fallback** (Simplest for MVP)
-   - After initial sync, poll Stash API periodically for changes
-   - Use exponential backoff: check 1min, 5min, 15min, 1hr, 24hr after initial sync
-   - Stop polling once metadata populated
-   - Recommended: 5-10 second timeout on polling requests
+- Job success → `circuit_breaker.record_success()`
+- Job failure → `circuit_breaker.record_failure()`
+- 5 consecutive failures → OPEN
+- Already implemented, no changes needed
 
-2. **Webhook Integration** (More efficient, but requires Stash support)
-   - Subscribe to Stash scene update webhooks
-   - Immediate notification when metadata changes
-   - Fallback to polling if webhook delivery fails (hybrid approach most reliable)
+---
 
-3. **Virtual Webhooks** (Hybrid - 2026 pattern)
-   - Poll on configurable intervals
-   - Push events only when changes detected
-   - Best of both worlds: polling reliability + webhook efficiency
+## Comparison: PlexSync vs Industry Patterns
 
-### Matching Improvements
+| Feature | AWS SQS + Lambda | RabbitMQ | Kafka | PlexSync Approach |
+|---------|------------------|----------|-------|-------------------|
+| **Automatic recovery** | Built-in: messages retry automatically | DLQ + shovel plugin for replay | Consumer offset management | Worker loop + circuit breaker auto-resume |
+| **Health monitoring** | CloudWatch alarms on DLQ depth | Management UI health checks | JMX metrics + consumer lag | Active probe during OPEN + passive job monitoring |
+| **Circuit breaker** | Not built-in (app-level) | Not built-in | Not applicable (pull model) | **YES** - core resilience feature |
+| **State persistence** | DLQ is persistent | Messages persist to disk | Log-based persistence | Queue + DLQ persistent, circuit state ephemeral (Phase 2: persist) |
+| **Outage visibility** | CloudWatch dashboards | Management UI | Kafka UI, Burrow | Queue status task + log messages |
+| **Recovery automation** | Auto-retry with backoff | Dead-letter queue + shovel | Consumer resume on rebalance | **Phase 1 focus** - health check + auto-drain |
 
-**Current Issue:** Fuzzy matching creates false negatives (misses valid matches)
+**Key Differentiator:** PlexSync's circuit breaker is more sophisticated than typical queue systems. Most rely on consumer-side retry logic. PlexSync has producer-side pause (circuit OPEN = stop processing queue) + automatic recovery detection.
 
-**Solution Strategy:**
-1. **Multi-Strategy Matching Pipeline:**
-   - Exact match on unique IDs (email, scene hash) - 100% confidence
-   - Normalized string match (lowercase, remove special chars) - 95% confidence
-   - Fuzzy match with Levenshtein distance - 60-90% confidence based on threshold
-   - Semantic matching for abbreviations ("Robert" vs "Bob") - requires NLP library
+**Industry Standard We Match:**
 
-2. **Confidence Thresholds:**
-   - ≥90%: Auto-merge
-   - 60-89%: Log for manual review (requires review queue feature)
-   - <60%: No match
+- Persistent queue with DLQ (AWS SQS, RabbitMQ, Kafka all have this)
+- Exponential backoff with jitter (AWS SDK default, RabbitMQ plugin)
+- Health monitoring (all production systems)
 
-3. **Common Pitfalls to Avoid:**
-   - Ignore common industry terms ("LLC", "Inc", "Tech", "Systems") before scoring
-   - Normalize string length impact (short strings more sensitive to edits)
-   - Cross-check with secondary attributes (dates, file size) to validate matches
+**Industry Standard We Lack (Phase 1 adds):**
 
-### Validation & Sanitization
+- Automatic resume after outage (AWS Lambda auto-retries, Kafka consumers resume)
+- Active health checks during outage (most monitoring systems probe periodically)
 
-**Input Validation Checklist:**
-- Check required fields exist (title, file path)
-- Validate data types (dates are dates, numbers are numbers)
-- Length limits (Plex API field length constraints)
-- Character encoding (UTF-8, handle special characters)
-- Null/empty handling
-
-**Sanitization Strategy:**
-- Escape HTML special characters (`<`, `>`, `&`) to prevent XSS
-- Remove control characters that break APIs
-- Normalize unicode (NFC normalization for consistent comparison)
-- Trim whitespace
-- Use `unidecode` library (already in PlexSync requirements.txt) for ASCII conversion
-
-## Complexity Assessment
-
-| Feature Category | Complexity | Time Estimate | Dependencies |
-|-----------------|------------|---------------|--------------|
-| Timeouts & Basic Retry | Low | 1-2 days | requests library |
-| Exponential Backoff (tenacity) | Medium | 2-3 days | tenacity library |
-| Idempotency Keys | Medium | 3-5 days | Database/state storage |
-| Dead Letter Queue | Medium | 3-5 days | File system or database |
-| Circuit Breaker | High | 5-7 days | State management library |
-| Late Update Detection (polling) | Medium | 3-5 days | Stash API access |
-| Late Update Detection (webhooks) | High | 7-10 days | Stash webhook support |
-| Confidence-Based Matching | High | 7-10 days | Multiple matching libraries |
-| Observability (OpenTelemetry) | High | 10-14 days | opentelemetry-python |
+---
 
 ## Sources
 
-### Retry Logic & Backoff
-- [Designing retry logic that doesn't create data duplicates (Medium, Jan 2026)](https://medium.com/@backend.bao/designing-retry-logic-that-doesnt-create-data-duplicates-99a784500931)
-- [A Guide to Retry Pattern in Distributed Systems (ByteByteGo)](https://blog.bytebytego.com/p/a-guide-to-retry-pattern-in-distributed)
-- [How to Implement Retry Logic with Exponential Backoff in gRPC (OneUpTime, Jan 2026)](https://oneuptime.com/blog/post/2026-01-08-grpc-retry-exponential-backoff/view)
-- [Tenacity Retries: Exponential Backoff Decorators 2026](https://johal.in/tenacity-retries-exponential-backoff-decorators-2026/)
-- [Better Retries with Exponential Backoff and Jitter (Baeldung)](https://www.baeldung.com/resilience4j-backoff-jitter)
+### Queue System Recovery Patterns
 
-### Idempotency
-- [Understanding Idempotency in Data Pipelines (Airbyte)](https://airbyte.com/data-engineering-resources/idempotency-in-data-pipelines)
-- [Idempotency and ordering in event-driven systems (CockroachDB)](https://www.cockroachlabs.com/blog/idempotency-and-ordering-in-event-driven-systems/)
-- [What Is Idempotent (Dagster)](https://dagster.io/glossary/data-idempotency)
+- [Outage recovery scenarios in Amazon SQS](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/designing-for-outage-recovery-scenarios.html) — HIGH confidence: AWS best practices for failover, message handling during outages
+- [Avoiding insurmountable queue backlogs](https://aws.amazon.com/builders-library/avoiding-insurmountable-queue-backlogs/) — HIGH confidence: AWS Builders Library on backpressure, retry strategies
+- [Reliability Guide | RabbitMQ](https://www.rabbitmq.com/docs/reliability) — HIGH confidence: Durability, acknowledgment, recovery patterns
 
-### Dead Letter Queue
-- [Dead Letter Queue Pattern (IBM Cloud Architecture)](https://www.ibm.com/cloud/architecture/architectures/event-driven-deadletter-queue-pattern/)
-- [What is a Dead-Letter Queue (AWS)](https://aws.amazon.com/what-is/dead-letter-queue/)
-- [Using dead-letter queues in Amazon SQS](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html)
+### Circuit Breaker Patterns
 
-### Circuit Breaker
-- [Circuit Breaker Pattern (Azure Architecture Center)](https://learn.microsoft.com/en-us/azure/architecture/patterns/circuit-breaker)
-- [API Circuit Breaker: Best Practices Guide (Unkey)](https://www.unkey.com/glossary/api-circuit-breaker)
-- [Circuit Breaker Pattern (Martin Fowler)](https://martinfowler.com/bliki/CircuitBreaker.html)
+- [How to Configure Circuit Breaker Patterns](https://oneuptime.com/blog/post/2026-02-02-circuit-breaker-patterns/view) — MEDIUM confidence: Recent (Feb 2026) guide on three-state pattern
+- [Circuit Breaker Pattern in Microservices](https://www.geeksforgeeks.org/system-design/what-is-circuit-breaker-pattern-in-microservices/) — MEDIUM confidence: CLOSED/OPEN/HALF_OPEN state behavior
+- [Building Resilient Systems: Circuit Breakers and Retry Patterns](https://dasroot.net/posts/2026/01/building-resilient-systems-circuit-breakers-retry-patterns/) — MEDIUM confidence: Integration with retry logic
+- [Why Circuit Breaker Recovery Needs Coordination](https://blog.bolshakov.dev/2025/12/06/why-circuit-breaker-recovery-needs-coordination.html) — HIGH confidence: Concurrent recovery challenges, state race conditions
 
-### Fuzzy Matching
-- [Fuzzy Matching 101: A Complete Guide for 2026](https://matchdatapro.com/fuzzy-matching-101-a-complete-guide-for-2026/)
-- [Why Fuzzy Matching Isn't Enough (Medium)](https://medium.com/@williamflaiz/why-fuzzy-matching-isnt-enough-and-what-actually-finds-your-hidden-duplicates-7ddfdc5c26de)
+### Health Check Patterns
 
-### Silent Failures & Monitoring
-- [Silent Failures in Data Pipelines: Why They're So Dangerous (Medium)](https://medium.com/@chu.ngwoke/silent-failures-in-data-pipelines-why-theyre-so-dangerous-7c3c2aff8238)
-- [11 Key Observability Best Practices You Should Know in 2026 (Spacelift)](https://spacelift.io/blog/observability-best-practices)
-- [5 Key Pillars of Data Observability to Know in 2026 (Medium, Jan 2026)](https://medium.com/@community_md101/5-key-pillars-of-data-observability-to-know-in-2026-814515c22a04)
+- [Mastering APISIX Health Checks: Active and Passive Monitoring Strategies](https://api7.ai/blog/health-check-ensures-high-availability) — HIGH confidence: Active vs passive tradeoffs, hybrid approach
+- [Active or Passive Health Checks: Which Is Right for You?](https://www.f5.com/company/blog/nginx/active-or-passive-health-checks-which-is-right-for-you) — HIGH confidence: When to use each, resource implications
+- [10 Essential Best Practices for API Gateway Health Checks](https://api7.ai/blog/10-best-practices-of-api-gateway-health-checks) — MEDIUM confidence: Probe frequency, timeout configuration
+- [Health Monitoring | Distributed Application Architecture Patterns](https://jurf.github.io/daap/resilience-and-reliability-patterns/health-monitoring/) — MEDIUM confidence: Patterns for dependency health tracking
 
-### Python-Specific
-- [Python Retry Logic with Tenacity (Instructor)](https://python.useinstructor.com/concepts/retrying/)
-- [Tenacity — Official Documentation](https://tenacity.readthedocs.io/)
-- [Python Requests Timeout Best Practices (Codiga)](https://www.codiga.io/blog/python-requests-timeout/)
-- [How to Retry Failed Python Requests [2026] (ZenRows)](https://www.zenrows.com/blog/python-requests-retry)
+### Dead Letter Queue Recovery
 
-### Change Detection & Sync Patterns
-- [Polling vs Webhooks: When to Use One Over the Other (Unified.to)](https://unified.to/blog/polling_vs_webhooks_when_to_use_one_over_the_other)
-- [Why Events Beat Webhooks for Reliable Data Sync (StackSync)](https://www.stacksync.com/blog/events-beat-webhooks-reliable-data-sync)
-- [The Complete Guide to Two Way Sync (StackSync)](https://www.stacksync.com/blog/the-complete-guide-to-two-way-sync-definitions-methods-and-use-cases)
+- [How to Implement Dead Letter Queue Patterns for Failed Message Handling](https://oneuptime.com/blog/post/2026-02-09-dead-letter-queue-patterns/view) — HIGH confidence: Recent (Feb 2026), recovery strategies, retry workflows
+- [Strategies for Successful Dead Letter Queue Event Handling](https://rashadansari.medium.com/strategies-for-successful-dead-letter-queue-event-handling-e354f7dfbb3e) — MEDIUM confidence: Manual review, automated reprocessing
+- [Apache Kafka Dead Letter Queue: A Comprehensive Guide](https://www.confluent.io/learn/kafka-dead-letter-queue/) — HIGH confidence: Official Confluent resource, when to DLQ vs retry
+- [Dead Letter Queue - Karafka framework documentation](https://karafka.io/docs/Dead-Letter-Queue/) — MEDIUM confidence: Multiple DLQ tiers, error classification
 
-### Validation & Sanitization
-- [Best Practices for Secure Data - Sanitizing Data (Okta)](https://developer.okta.com/books/api-security/sanitizing/best-practices/)
-- [Data Validation & Input Sanitization Best Practices (Bitto Exabyte)](https://bittoexabyte.com/blog/data-validation-and-input-sanitization/)
+### Event-Driven Processing (Non-Daemon)
+
+- [8 Event-Driven Architectures With Webhooks, Queues, and n8n](https://medium.com/@Nexumo_/8-event-driven-architectures-with-webhooks-queues-and-n8n-34f08e3a8a43) — MEDIUM confidence: Webhook + queue patterns, async processing
+- [How to Choose a Solution for Queuing Your Webhooks](https://hookdeck.com/webhooks/guides/how-to-choose-a-solution-for-queuing-your-webhooks) — MEDIUM confidence: Event-driven queue processing without daemon
+- [Building a Webhooks System with Event Driven Architecture](https://codeopinion.com/building-a-webhooks-system-with-event-driven-architecture/) — MEDIUM confidence: Decouple producers/consumers, idempotent processing
+
+### Outage Monitoring & Alerting
+
+- [How to Monitor SQS Queue Depth](https://oneuptime.com/blog/post/2026-01-27-sqs-queue-depth-monitoring/view) — MEDIUM confidence: Key metrics (queue depth = most important), alerting strategies
+- [IT Monitoring Trends 2026: From Multi-Cloud Chaos to Unified Visibility](https://blog.paessler.com/it-monitoring-trends-2026-from-multi-cloud-chaos-to-unified-visibility) — LOW confidence: General trends, AI-powered anomaly detection
+- [Cloud outages expected to be the new normal in 2026](https://www.techtarget.com/searchCloudComputing/feature/Cloud-outages-expected-to-be-the-new-normal-in-2026) — MEDIUM confidence: Context for why outage resilience matters (264 global outages in one week Feb 2026)
+
+---
+
+**Research Summary:**
+
+Automatic recovery is **table stakes** — every production queue system (AWS SQS, RabbitMQ, Kafka) has mechanisms to resume after downstream recovers. PlexSync's gap is the event-driven trigger: worker runs in daemon thread but doesn't actively probe during outages.
+
+**Phase 1 (MVP) is straightforward:**
+1. Add active health check to worker loop (when circuit OPEN, probe every 60s)
+2. When probe succeeds → circuit transitions to HALF_OPEN (existing logic) → test real job → CLOSED
+3. When circuit closes → worker automatically resumes queue processing (loop already exists)
+4. Log all state transitions clearly
+5. Show circuit state in queue status UI
+
+**Phase 2 (production hardening) adds persistence:**
+- Circuit state survives Stash restarts (prevents reset-to-CLOSED during outage)
+- Health check backoff (5s → 60s cap) reduces load on recovering Plex
+- Outage history for post-mortem analysis
+
+**Phase 3 (advanced) integrates with reconciliation:**
+- After extended outage, auto-trigger reconciliation for missed events
+- Re-queue DLQ jobs that failed due to outage (not permanent errors)
+
+All patterns align with industry best practices for resilient queue systems. No novel approaches needed — apply proven patterns to PlexSync's non-daemon constraint.
+
+---
+
+*Feature research for: PlexSync outage resilience milestone*
+*Researched: 2026-02-15*
+*Confidence: HIGH (circuit breaker patterns, health checks, DLQ recovery all verified with current 2026 sources)*
