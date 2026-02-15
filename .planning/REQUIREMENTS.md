@@ -65,7 +65,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | RECV-01 | Phase 19 | Complete |
 | RECV-02 | Phase 19 | Complete |
 | RECV-03 | Phase 19 | Complete |
-| RECV-04 | Phase 20 | Pending |
+| RECV-04 | Phase 20 | Complete |
 | HLTH-01 | Phase 18 | Complete |
 | HLTH-02 | Phase 18 | Complete |
 | HLTH-03 | Phase 18 | Complete |

@@ -27,7 +27,7 @@
 - [x] **Phase 17: Circuit Breaker Persistence** - Circuit breaker state survives plugin restarts — completed 2026-02-15
 - [x] **Phase 18: Health Check Infrastructure** - Lightweight Plex connectivity validation — completed 2026-02-15
 - [x] **Phase 19: Recovery Detection & Automation** - Automatic Plex recovery detection with queue drain — completed 2026-02-15
-- [ ] **Phase 20: Graduated Recovery & Rate Limiting** - Rate-limited queue draining prevents overwhelming recovered Plex
+- [x] **Phase 20: Graduated Recovery & Rate Limiting** - Rate-limited queue draining prevents overwhelming recovered Plex — completed 2026-02-15
 - [ ] **Phase 21: Outage Visibility & History** - Enhanced status UI with outage tracking and history
 - [ ] **Phase 22: DLQ Recovery for Outage Jobs** - Re-queue DLQ entries from outage windows
 
@@ -92,8 +92,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 20-01-PLAN.md --- TDD: RecoveryRateLimiter with token bucket, graduated scaling, and error monitoring
-- [ ] 20-02-PLAN.md --- Wire rate limiter into worker loop with integration tests
+- [x] 20-01-PLAN.md --- TDD: RecoveryRateLimiter with token bucket, graduated scaling, and error monitoring
+- [x] 20-02-PLAN.md --- Wire rate limiter into worker loop with integration tests
 
 ### Phase 21: Outage Visibility & History
 **Goal**: Queue status UI shows circuit state, recovery timing, and outage history for debugging
@@ -137,9 +137,9 @@ Phases execute in numeric order: 17 → 18 → 19 → 20 → 21 → 22
 | 17. Circuit Breaker Persistence | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
 | 18. Health Check Infrastructure | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
 | 19. Recovery Detection & Automation | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
-| 20. Graduated Recovery & Rate Limiting | v1.5 | 0/2 | Not started | - |
+| 20. Graduated Recovery & Rate Limiting | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
 | 21. Outage Visibility & History | v1.5 | 0/TBD | Not started | - |
 | 22. DLQ Recovery for Outage Jobs | v1.5 | 0/TBD | Not started | - |
 
 ---
-*Last updated: 2026-02-15 after Phase 20 planning*
+*Last updated: 2026-02-15 after Phase 20 completion*

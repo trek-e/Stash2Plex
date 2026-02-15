@@ -93,7 +93,7 @@ None yet. Research indicates zero new dependencies needed (stdlib + plexapi).
 Last session: 2026-02-15 (plan execution)
 Stopped at: Completed 20-02-PLAN.md (Worker Loop Integration)
 Resume file: None
-Next step: Phase 20 complete — proceed to Phase 21 or v1.5 testing
+Next step: Begin Phase 21 (Outage Visibility & History)
 
 ---
 *Last updated: 2026-02-15 after completing plan 20-02 (2 of 2 in phase 20)*
