@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 
 Milestone: v1.5 Outage Resilience
 Phase: 22 of 22 (DLQ Recovery for Outage Jobs)
-Plan: 1 of 2 in current phase
-Status: In Progress
-Last activity: 2026-02-15 — Completed 22-01-PLAN.md (DLQ Recovery Module)
+Plan: 2 of 2 in current phase
+Status: Complete
+Last activity: 2026-02-15 — Completed 22-02-PLAN.md (Task Integration & Recovery UI)
 
-Progress: [██████------] 50% (1 of 2 plans in phase 22 complete)
+Progress: [████████████] 100% (2 of 2 plans in phase 22 complete)
 
 ## Performance Metrics
 
@@ -41,12 +41,12 @@ Progress: [██████------] 50% (1 of 2 plans in phase 22 complete)
 | 19-recovery-detection-automation | 2 | 5.77 min | 2.89 min |
 | 20-graduated-recovery-rate-limiting | 2 | 8.63 min | 4.32 min |
 
-**v1.5 Progress:** 11 of 12 plans complete across phases 17-22 (92%)
+**v1.5 Progress:** 12 of 12 plans complete across phases 17-22 (100%)
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 21-outage-visibility-history | 2 | 8.85 min | 4.43 min |
-| 22-dlq-recovery-outage-jobs | 1 | 5.33 min | 5.33 min |
+| 22-dlq-recovery-outage-jobs | 2 | 9.51 min | 4.76 min |
 
 ## Accumulated Context
 
@@ -96,6 +96,8 @@ Recent decisions affecting current work:
 - [Phase 22-01]: Optional retry types (PlexTemporaryError, PlexNotFound) require user opt-in
 - [Phase 22-01]: Three-gate validation order: Plex health (abort early) → dedup → scene existence
 - [Phase 22-01]: In-memory batch deduplication prevents duplicate scene_ids within same recovery run
+- [Phase 22-02]: Conservative default hardcoded in UI task (no user parameter to avoid confusion)
+- [Phase 22-02]: recover_outage_jobs in management_modes set (no queue drain wait, recovery enqueues jobs)
 
 ### Pending Todos
 
@@ -108,9 +110,9 @@ None yet. Research indicates zero new dependencies needed (stdlib + plexapi).
 ## Session Continuity
 
 Last session: 2026-02-15 (plan execution)
-Stopped at: Completed 22-01-PLAN.md (DLQ Recovery Module)
+Stopped at: Completed 22-02-PLAN.md (Task Integration & Recovery UI)
 Resume file: None
-Next step: Execute 22-02-PLAN.md (Task Integration & Recovery UI) — FINAL PLAN
+Next step: Phase 22 complete — v1.5 milestone complete (all 12 plans across phases 17-22)
 
 ---
-*Last updated: 2026-02-15 after completing plan 22-01 (1 of 2 in phase 22)*
+*Last updated: 2026-02-15 after completing plan 22-02 (2 of 2 in phase 22) — PHASE 22 COMPLETE — v1.5 MILESTONE COMPLETE*
