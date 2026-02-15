@@ -310,46 +310,52 @@ class TestErrorRateMonitoring:
 
     def test_backoff_reduces_rate(self):
         """Backoff reduces current rate by 50% (rate_multiplier=0.5)."""
-        limiter = RecoveryRateLimiter(initial_rate=10.0, target_rate=20.0, error_threshold=0.3)
+        limiter = RecoveryRateLimiter(initial_rate=10.0, target_rate=20.0, error_threshold=0.3, ramp_duration=300.0)
         limiter.start_recovery_period(now=1000.0)
 
         # Baseline rate at start
         base_rate = limiter.current_rate(now=1000.0)
         assert base_rate == 10.0
 
-        # Trigger backoff with high error rate
+        # Trigger backoff with high error rate at now=1010
         for i in range(4):
-            limiter.record_result(success=False, now=1000.0 + i)  # 4 failures
-        limiter.record_result(success=True, now=1005.0)  # 1 success
+            limiter.record_result(success=False, now=1010.0 + i)  # 4 failures
+        limiter.record_result(success=True, now=1015.0)  # 1 success
         # Error rate = 4/5 = 0.8 > 0.3, triggers backoff
 
-        # After backoff, rate should be halved
-        backed_off_rate = limiter.current_rate(now=1010.0)
-        assert backed_off_rate == base_rate * 0.5
+        # After backoff, rate should be halved compared to what it would be without backoff
+        # At now=1020, elapsed=20s, rate without backoff = 10 + (20-10)*(20/300) = 10.667
+        # With backoff (multiplier=0.5), rate = 10.667 * 0.5 = 5.333
+        backed_off_rate = limiter.current_rate(now=1020.0)
+        expected_rate_without_backoff = 10.0 + (20.0 - 10.0) * (20.0 / 300.0)
+        assert abs(backed_off_rate - expected_rate_without_backoff * 0.5) < 0.01
 
     def test_backoff_recovery(self):
         """Backoff recovery: when error rate drops below 0.1, restore multiplier to 1.0."""
-        limiter = RecoveryRateLimiter(initial_rate=10.0, error_threshold=0.3)
+        limiter = RecoveryRateLimiter(initial_rate=10.0, target_rate=20.0, error_threshold=0.3, ramp_duration=300.0)
         limiter.start_recovery_period(now=1000.0)
 
-        # Trigger backoff
+        # Trigger backoff at now=1010
         for i in range(4):
-            limiter.record_result(success=False, now=1000.0 + i)
-        limiter.record_result(success=True, now=1005.0)
+            limiter.record_result(success=False, now=1010.0 + i)
+        limiter.record_result(success=True, now=1015.0)
 
-        # Rate is halved
-        assert limiter.current_rate(now=1010.0) == 5.0
+        # Rate is halved after backoff
+        # At now=1020, elapsed=20s, rate = (10 + (20-10)*(20/300)) * 0.5 = 10.667 * 0.5
+        backed_off_rate = limiter.current_rate(now=1020.0)
+        expected_backed_off = (10.0 + (20.0 - 10.0) * (20.0 / 300.0)) * 0.5
+        assert abs(backed_off_rate - expected_backed_off) < 0.01
 
-        # After backoff_until expires and error rate drops, restore
+        # After backoff_until expires (60s after trigger = 1075) and error rate drops, restore
         # Add many successes to drop error rate below 0.1
         for i in range(20):
             limiter.record_result(success=True, now=1100.0 + i)
 
-        # Error rate now < 0.1, should restore multiplier
+        # Error rate now < 0.1, backoff expired, should restore multiplier
         rate = limiter.current_rate(now=1200.0)
-        # At now=1200, elapsed=200, rate should be 10.0 (not halved)
+        # At now=1200, elapsed=200, rate should be full (not halved)
         expected = 10.0 + (20.0 - 10.0) * (200.0 / 300.0)
-        assert rate == expected
+        assert abs(rate - expected) < 0.01
 
 
 class TestEdgeCases:
