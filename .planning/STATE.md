@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 
 Milestone: v1.5 Outage Resilience
 Phase: 18 of 22 (Health Check Infrastructure)
-Plan: 1 of 2 in current phase
-Status: In progress
-Last activity: 2026-02-15 — Completed 18-01-PLAN.md (deep health check)
+Plan: 2 of 2 in current phase
+Status: Complete
+Last activity: 2026-02-15 — Completed 18-02-PLAN.md (manual health check task + active probes)
 
-Progress: [██████░░░░░░] 50% (1 of 2 plans in phase 18 complete)
+Progress: [████████████] 100% (2 of 2 plans in phase 18 complete)
 
 ## Performance Metrics
 
@@ -37,9 +37,9 @@ Progress: [██████░░░░░░] 50% (1 of 2 plans in phase 18 c
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 17-circuit-breaker-persistence | 2 | 4 min | 2 min |
-| 18-health-check-infrastructure | 1 | 1.82 min | 1.82 min |
+| 18-health-check-infrastructure | 2 | 7.42 min | 3.71 min |
 
-**v1.5 Progress:** 3 of 4 plans complete across phases 17-18 (IN PROGRESS)
+**v1.5 Progress:** 4 of 4 plans complete across phases 17-18 (COMPLETE)
 
 ## Accumulated Context
 
@@ -48,6 +48,9 @@ Progress: [██████░░░░░░] 50% (1 of 2 plans in phase 18 c
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
+- v1.5 (18-02): Health checks do NOT directly modify circuit breaker state (avoids race conditions)
+- v1.5 (18-02): Health check failures during OPEN state logged at debug level (expected/noisy)
+- v1.5 (18-02): Health check timeout is 5s (not 30s read_timeout) to avoid blocking worker thread
 - v1.5 (17-01): state_file=None default for 100% backward compatibility
 - v1.5 (17-01): Non-blocking advisory locking (LOCK_NB) makes save skippable, not blocking
 - v1.5 (17-01): Corrupted state defaults to CLOSED (safe, not stuck-open)
@@ -69,9 +72,9 @@ None yet. Research indicates zero new dependencies needed (stdlib + plexapi).
 ## Session Continuity
 
 Last session: 2026-02-15 (plan execution)
-Stopped at: Completed 18-01-PLAN.md (deep health check)
+Stopped at: Completed 18-02-PLAN.md (manual health check task + active probes)
 Resume file: None
-Next step: Continue Phase 18 with plan 18-02 (manual health check task)
+Next step: Phase 18 complete. Proceed to next phase in v1.5 milestone.
 
 ---
-*Last updated: 2026-02-15 after completing plan 18-01 (1 of 2 in phase 18)*
+*Last updated: 2026-02-15 after completing plan 18-02 (2 of 2 in phase 18 - PHASE COMPLETE)*
