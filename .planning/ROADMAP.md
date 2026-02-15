@@ -104,10 +104,11 @@ Plans:
   2. Outage history tracks last 30 outages with start/end times, duration, and jobs affected
   3. "Outage Summary Report" task available in Stash UI shows detailed outage statistics
   4. Enhanced status display shows time since last health check and next scheduled check
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 21-01: TBD
+- [ ] 21-01-PLAN.md --- TDD: OutageHistory manager with circular buffer, time formatting, and metrics calculation
+- [ ] 21-02-PLAN.md --- Wire outage recording, enhance queue status display, create outage summary task
 
 ### Phase 22: DLQ Recovery for Outage Jobs
 **Goal**: Re-queue DLQ entries with transient errors from outage windows, enabling recovery of jobs that failed during Plex downtime
@@ -138,8 +139,8 @@ Phases execute in numeric order: 17 → 18 → 19 → 20 → 21 → 22
 | 18. Health Check Infrastructure | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
 | 19. Recovery Detection & Automation | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
 | 20. Graduated Recovery & Rate Limiting | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
-| 21. Outage Visibility & History | v1.5 | 0/TBD | Not started | - |
+| 21. Outage Visibility & History | v1.5 | 0/2 | Not started | - |
 | 22. DLQ Recovery for Outage Jobs | v1.5 | 0/TBD | Not started | - |
 
 ---
-*Last updated: 2026-02-15 after Phase 20 completion*
+*Last updated: 2026-02-15 after Phase 21 planning*
