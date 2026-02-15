@@ -89,10 +89,11 @@ Plans:
   2. Graduated scaling increases drain rate over time (5 jobs/sec → 10 → 20 → normal)
   3. Error rate monitoring backs off if failures increase during recovery period
   4. Configurable recovery rate with safe defaults prevents thundering herd on large backlogs
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 20-01: TBD
+- [ ] 20-01-PLAN.md --- TDD: RecoveryRateLimiter with token bucket, graduated scaling, and error monitoring
+- [ ] 20-02-PLAN.md --- Wire rate limiter into worker loop with integration tests
 
 ### Phase 21: Outage Visibility & History
 **Goal**: Queue status UI shows circuit state, recovery timing, and outage history for debugging
@@ -136,9 +137,9 @@ Phases execute in numeric order: 17 → 18 → 19 → 20 → 21 → 22
 | 17. Circuit Breaker Persistence | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
 | 18. Health Check Infrastructure | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
 | 19. Recovery Detection & Automation | v1.5 | 2/2 | ✓ Complete | 2026-02-15 |
-| 20. Graduated Recovery & Rate Limiting | v1.5 | 0/TBD | Not started | - |
+| 20. Graduated Recovery & Rate Limiting | v1.5 | 0/2 | Not started | - |
 | 21. Outage Visibility & History | v1.5 | 0/TBD | Not started | - |
 | 22. DLQ Recovery for Outage Jobs | v1.5 | 0/TBD | Not started | - |
 
 ---
-*Last updated: 2026-02-15 after Phase 19 completion*
+*Last updated: 2026-02-15 after Phase 20 planning*
