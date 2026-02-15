@@ -495,6 +495,14 @@ class GapDetectionEngine:
                 skipped_count += 1
                 continue
 
+            # Quality gate: don't enqueue scenes with no meaningful metadata.
+            # Same guard as hooks/handlers.py — prevents syncing empty metadata
+            # which would clear existing Plex values.
+            if not has_meaningful_metadata(job_data):
+                log_debug(f"Scene {scene_id} has no meaningful metadata, skipping enqueue")
+                skipped_count += 1
+                continue
+
             # Enqueue
             try:
                 enqueue(self.queue, scene_id, "metadata", job_data)

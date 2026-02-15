@@ -418,6 +418,45 @@ def test_scenes_without_files_skipped(mock_stash, mock_config, tmp_data_dir, moc
         assert len(result.errors) == 0
 
 
+def test_enqueue_skips_scenes_without_meaningful_metadata(mock_stash, mock_config, tmp_data_dir, mock_queue, mock_plex_client):
+    """Test that scenes without meaningful metadata are not enqueued (quality gate)."""
+    # Scene with only title/path but no studio, performers, tags, details, or date
+    bare_scene = {
+        'id': '777',
+        'title': 'Bare Scene No Metadata',
+        'details': None,
+        'date': None,
+        'rating100': None,
+        'updated_at': '2026-02-10T12:00:00Z',
+        'files': [{'path': '/media/bare_scene.mp4'}],
+        'studio': None,
+        'performers': [],
+        'tags': [],
+        'paths': {}
+    }
+
+    mock_stash.find_scenes.return_value = [bare_scene]
+
+    # Create stale sync gap so it gets detected
+    from sync_queue.operations import save_sync_timestamp
+    old_timestamp = datetime.fromisoformat('2026-02-01T00:00:00+00:00').timestamp()
+    save_sync_timestamp(tmp_data_dir, 777, old_timestamp)
+
+    with patch('plex.client.PlexClient', return_value=mock_plex_client), \
+         patch('plex.cache.PlexCache'), \
+         patch('plex.cache.MatchCache'), \
+         patch('sync_queue.operations.enqueue') as mock_enqueue, \
+         patch('sync_queue.operations.get_queued_scene_ids', return_value=set()):
+
+        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=mock_queue)
+        result = engine.run(scope="all")
+
+        # Gap is detected but NOT enqueued (quality gate blocks it)
+        assert result.stale_sync_count == 1
+        assert result.enqueued_count == 0
+        mock_enqueue.assert_not_called()
+
+
 def test_reconcile_missing_disabled_skips_missing_detection(mock_stash, mock_config, tmp_data_dir, sample_scenes, mock_plex_client):
     """Test that reconcile_missing=False skips 'missing from Plex' detection."""
     mock_config.reconcile_missing = False

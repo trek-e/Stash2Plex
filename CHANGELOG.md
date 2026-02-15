@@ -5,6 +5,12 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.4] - 2026-02-15
+
+### Fixed
+
+- **Reconciliation Quality Gate**: Reconciliation now applies the same metadata quality gate as hook handlers before enqueueing jobs. Previously, reconciliation would enqueue scenes with no meaningful metadata (no studio, performers, tags, details, or date), causing the worker to sync empty data and clear existing Plex values. Scenes still being identified by stash-box are now correctly deferred.
+
 ## [1.5.2] - 2026-02-15
 
 ### Fixed
