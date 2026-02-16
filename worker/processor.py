@@ -318,7 +318,7 @@ class SyncWorker:
     def _worker_loop(self):
         """Main worker loop - runs in background thread"""
         from worker.circuit_breaker import CircuitState
-        from plex.exceptions import PlexServerDown
+        from plex.exceptions import PlexServerDown, PlexNotFound
         # Lazy imports to avoid module-level pollution in tests
         from sync_queue.operations import get_pending, ack_job, nack_job, fail_job
 
@@ -470,6 +470,28 @@ class SyncWorker:
                     if self.circuit_breaker.state == CircuitState.OPEN:
                         pending = self.queue.size
                         log_warn(f"Plex server is down — pausing, {pending} job(s) waiting")
+
+                except PlexNotFound as e:
+                    # Item not in Plex library (not yet scanned).
+                    # Does NOT count against circuit breaker — this is an
+                    # item-level issue, not a server outage.
+                    _job_elapsed = time.perf_counter() - _job_start
+
+                    # Prepare job for retry with backoff metadata
+                    job = self._prepare_for_retry(item, e)
+                    max_retries = self._get_max_retries_for_error(e)
+                    job_retry_count = job.get('retry_count', 0)
+
+                    if job_retry_count >= max_retries:
+                        log_warn(f"Job {pqid} exceeded max retries ({max_retries}), moving to DLQ")
+                        fail_job(self.queue, item)
+                        self.dlq.add(job, e, job_retry_count)
+                        self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
+                    else:
+                        delay = job.get('next_retry_at', 0) - time.time()
+                        log_debug(f"Job {pqid} not in Plex yet (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s")
+                        self._requeue_with_metadata(job)
+                        self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=False)
 
                 except TransientError as e:
                     _job_elapsed = time.perf_counter() - _job_start

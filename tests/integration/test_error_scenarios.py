@@ -147,6 +147,33 @@ class TestPlexNotFoundScenarios:
         max_retries = worker._get_max_retries_for_error(error)
         assert max_retries == 12
 
+    def test_plex_not_found_does_not_trip_circuit_breaker(self, integration_worker_no_match):
+        """PlexNotFound should NOT count toward circuit breaker failures.
+
+        Item-level "not found" is different from server-level outage.
+        A batch of new scenes that Plex hasn't scanned yet should not
+        trip the circuit breaker and block syncs for existing items.
+        """
+        from plex.exceptions import PlexNotFound
+        from worker.circuit_breaker import CircuitState
+
+        worker = integration_worker_no_match
+
+        # Fire 10 consecutive PlexNotFound errors (well above threshold of 5)
+        for i in range(10):
+            job = {
+                'scene_id': 1000 + i,
+                'update_type': 'metadata',
+                'data': {'path': f'/media/new_scene_{i}.mp4'},
+                'pqid': i + 1,
+            }
+            with pytest.raises(PlexNotFound):
+                worker._process_job(job)
+
+        # Circuit breaker should still be CLOSED
+        assert worker.circuit_breaker.state == CircuitState.CLOSED
+        assert worker.circuit_breaker._failure_count == 0
+
     def test_plex_not_found_gets_longer_base_delay(self):
         """PlexNotFound gets 30s base delay (vs 5s for other transient)."""
         from worker.backoff import get_retry_params

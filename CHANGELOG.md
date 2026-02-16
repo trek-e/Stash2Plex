@@ -5,6 +5,12 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.6] - 2026-02-15
+
+### Fixed
+
+- **PlexNotFound No Longer Trips Circuit Breaker**: PlexNotFound errors (item not yet in Plex library) no longer count toward the circuit breaker failure threshold. Previously, a batch of newly added scenes that Plex hadn't scanned yet would trip the circuit breaker after 5 consecutive PlexNotFound errors, blocking syncs for items that already exist in Plex. PlexNotFound still retries with the same 12-attempt / 30s-base-delay window.
+
 ## [1.5.5] - 2026-02-15
 
 ### Fixed
