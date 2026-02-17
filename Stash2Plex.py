@@ -818,9 +818,11 @@ def handle_process_queue():
 
         processed = 0
         failed = 0
+        skipped_dupes = 0
         last_error = None
         start_time = time.time()
         last_progress_time = start_time
+        processed_scenes = set()  # Track already-processed scene IDs to skip duplicates
 
         while True:
             # Check circuit breaker before processing
@@ -838,11 +840,20 @@ def handle_process_queue():
             scene_id = job.get('scene_id', '?')
             retry_count = job.get('retry_count', 0)
 
+            # Skip duplicate scene IDs — queue may contain multiple entries
+            # for the same scene from overlapping reconciliation runs or hooks
+            if scene_id != '?' and scene_id in processed_scenes:
+                ack_job(queue, job)  # Remove duplicate without processing
+                skipped_dupes += 1
+                continue
+
             try:
                 worker_local._process_job(job)
                 ack_job(queue, job)
                 worker_local.circuit_breaker.record_success()
                 processed += 1
+                if scene_id != '?':
+                    processed_scenes.add(scene_id)
 
                 # Brief pause between jobs to avoid overwhelming Plex
                 time.sleep(0.15)
@@ -891,7 +902,11 @@ def handle_process_queue():
         # Final summary
         elapsed = time.time() - start_time
         log_progress(100)
-        log_info(f"Batch processing complete: {processed} succeeded, {failed} failed in {elapsed:.1f}s")
+        summary = f"Batch processing complete: {processed} succeeded, {failed} failed"
+        if skipped_dupes > 0:
+            summary += f", {skipped_dupes} duplicates skipped"
+        summary += f" in {elapsed:.1f}s"
+        log_info(summary)
 
         # Show DLQ count if items were added
         if failed > 0:

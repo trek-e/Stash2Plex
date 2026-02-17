@@ -5,6 +5,12 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.7] - 2026-02-17
+
+### Fixed
+
+- **Queue Duplicate Processing Loop**: Fixed queue processing getting stuck in a loop re-syncing the same scene thousands of times. Both `Process Queue` (batch) and background worker now track already-processed scene IDs and skip duplicates, acking them from the queue without re-syncing.
+
 ## [1.5.6] - 2026-02-15
 
 ### Fixed

@@ -322,6 +322,11 @@ class SyncWorker:
         # Lazy imports to avoid module-level pollution in tests
         from sync_queue.operations import get_pending, ack_job, nack_job, fail_job
 
+        # Track recently-processed scene IDs to skip duplicates within this session.
+        # Capped to prevent unbounded memory growth in long-running workers.
+        _recently_synced: set = set()
+        _DEDUP_CAP = 50000  # Reset after this many to bound memory
+
         while self.running:
             try:
                 _dbg = getattr(self.config, 'debug_logging', False)
@@ -409,6 +414,14 @@ class SyncWorker:
                 pqid = item.get('pqid')
                 scene_id = item.get('scene_id')
                 retry_count = item.get('retry_count', 0)
+
+                # Skip duplicate scene IDs (queue may have multiple entries from
+                # overlapping reconciliation runs or repeated hooks)
+                if scene_id is not None and retry_count == 0 and scene_id in _recently_synced:
+                    ack_job(self.queue, item)
+                    log_debug(f"Job {pqid} skipped — scene {scene_id} already synced this session")
+                    continue
+
                 log_debug(f"Processing job {pqid} for scene {scene_id} (attempt {retry_count + 1})")
 
                 _job_start = time.perf_counter()
@@ -442,6 +455,12 @@ class SyncWorker:
                         log_info("Recovery period started: graduated rate limiting enabled")
 
                     log_info(f"Job {pqid} completed")
+
+                    # Track for dedup (skip future duplicates of this scene)
+                    if scene_id is not None:
+                        _recently_synced.add(scene_id)
+                        if len(_recently_synced) > _DEDUP_CAP:
+                            _recently_synced.clear()
 
                     # Brief pause between jobs to avoid overwhelming Plex
                     time.sleep(0.15)
