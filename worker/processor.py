@@ -406,13 +406,14 @@ class SyncWorker:
                 if not self._is_ready_for_retry(item):
                     if _dbg:
                         remaining = item.get('next_retry_at', 0) - time.time()
-                        log_info(f"[DEBUG] Job {item.get('pqid')} backoff not elapsed ({remaining:.1f}s remaining)")
+                        _dbg_id = item.get('pqid') or item.get('scene_id')
+                        log_info(f"[DEBUG] Job {_dbg_id} backoff not elapsed ({remaining:.1f}s remaining)")
                     nack_job(self.queue, item)
                     time.sleep(0.1)  # Small delay to avoid tight loop
                     continue
 
-                pqid = item.get('pqid')
                 scene_id = item.get('scene_id')
+                pqid = item.get('pqid') or scene_id
                 retry_count = item.get('retry_count', 0)
 
                 # Skip duplicate scene IDs (queue may have multiple entries from
