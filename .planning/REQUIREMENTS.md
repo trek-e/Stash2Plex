@@ -17,8 +17,8 @@ Requirements for Plex metadata provider milestone. Each maps to roadmap phases.
 
 ### Path Mapping
 
-- [ ] **PATH-01**: Regex-based bidirectional path mapping translates Plex library paths to Stash scene paths and vice versa
-- [ ] **PATH-02**: Path mapping supports multiple named rules applied in order
+- [x] **PATH-01**: Regex-based bidirectional path mapping translates Plex library paths to Stash scene paths and vice versa
+- [x] **PATH-02**: Path mapping supports multiple named rules applied in order
 - [ ] **PATH-03**: Startup roundtrip validation confirms each mapping rule correctly translates in both directions
 - [ ] **PATH-04**: Path mapping handles Plex's relative-to-library-root filename format
 
@@ -31,7 +31,7 @@ Requirements for Plex metadata provider milestone. Each maps to roadmap phases.
 
 ### Infrastructure
 
-- [ ] **INFR-01**: Monorepo structure with shared_lib/ package importable by both plugin and provider
+- [x] **INFR-01**: Monorepo structure with shared_lib/ package importable by both plugin and provider
 - [ ] **INFR-02**: Stash GraphQL client in shared_lib/ queries scenes by path and by ID
 - [ ] **INFR-03**: Docker container handles Linux host networking (host.docker.internal workaround)
 - [ ] **INFR-04**: Provider configuration via environment variables and/or config file
@@ -72,15 +72,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROV-03 | Phase 26 | Pending |
 | PROV-04 | Phase 25 | Pending |
 | PROV-05 | Phase 24 | Pending |
-| PATH-01 | Phase 23 | Pending |
-| PATH-02 | Phase 23 | Pending |
+| PATH-01 | Phase 23 | Complete |
+| PATH-02 | Phase 23 | Complete |
 | PATH-03 | Phase 25 | Pending |
 | PATH-04 | Phase 25 | Pending |
 | GAPD-01 | Phase 27 | Pending |
 | GAPD-02 | Phase 27 | Pending |
 | GAPD-03 | Phase 27 | Pending |
 | GAPD-04 | Phase 27 | Pending |
-| INFR-01 | Phase 23 | Pending |
+| INFR-01 | Phase 23 | Complete |
 | INFR-02 | Phase 23 | Pending |
 | INFR-03 | Phase 24 | Pending |
 | INFR-04 | Phase 24 | Pending |

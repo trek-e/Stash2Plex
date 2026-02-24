@@ -37,7 +37,7 @@
 
 **Milestone Goal:** Add a Plex Custom Metadata Provider service that Plex queries during library scans to resolve and serve Stash scene metadata, with regex-based bidirectional path mapping and bi-directional gap detection between libraries.
 
-- [ ] **Phase 23: Foundation + Shared Library** — Monorepo structure, shared_lib package, bidirectional path mapping engine, async Stash GraphQL client
+- [x] **Phase 23: Foundation + Shared Library** — Monorepo structure, shared_lib package, bidirectional path mapping engine, async Stash GraphQL client (1/2 plans done)
 - [ ] **Phase 24: Provider HTTP Skeleton** — FastAPI provider registers with Plex, Docker container deployed, Plex shows Stash2Plex in agent list
 - [ ] **Phase 25: Match Endpoint** — Plex scan requests return Stash scene IDs via path mapping + fallback; startup roundtrip validation; 90s timeout compliance
 - [ ] **Phase 26: Metadata Serve Route** — Plex displays full scene metadata (title, date, studio, performers, tags, summary, artwork) after a successful match
@@ -57,7 +57,7 @@
   5. Docker build context is set to repo root so `shared_lib/` is available inside the provider container at build time
 **Plans:** 2 plans
 Plans:
-- [ ] 23-01-PLAN.md — Infrastructure + bidirectional path mapper (TDD)
+- [x] 23-01-PLAN.md — Infrastructure + bidirectional path mapper (TDD) — complete 2026-02-24
 - [ ] 23-02-PLAN.md — Async Stash GraphQL client + import verification (TDD)
 
 ### Phase 24: Provider HTTP Skeleton
@@ -118,11 +118,11 @@ Plans:
 | 20. Graduated Recovery & Rate Limiting | v1.5 | 2/2 | Complete | 2026-02-15 |
 | 21. Outage Visibility & History | v1.5 | 2/2 | Complete | 2026-02-15 |
 | 22. DLQ Recovery for Outage Jobs | v1.5 | 2/2 | Complete | 2026-02-15 |
-| 23. Foundation + Shared Library | v2.0 | 0/2 | Not started | - |
+| 23. Foundation + Shared Library | v2.0 | 1/2 | In progress | - |
 | 24. Provider HTTP Skeleton | v2.0 | 0/? | Not started | - |
 | 25. Match Endpoint | v2.0 | 0/? | Not started | - |
 | 26. Metadata Serve Route | v2.0 | 0/? | Not started | - |
 | 27. Gap Detection | v2.0 | 0/? | Not started | - |
 
 ---
-*Last updated: 2026-02-23 after Phase 23 planning*
+*Last updated: 2026-02-24 after 23-01 completion*
