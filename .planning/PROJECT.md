@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Improvements to the PlexSync plugin for Stash, which syncs metadata from Stash to Plex. The plugin provides reliable, queue-based synchronization with comprehensive test coverage, caching for performance, granular control over which fields sync, metadata reconciliation, and automatic outage recovery.
+Stash-to-Plex metadata sync ecosystem: a Stash plugin that pushes metadata on changes (v1.x), plus a Plex metadata provider service that lets Plex pull metadata from Stash during scans (v2.0). Together they ensure metadata flows reliably in both directions — push for real-time updates, pull for scan-time resolution — with regex-based path mapping and bi-directional gap detection.
 
 ## Core Value
 
@@ -97,22 +97,37 @@ Built on v1.0-v1.4 foundation:
 
 ### Active
 
-(No active milestone — use `/gsd:new-milestone` to start next version)
+## Current Milestone: v2.0 Plex Metadata Provider
+
+**Goal:** Add a Plex-side metadata provider service that Plex queries during scans to resolve metadata from Stash, with regex path mapping and bi-directional gap detection between libraries.
+
+**Target features:**
+- Custom Plex metadata provider (tv.plex.agents.custom.stash2plex) deployed as Docker container
+- Match flow: regex path mapping → Stash GraphQL lookup, filename/hash fallback
+- Full metadata serving on Plex Metadata requests
+- Regex-based bidirectional path mapping engine (complex remapping, not just prefix swaps)
+- Bi-directional gap detection: real-time during scans + scheduled full comparison
+- Monorepo structure: provider/ alongside existing Stash plugin, shared code
+- Coexists with v1.x push model (complementary, not replacement)
 
 ### Out of Scope
 
-- Plex → Stash sync — Stash remains the primary metadata source
-- Bi-directional sync — complexity outweighs benefit for current use case
-- Mobile/web UI — Stash plugin UI is sufficient
+- Plex → Stash metadata write-back — Stash remains the primary metadata source; provider reads from Stash only
+- Mobile/web UI — Stash plugin UI + Docker logs sufficient for provider
+- Provider replaces push model — v1.x plugin continues for real-time hook-driven sync
 
 ## Context
 
 **Source:** https://github.com/stashapp/CommunityScripts/tree/main/plugins/PlexSync
+**Plex Provider API:** https://developer.plex.tv/pms/index.html#section/API-Info/Metadata-Providers
+**Plex Provider API version:** 1.2.0, requires PMS 1.43.0+
 
 ## Constraints
 
-- **Compatibility**: Must work with existing Stash plugin architecture
-- **Dependencies**: Minimize new dependencies (added diskcache for v1.1 caching)
+- **Compatibility**: Must work with existing Stash plugin architecture (v1.x push model preserved)
+- **Plex Provider API**: Must conform to PMS metadata provider spec (Match + Metadata features)
+- **Deployment**: Provider service runs as Docker container, needs access to Stash GraphQL API and Plex API
+- **Dependencies**: Minimize new dependencies in Stash plugin; provider service can use appropriate framework
 
 ## Key Decisions
 
@@ -157,6 +172,7 @@ Built on v1.0-v1.4 foundation:
 | v1.3 | Complete | 2026-02-09 | Ad-hoc, 28 commits, production-driven |
 | v1.4 | Complete | 2026-02-14 | 3 phases, 5 plans, metadata reconciliation |
 | v1.5 | Complete | 2026-02-24 | Outage resilience — 6 phases, 12 plans |
+| v2.0 | Active | 2026-02-23 | Plex metadata provider + bi-directional gap detection |
 
 ---
-*Last updated: 2026-02-24 after v1.5 milestone completion*
+*Last updated: 2026-02-23 after v2.0 milestone start*
