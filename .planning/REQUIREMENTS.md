@@ -32,7 +32,7 @@ Requirements for Plex metadata provider milestone. Each maps to roadmap phases.
 ### Infrastructure
 
 - [x] **INFR-01**: Monorepo structure with shared_lib/ package importable by both plugin and provider
-- [ ] **INFR-02**: Stash GraphQL client in shared_lib/ queries scenes by path and by ID
+- [x] **INFR-02**: Stash GraphQL client in shared_lib/ queries scenes by path and by ID
 - [ ] **INFR-03**: Docker container handles Linux host networking (host.docker.internal workaround)
 - [ ] **INFR-04**: Provider configuration via environment variables and/or config file
 
@@ -81,7 +81,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GAPD-03 | Phase 27 | Pending |
 | GAPD-04 | Phase 27 | Pending |
 | INFR-01 | Phase 23 | Complete |
-| INFR-02 | Phase 23 | Pending |
+| INFR-02 | Phase 23 | Complete |
 | INFR-03 | Phase 24 | Pending |
 | INFR-04 | Phase 24 | Pending |
 

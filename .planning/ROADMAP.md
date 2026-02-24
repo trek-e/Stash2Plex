@@ -55,7 +55,7 @@
   3. Path mapping supports multiple named rules evaluated in priority order — first matching rule wins
   4. `shared_lib/stash_client.py` queries Stash GraphQL to find a scene by file path and by scene ID and returns a typed result
   5. Docker build context is set to repo root so `shared_lib/` is available inside the provider container at build time
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 Plans:
 - [x] 23-01-PLAN.md — Infrastructure + bidirectional path mapper (TDD) — complete 2026-02-24
 - [ ] 23-02-PLAN.md — Async Stash GraphQL client + import verification (TDD)
@@ -118,7 +118,7 @@ Plans:
 | 20. Graduated Recovery & Rate Limiting | v1.5 | 2/2 | Complete | 2026-02-15 |
 | 21. Outage Visibility & History | v1.5 | 2/2 | Complete | 2026-02-15 |
 | 22. DLQ Recovery for Outage Jobs | v1.5 | 2/2 | Complete | 2026-02-15 |
-| 23. Foundation + Shared Library | v2.0 | 1/2 | In progress | - |
+| 23. Foundation + Shared Library | 2/2 | Complete   | 2026-02-24 | - |
 | 24. Provider HTTP Skeleton | v2.0 | 0/? | Not started | - |
 | 25. Match Endpoint | v2.0 | 0/? | Not started | - |
 | 26. Metadata Serve Route | v2.0 | 0/? | Not started | - |

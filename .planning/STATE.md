@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-02-23)
 
 Milestone: v2.0 Plex Metadata Provider
 Phase: 23 of 27 (Foundation + Shared Library)
-Plan: 02 (23-01 complete)
+Plan: 03 (23-02 complete)
 Status: In progress
-Last activity: 2026-02-24 — 23-01 complete: shared_lib package, PathMapper with bidirectional regex translation
+Last activity: 2026-02-24 — 23-02 complete: StashClient async GraphQL client, StashScene model, INFR-01+INFR-02 satisfied
 
-Progress: [█░░░░░░░░░] ~6%
+Progress: [██░░░░░░░░] ~12%
 
 ## Performance Metrics
 
@@ -28,6 +28,7 @@ Progress: [█░░░░░░░░░] ~6%
 | Phase | Plan | Duration | Tasks | Notes |
 |-------|------|----------|-------|-------|
 | 23 | 01 | 5 min | 2 | shared_lib + PathMapper |
+| 23 | 02 | 3 min | 2 | StashClient async GraphQL client, 12 TDD tests |
 
 ## Accumulated Context
 
@@ -46,6 +47,9 @@ Key decisions from 23-01:
 - plex_pattern is a match regex — _pattern_to_repl_template derives a replacement template for the reverse direction
 - asyncio_mode = strict in pytest.ini (explicit @pytest.mark.asyncio required, does not affect existing sync tests)
 - count=1 in re.sub() prevents multiple substitutions on paths with repeated segments
+- [Phase 23]: str|int union for scene_id parameter — coerced to str(scene_id) before GraphQL variables, satisfying both plugin (int from hooks) and provider (str from API) call sites
+- [Phase 23]: StashConnectionError covers both ConnectError and TimeoutException — both mean server unavailable from caller perspective
+- [Phase 23]: find_scene_by_path returns None on no match (not raises) — symmetric with PathMapper.plex_to_stash returning None
 
 ### Pending Todos
 
@@ -54,16 +58,16 @@ None.
 ### Blockers/Concerns
 
 - [Phase 25] Exact Match endpoint payload format (filename field) needs live Plex validation — design path mapping to degrade gracefully when filename is absent
-- [Phase 25] Stash GraphQL field names for scene paths (files { path } vs paths { ... }) need verification against local instance before implementing stash_client
+- [Phase 25] Stash GraphQL field names for scene paths used in stash_client.py (files { path }, paths { screenshot preview }) need verification against live instance — FindScenesByPath EQUALS modifier especially
 - [Phase 26] Image URL auth: whether Plex can fetch Stash images directly or provider must proxy needs testing
 - [Phase 27] Genre array Plex bug (only first genre imported) is active as of February 2026 — monitor for fix
 
 ## Session Continuity
 
 Last session: 2026-02-24
-Stopped at: 23-01 complete. shared_lib package with PathMapper. 13 TDD tests pass. httpx/respx/pytest-asyncio installed.
+Stopped at: 23-02 complete. StashClient async GraphQL client. 25 shared_lib TDD tests pass. INFR-01 + INFR-02 satisfied.
 Resume file: None
-Next step: Execute 23-02 (stash_client.py)
+Next step: Execute 23-03 (if exists) or advance to Phase 24
 
 ---
-*Last updated: 2026-02-24 after 23-01 completion*
+*Last updated: 2026-02-24 after 23-02 completion*
