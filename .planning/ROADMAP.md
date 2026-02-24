@@ -55,7 +55,10 @@
   3. Path mapping supports multiple named rules evaluated in priority order — first matching rule wins
   4. `shared_lib/stash_client.py` queries Stash GraphQL to find a scene by file path and by scene ID and returns a typed result
   5. Docker build context is set to repo root so `shared_lib/` is available inside the provider container at build time
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 23-01-PLAN.md — Infrastructure + bidirectional path mapper (TDD)
+- [ ] 23-02-PLAN.md — Async Stash GraphQL client + import verification (TDD)
 
 ### Phase 24: Provider HTTP Skeleton
 **Goal**: A running Docker container that Plex can reach and register as a metadata provider
@@ -115,11 +118,11 @@
 | 20. Graduated Recovery & Rate Limiting | v1.5 | 2/2 | Complete | 2026-02-15 |
 | 21. Outage Visibility & History | v1.5 | 2/2 | Complete | 2026-02-15 |
 | 22. DLQ Recovery for Outage Jobs | v1.5 | 2/2 | Complete | 2026-02-15 |
-| 23. Foundation + Shared Library | v2.0 | 0/? | Not started | - |
+| 23. Foundation + Shared Library | v2.0 | 0/2 | Not started | - |
 | 24. Provider HTTP Skeleton | v2.0 | 0/? | Not started | - |
 | 25. Match Endpoint | v2.0 | 0/? | Not started | - |
 | 26. Metadata Serve Route | v2.0 | 0/? | Not started | - |
 | 27. Gap Detection | v2.0 | 0/? | Not started | - |
 
 ---
-*Last updated: 2026-02-23 after v2.0 roadmap creation*
+*Last updated: 2026-02-23 after Phase 23 planning*
