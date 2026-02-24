@@ -118,7 +118,7 @@ Plans:
 | 20. Graduated Recovery & Rate Limiting | v1.5 | 2/2 | Complete | 2026-02-15 |
 | 21. Outage Visibility & History | v1.5 | 2/2 | Complete | 2026-02-15 |
 | 22. DLQ Recovery for Outage Jobs | v1.5 | 2/2 | Complete | 2026-02-15 |
-| 23. Foundation + Shared Library | 2/2 | Complete   | 2026-02-24 | - |
+| 23. Foundation + Shared Library | 2/2 | Complete    | 2026-02-24 | - |
 | 24. Provider HTTP Skeleton | v2.0 | 0/? | Not started | - |
 | 25. Match Endpoint | v2.0 | 0/? | Not started | - |
 | 26. Metadata Serve Route | v2.0 | 0/? | Not started | - |
