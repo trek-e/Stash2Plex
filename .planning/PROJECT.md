@@ -2,29 +2,31 @@
 
 ## What This Is
 
-Improvements to the PlexSync plugin for Stash, which syncs metadata from Stash to Plex. The plugin provides reliable, queue-based synchronization with comprehensive test coverage, caching for performance, and granular control over which fields sync.
+Improvements to the PlexSync plugin for Stash, which syncs metadata from Stash to Plex. The plugin provides reliable, queue-based synchronization with comprehensive test coverage, caching for performance, granular control over which fields sync, metadata reconciliation, and automatic outage recovery.
 
 ## Core Value
 
 Reliable sync: when metadata changes in Stash, it eventually reaches Plex — even if Plex was temporarily unavailable or Stash hadn't finished indexing yet.
 
-## Current State (v1.4)
+## Current State (v1.5)
 
-**Shipped:** 2026-02-14
+**Shipped:** 2026-02-24
 
-PlexSync v1.4 adds metadata reconciliation — automatic detection and repair of gaps between Stash and Plex:
-- Gap detection engine: empty metadata, stale sync, and missing item detection
-- Manual reconciliation tasks: Reconcile Library (All / Recent / Last 7 Days) in Stash UI
-- Auto-reconciliation: startup trigger + configurable interval (never/hourly/daily/weekly)
-- Reconciliation status in "View Queue Status" (last run, gaps found by type, enqueued count)
-- Configurable scope (all/24h/7days) with check-on-invocation scheduling pattern
-- 999 tests, 91% coverage, 3,029 LOC in reconciliation module
+PlexSync v1.5 adds outage resilience — automatic recovery when Plex comes back online:
+- Circuit breaker state persists to JSON across plugin restarts (advisory file locking)
+- Deep Plex health checks via /identity endpoint with exponential backoff (5s → 60s cap)
+- Automatic recovery detection on plugin invocation — queue drains without user interaction
+- Graduated rate limiting with token bucket prevents overwhelming Plex post-recovery
+- Outage history tracking (last 30 outages) with MTBF/MTTR metrics in Stash UI
+- DLQ recovery task re-queues outage-related failures with per-error-type filtering
+- 29,348 LOC Python
 
-Built on v1.0-v1.3 foundation:
+Built on v1.0-v1.4 foundation:
 - SQLite-backed persistent queue with crash recovery and circuit breaker (v1.0)
 - 910+ tests, complete documentation, disk-backed caching (v1.1)
 - Queue management UI with Process Queue button (v1.2)
 - Production stability: multi-library, debug logging, batch backpressure (v1.3)
+- Metadata reconciliation: gap detection, auto-reconciliation, enhanced status (v1.4)
 
 **Tech stack:** Python 3.9+, SQLite (persist-queue), plexapi, pydantic, diskcache, MkDocs
 
@@ -83,18 +85,19 @@ Built on v1.0-v1.3 foundation:
 - [x] Discovered gaps enqueued through existing queue (backpressure/retry/circuit breaker)
 - [x] Enhanced "View Queue Status" with reconciliation history and gap counts by type
 
+### Validated (v1.5)
+
+- [x] Automatic queue drain when Plex recovers from outage — v1.5
+- [x] Circuit breaker state persistence across Stash process restarts — v1.5
+- [x] Plex health monitoring and recovery detection — v1.5
+- [x] Graduated rate limiting during recovery period — v1.5
+- [x] Outage history tracking with MTBF/MTTR metrics — v1.5
+- [x] DLQ recovery for outage-related failures — v1.5
+- [x] Enhanced outage visibility in queue status — v1.5
+
 ### Active
 
-## Current Milestone: v1.5 Outage Resilience
-
-**Goal:** Automatic recovery when Plex comes back online after downtime — queue drains without user interaction, circuit breaker state persists across restarts, and health monitoring provides visibility into outage/recovery status.
-
-**Target features:**
-- Automatic queue drain when Plex recovers from outage
-- Circuit breaker state persistence across Stash process restarts
-- Plex health monitoring and recovery detection
-- DLQ recovery for outage-related failures
-- Enhanced outage visibility in queue status
+(No active milestone — use `/gsd:new-milestone` to start next version)
 
 ### Out of Scope
 
@@ -134,6 +137,15 @@ Built on v1.0-v1.3 foundation:
 | Lighter pre-check for gap detection | sync_timestamps lookup before expensive matcher call | v1.4 |
 | Meaningful metadata gate for gaps | Reuse handlers.py quality gate (studio/performers/tags/details/date) | v1.4 |
 | Standard sync jobs for gaps | Enqueue as normal jobs, no special gap tagging | v1.4 |
+| state_file=None default | 100% backward compatibility with existing configs | v1.5 |
+| Non-blocking advisory locking | LOCK_NB makes save skippable, not blocking | v1.5 |
+| Corrupted state defaults to CLOSED | Safe default, not stuck-open | v1.5 |
+| Health checks don't modify circuit breaker | Avoids race conditions between health checks and worker | v1.5 |
+| Health check timeout 5s | Short timeout avoids blocking worker thread | v1.5 |
+| Recovery detection on invocation only | Reuses check-on-invocation pattern from v1.4 | v1.5 |
+| Token bucket capacity 1.0 | Minimal burst, single job ahead for conservative recovery | v1.5 |
+| Circular buffer maxlen=30 | Automatic oldest-record eviction for outage history | v1.5 |
+| Conservative DLQ recovery default | PlexServerDown only; other types opt-in | v1.5 |
 
 ## Milestones
 
@@ -144,7 +156,7 @@ Built on v1.0-v1.3 foundation:
 | v1.2 | Complete | 2026-02-04 | 3 phases, 3 plans, 15 commits |
 | v1.3 | Complete | 2026-02-09 | Ad-hoc, 28 commits, production-driven |
 | v1.4 | Complete | 2026-02-14 | 3 phases, 5 plans, metadata reconciliation |
-| v1.5 | Active | 2026-02-15 | Outage resilience |
+| v1.5 | Complete | 2026-02-24 | Outage resilience — 6 phases, 12 plans |
 
 ---
-*Last updated: 2026-02-15 after v1.5 milestone start*
+*Last updated: 2026-02-24 after v1.5 milestone completion*

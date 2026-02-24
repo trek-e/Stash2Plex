@@ -1,5 +1,34 @@
 # Project Milestones: PlexSync
 
+## v1.5 Outage Resilience (Shipped: 2026-02-24)
+
+**Delivered:** Automatic recovery when Plex comes back online after downtime — queue drains without user interaction, circuit breaker state persists across restarts, and health monitoring provides visibility into outage/recovery status.
+
+**Phases completed:** 17-22 (12 plans total)
+
+**Key accomplishments:**
+
+- Circuit breaker state persistence to JSON with advisory file locking — survives plugin restarts
+- Deep Plex health checks via /identity endpoint with exponential backoff (5s → 60s cap)
+- Automatic recovery detection on plugin invocation — Plex recovery triggers queue drain
+- Graduated rate limiting with token bucket prevents overwhelming Plex post-recovery
+- Outage history tracking (last 30) with MTBF/MTTR metrics and Stash UI visibility
+- DLQ recovery task re-queues outage-related failures with per-error-type filtering
+
+**Stats:**
+
+- 12 plans across 6 phases
+- 51 commits
+- 13,660 lines added
+- 29,348 total LOC Python
+- Single day (2026-02-15)
+
+**Git range:** `b3578f8` → `a55a473`
+
+**Tag:** `v1.5`
+
+---
+
 ## v1.4 Metadata Reconciliation (Shipped: 2026-02-14)
 
 **Delivered:** Automatic detection and repair of metadata gaps between Stash and Plex — empty fields, stale syncs, and missing items are found and enqueued for sync, with manual and scheduled triggers.
