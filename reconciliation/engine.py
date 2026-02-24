@@ -36,6 +36,7 @@ class GapDetectionResult:
         total_gaps: Total number of gaps detected (sum of above)
         enqueued_count: Number of gaps actually enqueued (after dedup)
         skipped_already_queued: Number of gaps skipped (already in queue)
+        skipped_no_metadata: Number of gaps skipped due to quality gate (no meaningful metadata)
         scenes_checked: Total number of scenes checked
         errors: List of non-fatal error messages during detection
     """
@@ -45,6 +46,7 @@ class GapDetectionResult:
     total_gaps: int = 0
     enqueued_count: int = 0
     skipped_already_queued: int = 0
+    skipped_no_metadata: int = 0
     scenes_checked: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -149,10 +151,14 @@ class GapDetectionEngine:
         # Step 6: Enqueue gaps (if queue provided)
         if self.queue is not None:
             try:
-                enqueued, skipped = self._enqueue_gaps(empty_gaps, stale_gaps, missing_gaps)
+                enqueued, skipped, skipped_no_metadata = self._enqueue_gaps(empty_gaps, stale_gaps, missing_gaps)
                 result.enqueued_count = enqueued
                 result.skipped_already_queued = skipped
-                log_info(f"Enqueued {enqueued} gaps ({skipped} already queued)")
+                result.skipped_no_metadata = skipped_no_metadata
+                msg = f"Enqueued {enqueued} gaps ({skipped} already queued)"
+                if skipped_no_metadata > 0:
+                    msg += f", {skipped_no_metadata} skipped (no Stash metadata yet — add studio/performers/tags/date to sync)"
+                log_info(msg)
             except Exception as e:
                 result.errors.append(f"Failed to enqueue gaps: {e}")
                 log_error(f"Failed to enqueue gaps: {e}")
@@ -466,7 +472,7 @@ class GapDetectionEngine:
         empty_gaps: list,
         stale_gaps: list,
         missing_gaps: list
-    ) -> tuple[int, int]:
+    ) -> tuple[int, int, int]:
         """Enqueue discovered gaps as sync jobs.
 
         Deduplicates:
@@ -479,7 +485,7 @@ class GapDetectionEngine:
             missing_gaps: List of GapResult from detect_missing
 
         Returns:
-            Tuple of (enqueued_count, skipped_already_queued)
+            Tuple of (enqueued_count, skipped_already_queued, skipped_no_metadata)
         """
         from sync_queue.operations import enqueue, get_queued_scene_ids
         import os
@@ -492,6 +498,7 @@ class GapDetectionEngine:
         enqueued_this_run = set()
         enqueued_count = 0
         skipped_count = 0
+        skipped_no_metadata_count = 0
 
         # Combine all gaps
         all_gaps = list(empty_gaps) + list(stale_gaps) + list(missing_gaps)
@@ -522,7 +529,7 @@ class GapDetectionEngine:
             # which would clear existing Plex values.
             if not has_meaningful_metadata(job_data):
                 log_debug(f"Scene {scene_id} has no meaningful metadata, skipping enqueue")
-                skipped_count += 1
+                skipped_no_metadata_count += 1
                 continue
 
             # Enqueue
@@ -534,7 +541,7 @@ class GapDetectionEngine:
                 log_warn(f"Failed to enqueue scene {scene_id}: {e}")
                 skipped_count += 1
 
-        return enqueued_count, skipped_count
+        return enqueued_count, skipped_count, skipped_no_metadata_count
 
     def _build_job_data(self, scene: dict[str, Any]) -> Optional[dict[str, Any]]:
         """Build job data dict from Stash scene.

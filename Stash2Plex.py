@@ -667,19 +667,39 @@ def handle_queue_status():
             history = OutageHistory(data_dir)
             records = history.get_history()
 
+            # Determine if circuit breaker is currently CLOSED (Plex is healthy)
+            # If CLOSED, any open-ended outage record is orphaned (the outage resolved
+            # but the history record was not closed, e.g., due to process restart).
+            cb_is_closed = True  # Default: assume healthy until proven otherwise
+            cb_file = os.path.join(data_dir, 'circuit_breaker.json')
+            if os.path.exists(cb_file):
+                try:
+                    with open(cb_file, 'r') as f:
+                        cb_data = json.load(f)
+                    cb_state = cb_data.get('state', 'closed').lower()
+                    cb_is_closed = (cb_state == 'closed')
+                except Exception:
+                    pass  # Treat as closed on parse error
+
             if records:
                 # Show last 3 outages
                 recent = records[-3:]
                 for record in recent:
                     if record.ended_at is None:
                         elapsed = time.time() - record.started_at
-                        log_info(f"ONGOING ({format_duration(elapsed)})")
+                        if cb_is_closed:
+                            # Orphaned record: circuit is CLOSED so outage is over,
+                            # but the history record was never closed (process restart
+                            # or race between workers). Display as resolved.
+                            log_info(f"Duration: ~{format_duration(elapsed)} (resolved — circuit closed)")
+                        else:
+                            log_info(f"ONGOING ({format_duration(elapsed)})")
                     else:
                         log_info(f"Duration: {format_duration(record.duration)}")
 
-                # Check for current ongoing outage
+                # Check for current ongoing outage (only if circuit is actually OPEN)
                 current = history.get_current_outage()
-                if current:
+                if current and not cb_is_closed:
                     elapsed = time.time() - current.started_at
                     log_info(f"Current outage: {format_duration(elapsed)}")
             else:
@@ -977,6 +997,9 @@ def handle_reconcile(scope: str):
             log_info(f"Enqueued: {result.enqueued_count}")
             if result.skipped_already_queued:
                 log_info(f"Skipped (already queued): {result.skipped_already_queued}")
+            if result.skipped_no_metadata:
+                log_info(f"Skipped (no Stash metadata yet): {result.skipped_no_metadata}")
+                log_info("  Add studio, performers, tags, date, or details in Stash to allow sync")
         else:
             log_info("Detection-only mode (no items enqueued)")
 
@@ -1614,15 +1637,23 @@ def main():
     if worker and queue_manager and task_mode not in management_modes and _worker_lock_fd is not None:
         import time
         from worker.stats import SyncStats
+        from sync_queue.operations import get_stats as get_queue_stats
         queue = queue_manager.get_queue()
         data_dir = get_plugin_data_dir()
+        queue_path = os.path.join(data_dir, 'queue')
 
         # Load stats for dynamic timeout calculation
         stats_path = os.path.join(data_dir, 'stats.json')
         stats = SyncStats.load_from_file(stats_path)
 
-        # Dynamic timeout based on measured processing time
-        initial_size = queue.size
+        # Dynamic timeout based on measured processing time.
+        # Use pending + in_progress as initial count so we don't exit early when
+        # the worker has already dequeued (moved to in_progress) the only pending item.
+        try:
+            queue_counts = get_queue_stats(queue_path)
+            initial_size = queue_counts['pending'] + queue_counts['in_progress']
+        except Exception:
+            initial_size = queue.size  # Fallback to pending-only count
         max_wait = stats.get_estimated_timeout(initial_size)
         wait_interval = 0.5
         waited = 0
@@ -1639,7 +1670,13 @@ def main():
 
         while waited < max_wait:
             try:
-                size = queue.size
+                # Check both pending AND in_progress: if a job was dequeued (in_progress)
+                # but not yet acked, queue.size returns 0 but the job is still being processed.
+                try:
+                    counts = get_queue_stats(queue_path)
+                    size = counts['pending'] + counts['in_progress']
+                except Exception:
+                    size = queue.size  # Fallback
                 if size == 0:
                     break
                 # Log progress every 10 items processed
@@ -1652,14 +1689,19 @@ def main():
                 log_error(f"Error checking queue: {e}")
                 break
 
-        if waited >= max_wait and queue.size > 0:
-            remaining = queue.size
-            estimated_remaining_time = remaining * time_per_item
-            log_warn(
-                f"Timeout after {max_wait:.0f}s with {remaining} items remaining "
-                f"(est. {estimated_remaining_time:.0f}s more needed). "
-                f"Run 'Process Queue' task to continue without timeout limits."
-            )
+        if waited >= max_wait:
+            try:
+                counts = get_queue_stats(queue_path)
+                remaining = counts['pending'] + counts['in_progress']
+            except Exception:
+                remaining = queue.size
+            if remaining > 0:
+                estimated_remaining_time = remaining * time_per_item
+                log_warn(
+                    f"Timeout after {max_wait:.0f}s with {remaining} items remaining "
+                    f"(est. {estimated_remaining_time:.0f}s more needed). "
+                    f"Run 'Process Queue' task to continue without timeout limits."
+                )
 
     # Graceful shutdown: stop worker so in-flight items are acked/nacked
     # (prevents auto_resume from re-processing them in next invocation)
