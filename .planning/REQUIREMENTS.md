@@ -67,29 +67,29 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PROV-01 | — | Pending |
-| PROV-02 | — | Pending |
-| PROV-03 | — | Pending |
-| PROV-04 | — | Pending |
-| PROV-05 | — | Pending |
-| PATH-01 | — | Pending |
-| PATH-02 | — | Pending |
-| PATH-03 | — | Pending |
-| PATH-04 | — | Pending |
-| GAPD-01 | — | Pending |
-| GAPD-02 | — | Pending |
-| GAPD-03 | — | Pending |
-| GAPD-04 | — | Pending |
-| INFR-01 | — | Pending |
-| INFR-02 | — | Pending |
-| INFR-03 | — | Pending |
-| INFR-04 | — | Pending |
+| PROV-01 | Phase 24 | Pending |
+| PROV-02 | Phase 25 | Pending |
+| PROV-03 | Phase 26 | Pending |
+| PROV-04 | Phase 25 | Pending |
+| PROV-05 | Phase 24 | Pending |
+| PATH-01 | Phase 23 | Pending |
+| PATH-02 | Phase 23 | Pending |
+| PATH-03 | Phase 25 | Pending |
+| PATH-04 | Phase 25 | Pending |
+| GAPD-01 | Phase 27 | Pending |
+| GAPD-02 | Phase 27 | Pending |
+| GAPD-03 | Phase 27 | Pending |
+| GAPD-04 | Phase 27 | Pending |
+| INFR-01 | Phase 23 | Pending |
+| INFR-02 | Phase 23 | Pending |
+| INFR-03 | Phase 24 | Pending |
+| INFR-04 | Phase 24 | Pending |
 
 **Coverage:**
 - v2.0 requirements: 17 total
-- Mapped to phases: 0
-- Unmapped: 17 ⚠️
+- Mapped to phases: 17
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-02-23*
-*Last updated: 2026-02-23 after initial definition*
+*Last updated: 2026-02-23 after roadmap creation (traceability complete)*
