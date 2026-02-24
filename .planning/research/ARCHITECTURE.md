@@ -1,1013 +1,927 @@
-# Architecture Research: Outage Resilience Integration
+# Architecture Research: Plex Metadata Provider Integration
 
-**Domain:** Outage resilience for event-driven Stash plugin architecture
-**Researched:** 2026-02-15
-**Confidence:** HIGH
+**Domain:** HTTP metadata provider service + Stash plugin monorepo (v2.0)
+**Researched:** 2026-02-23
+**Confidence:** MEDIUM — Plex provider API is beta (PMS 1.43.0+); core patterns verified via official example repos and forum announcements
 
-## Executive Summary
+---
 
-PlexSync's outage resilience features must integrate with a **non-daemon, event-driven architecture** where the plugin exits after each invocation. The check-on-invocation pattern (proven in v1.4 reconciliation) extends naturally to recovery detection. New components focus on state persistence and health tracking, while existing components (circuit breaker, backoff, queue) require minimal modification.
+## System Overview
 
-**Key architectural decisions:**
-1. **Recovery detection uses check-on-invocation pattern** — same as auto-reconciliation scheduler
-2. **Circuit breaker state persists to disk** — survives process restarts
-3. **Health check is stateless** — no background monitoring needed
-4. **Recovery trigger is explicit** — check on next hook invocation, not async polling
-
-## Current Architecture Overview
+v2.0 adds a long-running HTTP service (`provider/`) alongside the existing short-lived plugin (`Stash2Plex.py`). They share code through a `shared/` package that lives in the plugin root.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Entry Point (Stash2Plex.py)               │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ main() → initialize() → maybe_auto_reconcile()      │    │
-│  │   ↓                                                  │    │
-│  │ handle_hook() or handle_task()                      │    │
-│  └──────────────┬──────────────────────────────────────┘    │
-│                 │                                            │
-├─────────────────┴────────────────────────────────────────────┤
-│                    Event Handlers Layer                      │
-│  ┌──────────────────┐          ┌──────────────────────┐     │
-│  │ hooks/handlers   │          │ Task Dispatch        │     │
-│  │ - Scene update   │          │ - reconcile_all      │     │
-│  │ - Validation     │          │ - process_queue      │     │
-│  │ - Enqueue (<100ms)│         │ - queue_status       │     │
-│  └────────┬─────────┘          └──────────┬───────────┘     │
-│           │                               │                 │
-├───────────┴───────────────────────────────┴──────────────────┤
-│                    Processing Layer                          │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │              worker/processor.py                     │    │
-│  │  • Daemon thread during invocation                  │    │
-│  │  • Circuit breaker (in-memory)                      │    │
-│  │  • Exponential backoff with jitter                  │    │
-│  │  • Dies when process exits                          │    │
-│  └───────────────────┬─────────────────────────────────┘    │
-│                      │                                       │
-├──────────────────────┴───────────────────────────────────────┤
-│                    State Persistence Layer                   │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │ Queue (SQLite)│  │ Sync Timestamps│  │ Reconciliation│    │
-│  │ persist-queue│  │ (JSON)         │  │ State (JSON)  │    │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-└─────────────────────────────────────────────────────────────┘
-
-External Services:
-┌──────────┐                    ┌──────────┐
-│  Stash   │ ←── GraphQL ────   │   Plex   │
-│  (GQL)   │                    │ (plexapi) │
-└──────────┘                    └──────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          USER ENVIRONMENT                                │
+│                                                                          │
+│   ┌────────────────────────┐        ┌────────────────────────────┐      │
+│   │   Stash Application    │        │   Plex Media Server        │      │
+│   │   (existing)           │        │   (PMS 1.43.0+)            │      │
+│   │                        │        │                            │      │
+│   │  Stash2Plex Plugin     │        │  Settings → Agents →       │      │
+│   │  (event-driven, short- │        │  Add Custom Provider       │      │
+│   │   lived per invocation)│        │  URL: http://provider:8080 │      │
+│   └────────────┬───────────┘        └────────────┬───────────────┘      │
+│                │                                  │                      │
+│                │  GraphQL (pull)                  │  HTTP (provider API) │
+│                ▼                                  ▼                      │
+│   ┌────────────────────────────────────────────────────────────────┐    │
+│   │              provider/ (Docker container, long-running)        │    │
+│   │                                                                │    │
+│   │  FastAPI HTTP server                                           │    │
+│   │  ├── GET /                    MediaProvider discovery          │    │
+│   │  ├── POST /library/metadata/matches   Match → Stash lookup     │    │
+│   │  ├── GET /library/metadata/{id}       Full metadata serve      │    │
+│   │  └── GET /library/metadata/{id}/images  Image proxy           │    │
+│   │                                                                │    │
+│   │  ┌─────────────────┐  ┌──────────────────┐  ┌─────────────┐  │    │
+│   │  │  path_mapper.py │  │  stash_client.py  │  │ gap_tracker │  │    │
+│   │  │  (regex engine) │  │  (GraphQL client) │  │ .py         │  │    │
+│   │  └─────────────────┘  └──────────────────┘  └─────────────┘  │    │
+│   └────────────────────────────────────────────────────────────────┘    │
+│                │                                                         │
+│                │  GraphQL + HTTP                                         │
+│                ▼                                                         │
+│   ┌────────────────────────┐                                             │
+│   │   Stash Server         │                                             │
+│   │   :9999/graphql        │                                             │
+│   └────────────────────────┘                                             │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Key Constraint: Invocation Lifecycle
+### Coexistence: Push + Pull Models
 
-**NOT a long-running daemon:**
-- Plugin invoked per-event (hook fires, task selected)
-- Process exits after handling event
-- Worker thread runs during invocation, dies on exit
-- State survives via disk persistence (SQLite queue, JSON files)
+The v1.x plugin (push) and v2.0 provider (pull) are **complementary, not competing**:
 
-**Check-on-invocation pattern** (proven in v1.4 reconciliation):
-1. On every plugin invocation: read JSON state file
-2. Check if action is due (time-based, condition-based)
-3. If due: execute action, update state
-4. Continue with normal processing
+| Trigger | Component | Flow |
+|---------|-----------|------|
+| Scene updated in Stash | Plugin (push) | Hook → enqueue → worker → Plex API write |
+| Plex library scan | Provider (pull) | PMS → HTTP match → Stash GraphQL → serve metadata |
+| Gap detected | Either | Plugin: existing reconciler enqueues; Provider: real-time during scan |
 
-## Outage Resilience Architecture
+---
 
-### System Overview with Resilience Features
+## How Plex Discovers and Calls the Provider
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Entry Point (Stash2Plex.py)               │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ main() → initialize()                                │    │
-│  │   ↓                                                  │    │
-│  │ maybe_auto_reconcile()  ← EXISTING                  │    │
-│  │ maybe_recovery_trigger() ← NEW (check-on-invocation)│    │
-│  │   ↓                                                  │    │
-│  │ handle_hook() or handle_task()                      │    │
-│  └──────────────┬──────────────────────────────────────┘    │
-│                 │                                            │
-├─────────────────┴────────────────────────────────────────────┤
-│                    Event Handlers Layer                      │
-│  ┌──────────────────┐          ┌──────────────────────┐     │
-│  │ hooks/handlers   │          │ Task Dispatch        │     │
-│  │ (no changes)     │          │ + health_check ← NEW │     │
-│  └────────┬─────────┘          └──────────┬───────────┘     │
-│           │                               │                 │
-├───────────┴───────────────────────────────┴──────────────────┤
-│                    Processing Layer                          │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │              worker/processor.py                     │    │
-│  │  • Circuit breaker (NOW PERSISTED) ← MODIFIED       │    │
-│  │  • Exponential backoff (no change)                  │    │
-│  │  • Worker loop checks CB before processing          │    │
-│  └───────────────────┬─────────────────────────────────┘    │
-│                      │                                       │
-├──────────────────────┴───────────────────────────────────────┤
-│                    Resilience Components (NEW)               │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │       resilience/recovery_detector.py                │    │
-│  │  • RecoveryDetector: check if Plex recovered         │    │
-│  │  • Uses plex/client.py health check                 │    │
-│  │  • Lightweight: single HTTP request                 │    │
-│  └─────────────────────────────────────────────────────┘    │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │       resilience/recovery_scheduler.py               │    │
-│  │  • RecoveryScheduler: check-on-invocation pattern    │    │
-│  │  • Loads recovery_state.json                        │    │
-│  │  • Decides if health check is due                   │    │
-│  │  • Records last check time, last failure time       │    │
-│  └─────────────────────────────────────────────────────┘    │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │       plex/health.py (NEW)                           │    │
-│  │  • check_plex_health(): /:/ping endpoint            │    │
-│  │  • Returns (is_healthy: bool, latency_ms: float)    │    │
-│  │  • Reuses PlexClient with short timeout             │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                                                              │
-├──────────────────────────────────────────────────────────────┤
-│                    State Persistence Layer                   │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │ Queue (SQLite)│  │ CB State (JSON)│  │ Recovery State│    │
-│  │ (existing)   │  │ ← NEW          │  │ (JSON) ← NEW  │    │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-│  ┌──────────────┐  ┌──────────────┐                        │
-│  │ Sync Timestamps│  │ Reconciliation│                      │
-│  │ (existing)   │  │ State (existing)│                     │
-│  └──────────────┘  └──────────────┘                        │
-└─────────────────────────────────────────────────────────────┘
+**Registration** (MEDIUM confidence — verified via Plex forum announcement and tmdb-example-provider):
+
+1. User opens PMS → Settings → Agents → Add Custom Provider
+2. Enters the provider base URL (e.g., `http://192.168.1.100:8080`)
+3. PMS performs a GET to the base URL to fetch the `MediaProvider` definition
+4. PMS stores the provider and calls it during library scans
+
+**Provider discovery response** — what the root endpoint must return:
+
+```json
+{
+  "MediaContainer": {
+    "MediaProvider": [{
+      "identifier": "tv.plex.agents.custom.stash2plex",
+      "title": "Stash2Plex",
+      "version": "2.0.0",
+      "Types": {
+        "MediaType": [{
+          "type": "1",
+          "title": "Movie",
+          "Scheme": [{"key": "stash2plex"}],
+          "Feature": [
+            {"type": "match", "key": "/library/metadata/matches"},
+            {"type": "metadata", "key": "/library/metadata"},
+            {"type": "images", "key": "/library/metadata/{id}/images"}
+          ]
+        }]
+      }
+    }]
+  }
+}
 ```
 
-## Component Integration Points
+**Match flow** (what PMS sends to provider during scan):
+
+```
+PMS scans file: /media/Adult/Studio/2024-01-01_scene_title.mp4
+    ↓
+POST /library/metadata/matches
+Body: {
+  "type": 1,
+  "title": "scene_title",
+  "year": 2024,
+  "filename": "2024-01-01_scene_title.mp4",
+  "manual": 0
+}
+    ↓
+Provider: apply regex path map to reconstruct Stash path
+Provider: query Stash GraphQL findScenes(path: ...)
+Provider: return candidate match with ratingKey = stash_scene_id
+    ↓
+PMS stores ratingKey, calls GET /library/metadata/{stash_scene_id}
+Provider: query Stash for full scene, return formatted metadata
+```
+
+**Authentication:** Currently unauthenticated (beta limitation confirmed by Plex team). Providers hosted locally on Docker do not need auth for now. Future versions will add auth.
+
+**Timeout:** PMS has a 90-second timeout for provider requests. Match + Stash GraphQL roundtrip must complete within this budget.
+
+**File path information passed:** PMS passes the filename (not full path) and relative path to library root. This is why the **regex path mapper** must reconstruct the full Stash path from PMS library base + relative path.
+
+---
+
+## Recommended Monorepo Structure
+
+```
+Stash2Plex/                          # repo root (existing plugin)
+├── Stash2Plex.py                    # existing entry point (unchanged)
+├── Stash2Plex.yml                   # existing plugin manifest
+├── requirements.txt                 # existing plugin deps
+│
+├── plex/                            # existing — plex API wrappers
+├── worker/                          # existing — queue worker
+├── sync_queue/                      # existing — queue ops
+├── reconciliation/                  # existing — gap detection (plugin side)
+├── validation/                      # existing — Pydantic config + validators
+├── hooks/                           # existing — Stash hook handlers
+├── shared/                          # existing shared utilities (log.py)
+│   └── log.py
+│
+├── shared_lib/                      # NEW — code shared between plugin + provider
+│   ├── __init__.py
+│   ├── path_mapper.py               # Bidirectional regex path mapping engine
+│   ├── stash_client.py              # Stash GraphQL client (http + ApiKey)
+│   └── models.py                    # Shared data models (StashScene, etc.)
+│
+└── provider/                        # NEW — Plex metadata provider service
+    ├── Dockerfile
+    ├── docker-compose.yml
+    ├── requirements.txt             # FastAPI, httpx, pydantic — no plugin deps
+    ├── pyproject.toml
+    ├── main.py                      # FastAPI app entry point
+    ├── config.py                    # Provider config (env vars via Pydantic)
+    ├── routes/
+    │   ├── __init__.py
+    │   ├── discovery.py             # GET / → MediaProvider response
+    │   ├── match.py                 # POST /library/metadata/matches
+    │   ├── metadata.py              # GET /library/metadata/{id}
+    │   └── images.py                # GET /library/metadata/{id}/images
+    ├── mappers/
+    │   ├── __init__.py
+    │   └── plex_response.py         # Stash scene → Plex MediaContainer format
+    ├── gap/
+    │   ├── __init__.py
+    │   └── tracker.py               # Gap tracking (scan-time + scheduled)
+    └── tests/
+        ├── test_discovery.py
+        ├── test_match.py
+        ├── test_metadata.py
+        └── test_path_mapper.py
+```
+
+### Structure Rationale
+
+- **`shared_lib/`** (not `shared/`): The existing `shared/` module is plugin-specific. A clearly named `shared_lib/` avoids confusion and maps to `pip install -e ../shared_lib` in the provider Dockerfile.
+- **`provider/requirements.txt`** separate from plugin `requirements.txt`: Provider uses FastAPI and httpx; plugin uses plexapi and persist-queue. No overlap. Don't mix.
+- **`provider/` as self-contained service**: Has its own `Dockerfile`, config, and can be deployed independently. The only shared dependency is `shared_lib/` installed via path.
+- **`provider/routes/`**: One file per endpoint group. FastAPI routers make this clean to compose.
+- **`provider/mappers/`**: Transformation layer — keeps routes thin and testable independently.
+- **`provider/gap/`**: Gap detection logic for the provider side (scan-time observation of what Plex couldn't match, separate from the plugin's reconciler).
+
+---
+
+## Component Responsibilities
 
 ### New Components
 
-#### 1. `resilience/recovery_detector.py` (NEW)
-
-**Responsibility:** Detect Plex recovery after an outage
-
-**Interface:**
-```python
-class RecoveryDetector:
-    def __init__(self, config: Stash2PlexConfig, data_dir: str):
-        self.config = config
-        self.data_dir = data_dir
-        self._scheduler = RecoveryScheduler(data_dir)
-
-    def check_recovery(self) -> tuple[bool, str]:
-        """Check if Plex has recovered from outage.
-
-        Returns:
-            (recovered: bool, reason: str)
-            - (True, "Plex is healthy") if recovered
-            - (False, "Circuit breaker not OPEN") if no outage detected
-            - (False, "Plex still down") if health check fails
-        """
-```
-
-**Integration:**
-- Called from `maybe_recovery_trigger()` in `Stash2Plex.py`
-- Uses `plex/health.py` for health checking
-- Reads/writes `recovery_state.json` via `RecoveryScheduler`
-- Loads circuit breaker state to check if recovery is relevant
-
-**Data flow:**
-1. Load circuit breaker state (if OPEN → proceed, else skip)
-2. Check scheduler: is health check due?
-3. If due: run health check via `plex/health.py`
-4. If healthy: return True (trigger recovery actions)
-5. Update scheduler state with check result
-
----
-
-#### 2. `resilience/recovery_scheduler.py` (NEW)
-
-**Responsibility:** Track recovery check timing (check-on-invocation pattern)
-
-**Interface:**
-```python
-@dataclass
-class RecoveryState:
-    """Persisted state for recovery checking."""
-    last_failure_time: float = 0.0      # When circuit breaker last opened
-    last_check_time: float = 0.0        # Last health check attempt
-    last_check_result: bool = False     # Last health check result
-    consecutive_successes: int = 0      # Successes since last failure
-
-class RecoveryScheduler:
-    STATE_FILE = 'recovery_state.json'
-
-    def is_check_due(self, now: float, check_interval: float) -> bool:
-        """Check if health check should run based on interval.
-
-        Args:
-            now: Current time (time.time())
-            check_interval: Seconds between checks (default: 60)
-
-        Returns:
-            True if check should run
-        """
-
-    def record_check(self, result: bool, now: float) -> None:
-        """Record health check result."""
-```
-
-**Integration:**
-- Used by `RecoveryDetector`
-- Persists to `data_dir/recovery_state.json`
-- Pattern matches `reconciliation/scheduler.py` (proven design)
-
----
-
-#### 3. `plex/health.py` (NEW)
-
-**Responsibility:** Lightweight Plex health checking
-
-**Interface:**
-```python
-def check_plex_health(
-    client: PlexClient,
-    timeout: float = 5.0
-) -> tuple[bool, float]:
-    """Check if Plex server is responding.
-
-    Uses /:/ping endpoint (lightweight, no auth needed).
-
-    Args:
-        client: PlexClient instance
-        timeout: Request timeout in seconds
-
-    Returns:
-        (is_healthy: bool, latency_ms: float)
-    """
-```
-
-**Integration:**
-- Called by `RecoveryDetector.check_recovery()`
-- Uses existing `plex/client.py` PlexClient
-- Independent of circuit breaker (uses fresh client with short timeout)
-
-**Implementation notes:**
-- Uses `requests.get(f"{plex_url}/:/ping", timeout=timeout)`
-- Success: HTTP 200 and response contains "pong"
-- Measures latency: `time.perf_counter()` before/after
-- Returns `(False, 0.0)` on timeout/connection error
-
----
-
-### Modified Components
-
-#### 4. `worker/circuit_breaker.py` (MODIFIED)
-
-**Current state:** In-memory only (state lost on process restart)
-
-**Changes:**
-```python
-class CircuitBreaker:
-    def __init__(
-        self,
-        failure_threshold: int = 5,
-        recovery_timeout: float = 60.0,
-        success_threshold: int = 1,
-        state_file: Optional[str] = None  # ← NEW: path to JSON state
-    ):
-        # ... existing fields ...
-        self._state_file = state_file
-
-        # Load persisted state if file provided
-        if self._state_file and os.path.exists(self._state_file):
-            self._load_state()
-
-    def _save_state(self) -> None:
-        """Persist state to disk (atomic write)."""
-        if not self._state_file:
-            return
-
-        state_data = {
-            'state': self._state.value,
-            'failure_count': self._failure_count,
-            'success_count': self._success_count,
-            'opened_at': self._opened_at,
-        }
-        # Atomic write: .tmp → rename
-        tmp = self._state_file + '.tmp'
-        with open(tmp, 'w') as f:
-            json.dump(state_data, f)
-        os.replace(tmp, self._state_file)
-
-    def _load_state(self) -> None:
-        """Load state from disk."""
-        with open(self._state_file) as f:
-            data = json.load(f)
-        self._state = CircuitState(data['state'])
-        self._failure_count = data['failure_count']
-        self._success_count = data['success_count']
-        self._opened_at = data['opened_at']
-```
-
-**Integration:**
-- Modified in `worker/processor.py` `SyncWorker.__init__()`:
-  ```python
-  cb_state_file = os.path.join(data_dir, 'circuit_breaker.json')
-  self.circuit_breaker = CircuitBreaker(
-      failure_threshold=5,
-      recovery_timeout=60.0,
-      success_threshold=1,
-      state_file=cb_state_file  # ← NEW
-  )
-  ```
-- Save state on every transition: `record_success()`, `record_failure()`, `_open()`, `_close()`
-
-**Why persist:**
-- Circuit breaker OPEN state survives process restart
-- Recovery detector can check "is CB OPEN?" without needing worker running
-- Prevents repeated retry exhaustion after plugin restart
-
----
-
-#### 5. `Stash2Plex.py` (MODIFIED)
-
-**Changes:** Add recovery check after reconciliation check
-
-```python
-def maybe_recovery_trigger():
-    """Check if Plex has recovered from outage and trigger queue drain.
-
-    Called on every plugin invocation. Uses check-on-invocation pattern:
-    1. Load circuit breaker state
-    2. If OPEN: check if Plex is healthy again
-    3. If recovered: close circuit breaker, log recovery
-    4. Worker will drain queue on next job processing
-
-    This is lightweight (reads one JSON file) and only runs health
-    check when circuit is OPEN.
-    """
-    if not config or not queue_manager:
-        return
-
-    try:
-        data_dir = get_plugin_data_dir()
-        from resilience.recovery_detector import RecoveryDetector
-
-        detector = RecoveryDetector(config, data_dir)
-        recovered, reason = detector.check_recovery()
-
-        if recovered:
-            log_info(f"Plex recovery detected: {reason}")
-            # Circuit breaker state already updated by detector
-            # Worker will resume processing on next queue poll
-        else:
-            log_trace(f"Recovery check: {reason}")
-
-    except Exception as e:
-        log_warn(f"Recovery check failed: {e}")
-
-def main():
-    # ... existing initialization ...
-
-    # Auto-reconciliation check (runs on every invocation)
-    maybe_auto_reconcile()
-
-    # Recovery trigger check (runs on every invocation)
-    maybe_recovery_trigger()  # ← NEW
-
-    # ... rest of main() unchanged ...
-```
-
-**Integration:**
-- Runs after `maybe_auto_reconcile()`, before event handling
-- Reuses `get_plugin_data_dir()` for state files
-- No impact on hook handler latency (check is <10ms when CB is CLOSED)
-
----
-
-#### 6. Task Dispatch (MODIFIED)
-
-**Changes:** Add `health_check` task mode
-
-```python
-_MANAGEMENT_HANDLERS = {
-    # ... existing handlers ...
-    'health_check': lambda args: handle_health_check(),  # ← NEW
-}
-
-def handle_health_check():
-    """Manual Plex health check task.
-
-    Reports:
-    - Current circuit breaker state
-    - Plex connectivity (via /:/ping)
-    - Last recovery check time
-    - Queue size (items waiting)
-    """
-    try:
-        data_dir = get_plugin_data_dir()
-
-        # 1. Circuit breaker state
-        cb_state_path = os.path.join(data_dir, 'circuit_breaker.json')
-        if os.path.exists(cb_state_path):
-            with open(cb_state_path) as f:
-                cb_data = json.load(f)
-            cb_state = cb_data.get('state', 'UNKNOWN')
-            log_info(f"Circuit breaker: {cb_state}")
-        else:
-            log_info("Circuit breaker: CLOSED (no state file)")
-
-        # 2. Plex health check
-        from plex.client import PlexClient
-        from plex.health import check_plex_health
-
-        client = PlexClient(
-            url=config.plex_url,
-            token=config.plex_token
-        )
-        is_healthy, latency_ms = check_plex_health(client)
-        if is_healthy:
-            log_info(f"Plex health: OK ({latency_ms:.0f}ms)")
-        else:
-            log_warn("Plex health: UNREACHABLE")
-
-        # 3. Recovery state
-        from resilience.recovery_scheduler import RecoveryScheduler
-        scheduler = RecoveryScheduler(data_dir)
-        state = scheduler.load_state()
-        if state.last_check_time > 0:
-            last_check = datetime.fromtimestamp(state.last_check_time)
-            log_info(f"Last recovery check: {last_check.strftime('%Y-%m-%d %H:%M:%S')}")
-            log_info(f"Consecutive successes: {state.consecutive_successes}")
-        else:
-            log_info("No recovery checks recorded")
-
-        # 4. Queue size
-        queue = queue_manager.get_queue()
-        pending = queue.size
-        log_info(f"Queue size: {pending} items")
-
-        if pending > 0 and cb_state == 'OPEN':
-            log_warn(f"{pending} items waiting in queue while circuit breaker is OPEN")
-        elif pending > 0:
-            log_info(f"{pending} items will be processed by worker")
-
-    except Exception as e:
-        log_error(f"Health check failed: {e}")
-        import traceback
-        traceback.print_exc()
-```
-
-**Integration:**
-- Add to `Stash2Plex.yml` task list: `health_check` mode
-- UI-accessible: user can trigger from Stash Tasks panel
-- Reports current system state without modifying anything
-
----
-
-## Data Flow Changes
-
-### Recovery Detection Flow (NEW)
-
-```
-[Hook Invocation]
-    ↓
-[main() → maybe_recovery_trigger()]
-    ↓
-[RecoveryScheduler.is_check_due()?]
-    │
-    ├─ NO → skip (log_trace)
-    │
-    └─ YES → [Load circuit_breaker.json]
-              │
-              ├─ CB is CLOSED → skip (no outage)
-              │
-              └─ CB is OPEN → [check_plex_health()]
-                               │
-                               ├─ HEALTHY → [Close circuit breaker]
-                               │             [Save CB state]
-                               │             [Log recovery]
-                               │             [Worker resumes on next poll]
-                               │
-                               └─ UNHEALTHY → [Update recovery_state.json]
-                                              [Log still down]
-```
-
-**Key properties:**
-- **Lightweight:** Only health check when CB is OPEN (rare)
-- **Stateless health check:** Single HTTP ping, no side effects
-- **Explicit trigger:** No background polling, check on next hook
-- **Survives restarts:** CB state persists, recovery detection picks up where it left off
-
----
-
-### Circuit Breaker State Persistence (MODIFIED)
-
-**Before (v1.4):**
-```
-[Worker Loop]
-    ↓
-[Process job] → [Error] → [circuit_breaker.record_failure()]
-                           ↓
-                         [In-memory state update]
-                         [State lost on process exit]
-```
-
-**After (v1.5+):**
-```
-[Worker Loop]
-    ↓
-[Process job] → [Error] → [circuit_breaker.record_failure()]
-                           ↓
-                         [In-memory state update]
-                         [Save to circuit_breaker.json] ← NEW
-                           ↓
-                         [Atomic write (tmp → rename)]
-```
-
-**On worker restart:**
-```
-[SyncWorker.__init__()]
-    ↓
-[CircuitBreaker(state_file=...)]
-    ↓
-[Load circuit_breaker.json] ← NEW
-    ↓
-[Restore state (OPEN/CLOSED/HALF_OPEN)]
-```
-
-**Integration with recovery:**
-```
-[maybe_recovery_trigger()]
-    ↓
-[Load circuit_breaker.json]
-    ↓
-[Check: state == 'OPEN'?]
-    │
-    └─ YES → [Run health check]
-              [If healthy: update state to CLOSED]
-```
-
----
-
-## File Structure
-
-### New Files
-
-```
-resilience/
-├── __init__.py
-├── recovery_detector.py      # RecoveryDetector class
-├── recovery_scheduler.py     # RecoveryScheduler + RecoveryState dataclass
-└── README.md                 # Component documentation
-
-plex/
-└── health.py                 # check_plex_health() function
-
-tests/resilience/
-├── __init__.py
-├── test_recovery_detector.py
-├── test_recovery_scheduler.py
-└── test_integration.py
-
-tests/plex/
-└── test_health.py
-```
-
-### Modified Files
-
-```
-worker/
-└── circuit_breaker.py        # Add state_file parameter, save/load methods
-
-Stash2Plex.py                 # Add maybe_recovery_trigger(), health_check task
-
-Stash2Plex.yml                # Add health_check task mode
-```
-
-### State Files (Runtime)
-
-```
-data/
-├── circuit_breaker.json      # Circuit breaker state (NEW)
-│   {
-│     "state": "OPEN",
-│     "failure_count": 5,
-│     "success_count": 0,
-│     "opened_at": 1739583412.5
-│   }
-│
-├── recovery_state.json       # Recovery check state (NEW)
-│   {
-│     "last_failure_time": 1739583412.5,
-│     "last_check_time": 1739583472.3,
-│     "last_check_result": false,
-│     "consecutive_successes": 0
-│   }
-│
-├── reconciliation_state.json # Existing (unchanged)
-├── sync_timestamps.json      # Existing (unchanged)
-└── queue/                    # Existing (unchanged)
-    └── [SQLite files]
-```
-
----
-
-## Build Order (Dependency-Based)
-
-### Phase 1: Circuit Breaker Persistence (Foundation)
-
-**Goal:** Make circuit breaker state survive restarts
-
-**Tasks:**
-1. Add `state_file` parameter to `CircuitBreaker.__init__()`
-2. Implement `_save_state()` and `_load_state()` methods
-3. Call `_save_state()` in `record_success()`, `record_failure()`, `_open()`, `_close()`
-4. Update `SyncWorker.__init__()` to pass `state_file` path
-5. Write tests: state persistence, atomic writes, corrupt file handling
-
-**Deliverable:** Circuit breaker state persists to `circuit_breaker.json`
-
-**Dependencies:** None (self-contained)
-
----
-
-### Phase 2: Health Check (Independent)
-
-**Goal:** Lightweight Plex connectivity check
-
-**Tasks:**
-1. Create `plex/health.py`
-2. Implement `check_plex_health(client, timeout)` using `/:/ping`
-3. Write tests: healthy server, unreachable server, timeout, latency measurement
-4. Add `health_check` task to task dispatch
-5. Update `Stash2Plex.yml` with new task mode
-
-**Deliverable:** Manual health check task available in Stash UI
-
-**Dependencies:** None (uses existing `PlexClient`)
-
----
-
-### Phase 3: Recovery Scheduler (State Management)
-
-**Goal:** Track recovery check timing
-
-**Tasks:**
-1. Create `resilience/recovery_scheduler.py`
-2. Define `RecoveryState` dataclass
-3. Implement `RecoveryScheduler` (pattern matches `ReconciliationScheduler`)
-4. Add `is_check_due()`, `record_check()`, `load_state()`, `save_state()`
-5. Write tests: check-on-invocation logic, state persistence
-
-**Deliverable:** Recovery scheduler manages check timing
-
-**Dependencies:** None (standalone state manager)
-
----
-
-### Phase 4: Recovery Detector (Integration)
-
-**Goal:** Detect Plex recovery after outage
-
-**Tasks:**
-1. Create `resilience/recovery_detector.py`
-2. Implement `RecoveryDetector.check_recovery()`
-3. Integrate with `RecoveryScheduler` (check timing)
-4. Integrate with `plex/health.py` (health checking)
-5. Integrate with circuit breaker state loading
-6. Write tests: recovery detected, still down, no outage, scheduler skips
-
-**Deliverable:** Recovery detection logic complete
-
-**Dependencies:**
-- Phase 1 (circuit breaker persistence)
-- Phase 2 (health check)
-- Phase 3 (recovery scheduler)
-
----
-
-### Phase 5: Entry Point Integration (Wiring)
-
-**Goal:** Wire recovery detection into plugin lifecycle
-
-**Tasks:**
-1. Add `maybe_recovery_trigger()` to `Stash2Plex.py`
-2. Call from `main()` after `maybe_auto_reconcile()`
-3. Handle exceptions gracefully (log, don't crash plugin)
-4. Write integration tests: full recovery flow, multiple invocations
-
-**Deliverable:** Recovery detection runs on every plugin invocation
-
-**Dependencies:**
-- Phase 4 (recovery detector)
-
----
-
-### Phase 6: Documentation & Testing
-
-**Goal:** Production-ready resilience features
-
-**Tasks:**
-1. Write `resilience/README.md` documenting architecture
-2. Add recovery detection examples to main README
-3. Write end-to-end tests: outage → recovery → queue drain
-4. Performance testing: check-on-invocation overhead (<10ms)
-5. Update Stash plugin UI with health check instructions
-
-**Deliverable:** Documented, tested, production-ready
-
-**Dependencies:**
-- Phase 5 (all components integrated)
+| Component | Responsibility | Communicates With |
+|-----------|---------------|-------------------|
+| `provider/main.py` | FastAPI app init, router assembly, lifespan | All routes |
+| `provider/config.py` | Env var config (Pydantic BaseSettings) | All provider components |
+| `provider/routes/discovery.py` | Serve MediaProvider definition to PMS | None (static) |
+| `provider/routes/match.py` | Handle PMS match requests → Stash lookup | `shared_lib/path_mapper`, `shared_lib/stash_client` |
+| `provider/routes/metadata.py` | Serve full scene metadata by ID | `shared_lib/stash_client`, `provider/mappers` |
+| `provider/routes/images.py` | Proxy image URLs from Stash | `shared_lib/stash_client` |
+| `provider/mappers/plex_response.py` | Transform StashScene → Plex MediaContainer | `shared_lib/models` |
+| `provider/gap/tracker.py` | Track unmatched items, schedule full comparison | `shared_lib/stash_client` |
+| `shared_lib/path_mapper.py` | Bidirectional regex path mapping | None |
+| `shared_lib/stash_client.py` | GraphQL client for Stash API | Stash :9999/graphql |
+| `shared_lib/models.py` | Shared data models | Both plugin and provider |
+
+### Existing Components: Reused vs. Unchanged
+
+| Component | v2.0 Status | Notes |
+|-----------|-------------|-------|
+| `plex/client.py` | Unchanged | Plugin push model only |
+| `plex/matcher.py` | Unchanged | Plugin push model only |
+| `worker/processor.py` | Unchanged | Push model only |
+| `reconciliation/engine.py` | Unchanged | Plugin-side gap detection |
+| `validation/config.py` | Extend | Add `path_mappings` config field |
+| `shared/log.py` | Plugin-only | Provider uses standard logging |
+| Stash GraphQL usage | Extracted | Move from inline calls in engine.py to `shared_lib/stash_client.py` |
+
+The reconciliation engine already queries Stash GraphQL inline via `stashapi`. The `shared_lib/stash_client.py` is a clean reimplementation for the provider using `httpx` (async-capable, no stashapi dependency), with the plugin continuing to use `stashapi` via its existing pattern.
 
 ---
 
 ## Architectural Patterns
 
-### Pattern 1: Check-on-Invocation
+### Pattern 1: MediaProvider Discovery Endpoint
 
-**What:** On every plugin invocation, check if an action is due based on persisted state
+**What:** Plex calls the base URL to get a static JSON description of the provider's capabilities. This is the handshake.
 
-**When to use:** Event-driven systems without long-running daemons
+**When to use:** Always — this is required for PMS to know what endpoints to call.
 
 **Implementation:**
+
 ```python
-def maybe_do_action():
-    """Lightweight check that only runs action when due."""
-    # 1. Load state (cheap: single JSON read)
-    state = load_state_from_disk()
+# provider/routes/discovery.py
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
-    # 2. Check condition (time-based, state-based)
-    if not is_action_due(state):
-        return  # Skip, action not needed yet
+router = APIRouter()
 
-    # 3. Execute action (expensive operation)
-    result = do_expensive_action()
+MEDIA_PROVIDER = {
+    "MediaContainer": {
+        "MediaProvider": [{
+            "identifier": "tv.plex.agents.custom.stash2plex",
+            "title": "Stash2Plex",
+            "version": "2.0.0",
+            "Types": {
+                "MediaType": [{
+                    "type": "1",
+                    "title": "Movie",
+                    "Scheme": [{"key": "stash2plex"}],
+                    "Feature": [
+                        {"type": "match", "key": "/library/metadata/matches"},
+                        {"type": "metadata", "key": "/library/metadata"},
+                        {"type": "images", "key": "/library/metadata/{id}/images"},
+                    ]
+                }]
+            }
+        }]
+    }
+}
 
-    # 4. Update state (persist result)
-    state.last_run = time.time()
-    save_state_to_disk(state)
+@router.get("/")
+async def discovery():
+    return JSONResponse(content=MEDIA_PROVIDER)
 ```
 
-**Trade-offs:**
-- **Pro:** No background threads/processes needed
-- **Pro:** Survives process restarts (state is durable)
-- **Pro:** Minimal overhead when action not due (<10ms)
-- **Con:** Relies on invocations happening (quiet systems = delayed actions)
-- **Con:** Not suitable for strict timing requirements (best-effort)
-
-**PlexSync usage:**
-- Auto-reconciliation (v1.4): check every invocation, run if interval elapsed
-- Recovery detection (v1.5): check every invocation, run if CB is OPEN
+**Trade-offs:** Static response — no auth complexity. Plex caches this, so changes require PMS to re-fetch (remove and re-add the provider URL).
 
 ---
 
-### Pattern 2: Persisted Circuit Breaker
+### Pattern 2: Regex Path Mapping Engine
 
-**What:** Circuit breaker state survives process restarts
+**What:** A bidirectional regex engine that transforms paths from PMS path space to Stash path space and vice versa. This is the core of the match feature.
 
-**When to use:** Non-daemon systems that need resilience across invocations
+**Why it's needed:** PMS and Stash see different paths to the same file. PMS might see `/media/Adult/scene.mp4` while Stash sees `/nas/content/Adult/scene.mp4`. A simple prefix swap is insufficient when path structures differ.
+
+**Design:** A list of ordered rules, each with a `from_pattern` (regex) and `to_pattern` (replacement). Applied in order, first match wins. Bidirectional: PMS→Stash and Stash→PMS rules.
 
 **Implementation:**
+
 ```python
-class CircuitBreaker:
-    def __init__(self, state_file: Optional[str] = None):
-        self._state_file = state_file
-        if state_file and os.path.exists(state_file):
-            self._load_state()
+# shared_lib/path_mapper.py
+import re
+from dataclasses import dataclass
+from typing import Optional
 
-    def record_failure(self):
-        # Update in-memory state
-        self._failure_count += 1
-        if self._failure_count >= self._threshold:
-            self._open()
+@dataclass
+class PathRule:
+    """Single bidirectional path mapping rule."""
+    from_pattern: str      # regex applied to source path
+    to_pattern: str        # replacement string (supports \1, \2 groups)
+    direction: str         # "plex_to_stash" | "stash_to_plex" | "both"
 
-        # Persist to disk (atomic)
-        self._save_state()
+class PathMapper:
+    def __init__(self, rules: list[PathRule]):
+        self._rules = rules
+        self._compiled = [
+            (re.compile(r.from_pattern), r.to_pattern, r.direction)
+            for r in rules
+        ]
 
-    def _save_state(self):
-        if not self._state_file:
-            return
+    def plex_to_stash(self, plex_path: str) -> Optional[str]:
+        """Map a PMS-visible path to Stash path space."""
+        for pattern, replacement, direction in self._compiled:
+            if direction in ("plex_to_stash", "both"):
+                if pattern.search(plex_path):
+                    return pattern.sub(replacement, plex_path)
+        return None  # No mapping found — fallback to filename search
 
-        # Atomic write: tmp → rename
-        tmp = self._state_file + '.tmp'
-        with open(tmp, 'w') as f:
-            json.dump(self._get_state_dict(), f)
-        os.replace(tmp, self._state_file)
+    def stash_to_plex(self, stash_path: str) -> Optional[str]:
+        """Map a Stash path to PMS path space (for gap detection)."""
+        for pattern, replacement, direction in self._compiled:
+            if direction in ("stash_to_plex", "both"):
+                if pattern.search(stash_path):
+                    return pattern.sub(replacement, stash_path)
+        return None
+```
+
+**Configuration** (in `provider/.env` / docker env):
+
+```
+PATH_MAPPINGS='[
+  {"from_pattern": "^/media/", "to_pattern": "/nas/content/", "direction": "plex_to_stash"},
+  {"from_pattern": "^/nas/content/Adult/(.+)", "to_pattern": "/media/Adult/\1", "direction": "stash_to_plex"}
+]'
 ```
 
 **Trade-offs:**
-- **Pro:** Circuit state survives crashes
-- **Pro:** Recovery detection can check "is circuit OPEN?" without worker running
-- **Pro:** Prevents retry exhaustion after restart
-- **Con:** Small disk I/O overhead on every state change (~1ms)
-- **Con:** State file management (cleanup, corruption handling)
-
-**PlexSync usage:**
-- Circuit breaker in `worker/processor.py` persists OPEN/CLOSED state
-- Recovery detector loads state to check if recovery check is relevant
+- Pro: Handles complex multi-segment remaps that prefix swap cannot
+- Pro: First-match-wins is predictable and debuggable
+- Con: User-configured regex is a footgun — needs clear error messages when no rule matches
+- Con: Must be tested against actual path pairs during setup
 
 ---
 
-### Pattern 3: Stateless Health Check
+### Pattern 3: Stash GraphQL Client (httpx, async)
 
-**What:** Health check with no side effects, no persistent state
+**What:** Thin async GraphQL client for Stash's `/graphql` endpoint using `httpx`.
 
-**When to use:** Detecting external service availability without tracking history
+**Why not stashapi:** The `stashapp-tools` package (`stashapi`) is designed for the plugin environment (auto-installs via pip, not suitable for Docker service). The provider needs a clean dependency. `httpx` is the natural async HTTP client for FastAPI services.
+
+**Authentication:** Stash uses `ApiKey` header (JWT). Verified via Stash pull request #1241 and community documentation.
 
 **Implementation:**
+
 ```python
-def check_plex_health(client: PlexClient, timeout: float = 5.0) -> tuple[bool, float]:
-    """Single HTTP request, no state changes."""
-    start = time.perf_counter()
-    try:
-        response = requests.get(f"{client._url}/:/ping", timeout=timeout)
-        elapsed = (time.perf_counter() - start) * 1000
-        is_healthy = response.status_code == 200 and 'pong' in response.text
-        return (is_healthy, elapsed)
-    except Exception:
-        return (False, 0.0)
+# shared_lib/stash_client.py
+import httpx
+from typing import Any, Optional
+
+FIND_SCENE_BY_PATH = """
+query FindSceneByPath($path: String!) {
+  findScenes(
+    scene_filter: { path: { value: $path, modifier: EQUALS } }
+    filter: { per_page: 1 }
+  ) {
+    scenes {
+      id
+      title
+      date
+      details
+      studio { name }
+      performers { name }
+      tags { name }
+      files { path }
+      paths { screenshot }
+      stash_ids { stash_id endpoint }
+    }
+  }
+}
+"""
+
+FIND_SCENE_BY_ID = """
+query FindScene($id: ID!) {
+  findScene(id: $id) {
+    id
+    title
+    date
+    details
+    studio { name }
+    performers { name }
+    tags { name }
+    files { path }
+    paths { screenshot }
+    stash_ids { stash_id endpoint }
+  }
+}
+"""
+
+class StashClient:
+    def __init__(self, stash_url: str, api_key: Optional[str] = None):
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["ApiKey"] = api_key
+        self._client = httpx.AsyncClient(
+            base_url=stash_url,
+            headers=headers,
+            timeout=30.0,
+        )
+
+    async def find_scene_by_path(self, path: str) -> Optional[dict]:
+        result = await self._graphql(FIND_SCENE_BY_PATH, {"path": path})
+        scenes = result.get("findScenes", {}).get("scenes", [])
+        return scenes[0] if scenes else None
+
+    async def find_scene_by_id(self, scene_id: str) -> Optional[dict]:
+        result = await self._graphql(FIND_SCENE_BY_ID, {"id": scene_id})
+        return result.get("findScene")
+
+    async def _graphql(self, query: str, variables: dict) -> dict[str, Any]:
+        response = await self._client.post(
+            "/graphql",
+            json={"query": query, "variables": variables}
+        )
+        response.raise_for_status()
+        data = response.json()
+        if "errors" in data:
+            raise RuntimeError(f"Stash GraphQL error: {data['errors']}")
+        return data.get("data", {})
+
+    async def close(self):
+        await self._client.aclose()
 ```
 
 **Trade-offs:**
-- **Pro:** No state management complexity
-- **Pro:** Idempotent (run multiple times = same result)
-- **Pro:** Fast (single HTTP request)
-- **Con:** No historical tracking (separate scheduler needed for that)
-- **Con:** Each check is independent (doesn't know about previous checks)
+- Pro: No stashapi dependency in provider service
+- Pro: Async — plays well with FastAPI's event loop
+- Con: Manual GraphQL query strings — must track if Stash schema changes
+- Mitigation: Keep queries in constants, add schema version check on startup
 
-**PlexSync usage:**
-- `plex/health.py` provides stateless health check
-- `RecoveryScheduler` provides timing/history tracking (separate concerns)
+---
+
+### Pattern 4: Match Route — Path Mapping + Stash Lookup
+
+**What:** The POST /library/metadata/matches handler. This is the primary integration point where PMS asks "what is this file?"
+
+**Two-stage lookup:**
+1. Regex path map PMS path → Stash path, query by path (HIGH confidence match)
+2. If no path match → query by filename/title (LOW confidence match, manual review)
+
+```python
+# provider/routes/match.py
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+
+router = APIRouter()
+
+@router.post("/library/metadata/matches")
+async def match(request: Request):
+    body = await request.json()
+    filename = body.get("filename", "")
+    title = body.get("title", "")
+    year = body.get("year")
+
+    path_mapper: PathMapper = request.app.state.path_mapper
+    stash: StashClient = request.app.state.stash_client
+
+    # Stage 1: Path-based match (reconstruct Stash path from PMS hints)
+    # PMS passes filename; we need the library base path from config
+    stash_path = path_mapper.plex_to_stash(filename)
+    scene = None
+    if stash_path:
+        scene = await stash.find_scene_by_path(stash_path)
+
+    # Stage 2: Filename/title fallback
+    if not scene:
+        scene = await stash.find_scene_by_filename(filename)
+
+    if not scene:
+        return JSONResponse(content={"MediaContainer": {"size": 0, "Metadata": []}})
+
+    return JSONResponse(content={
+        "MediaContainer": {
+            "size": 1,
+            "Metadata": [{
+                "ratingKey": str(scene["id"]),
+                "guid": f"stash2plex://{scene['id']}",
+                "type": "movie",
+                "title": scene.get("title") or filename,
+                "year": int(scene["date"][:4]) if scene.get("date") else None,
+            }]
+        }
+    })
+```
+
+**Trade-offs:**
+- Pro: Path-based match is deterministic, no false positives
+- Pro: Filename fallback ensures coverage when path mapping misconfigured
+- Con: PMS passes filename only (not full path) — provider must know library base paths to reconstruct full path
+- Mitigation: Configure `PLEX_LIBRARY_PATHS` env var in Docker; provider prepends when mapping
+
+---
+
+### Pattern 5: Stash Scene → Plex Metadata Mapping
+
+**What:** Transform Stash's scene data model into the Plex MediaContainer format.
+
+**Key mappings:**
+
+| Stash Field | Plex Field | Notes |
+|-------------|-----------|-------|
+| `id` | `ratingKey` | String — PMS uses this as the identifier |
+| `title` | `title` | Direct |
+| `date` | `originallyAvailableAt` | Format: YYYY-MM-DD |
+| `details` | `summary` | Direct |
+| `studio.name` | `studio` | String |
+| `performers[].name` | `Role[].tag` | Cast members |
+| `tags[].name` | `Genre[].tag` | Genre tags |
+| `paths.screenshot` | `thumb` | Poster image URL |
+| `rating100` | `rating` | Divide by 10 for 0-10 scale |
+
+```python
+# provider/mappers/plex_response.py
+
+def scene_to_metadata(scene: dict, stash_base_url: str) -> dict:
+    """Transform Stash scene dict into Plex Metadata object."""
+    metadata = {
+        "ratingKey": str(scene["id"]),
+        "key": f"/library/metadata/{scene['id']}",
+        "guid": f"stash2plex://{scene['id']}",
+        "type": "movie",
+        "title": scene.get("title") or "Untitled",
+        "summary": scene.get("details") or "",
+    }
+
+    if scene.get("date"):
+        metadata["originallyAvailableAt"] = scene["date"]
+        metadata["year"] = int(scene["date"][:4])
+
+    if scene.get("studio"):
+        metadata["studio"] = scene["studio"]["name"]
+
+    if scene.get("performers"):
+        metadata["Role"] = [
+            {"tag": p["name"]} for p in scene["performers"]
+        ]
+
+    if scene.get("tags"):
+        metadata["Genre"] = [
+            {"tag": t["name"]} for t in scene["tags"]
+        ]
+
+    if scene.get("paths", {}).get("screenshot"):
+        # Proxy through provider or serve direct Stash URL
+        metadata["thumb"] = f"{stash_base_url}{scene['paths']['screenshot']}"
+
+    return metadata
+```
+
+---
+
+### Pattern 6: Provider Config (Pydantic BaseSettings + env vars)
+
+**What:** All provider configuration via environment variables — no config file parsing, no YAML. Docker Compose sets env vars.
+
+```python
+# provider/config.py
+from pydantic_settings import BaseSettings
+from typing import Optional
+import json
+
+class ProviderConfig(BaseSettings):
+    # Stash connection
+    stash_url: str                    # e.g., http://stash:9999
+    stash_api_key: Optional[str] = None
+
+    # Provider identity
+    provider_id: str = "tv.plex.agents.custom.stash2plex"
+    provider_title: str = "Stash2Plex"
+    provider_version: str = "2.0.0"
+
+    # Path mapping (JSON array of rules)
+    path_mappings_json: str = "[]"
+
+    # Gap detection
+    gap_check_interval_hours: int = 24
+
+    # Logging
+    log_level: str = "INFO"
+
+    @property
+    def path_mappings(self) -> list[dict]:
+        return json.loads(self.path_mappings_json)
+
+    class Config:
+        env_file = ".env"
+```
+
+---
+
+### Pattern 7: Docker Compose Setup
+
+**What:** Provider runs as a Docker service alongside Stash. Single `docker-compose.yml` in `provider/`.
+
+```yaml
+# provider/docker-compose.yml
+services:
+  stash2plex-provider:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - STASH_URL=http://host.docker.internal:9999
+      - STASH_API_KEY=${STASH_API_KEY}
+      - PATH_MAPPINGS_JSON=${PATH_MAPPINGS_JSON}
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+```
+
+```dockerfile
+# provider/Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install shared_lib from parent directory
+COPY ../shared_lib /app/shared_lib
+RUN pip install -e /app/shared_lib
+
+# Install provider dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 8080
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+```
+
+**Trade-offs:**
+- Pro: Standard, well-understood deployment pattern
+- Pro: `host.docker.internal` resolves to host — works for Stash on same machine
+- Con: Docker build context must include `shared_lib/` from parent — `COPY ../shared_lib` requires running `docker build` from repo root, not `provider/`
+- Mitigation: `docker-compose.yml` sets `build.context: ..` and `dockerfile: provider/Dockerfile`
+
+---
+
+## Data Flows
+
+### Match Request Flow (Scan Time)
+
+```
+[PMS scans /media/Adult/2024-01-01_title.mp4]
+    ↓
+POST /library/metadata/matches
+{filename: "2024-01-01_title.mp4", title: "title", year: 2024}
+    ↓
+[PathMapper.plex_to_stash("2024-01-01_title.mp4")]
+    │
+    ├── Rule match found → reconstructed_path = "/nas/content/Adult/2024-01-01_title.mp4"
+    │   └── StashClient.find_scene_by_path(reconstructed_path)
+    │           └── GraphQL: findScenes(path == reconstructed_path)
+    │               ├── Found → return {ratingKey: "42", title: "...", ...}
+    │               └── Not found → fall through to filename search
+    │
+    └── No rule match → StashClient.find_scene_by_filename("2024-01-01_title.mp4")
+            └── GraphQL: findScenes(path contains filename)
+                ├── Found (1 result) → return match
+                └── Found (>1 result) → return all as candidates (manual selection)
+                └── Not found → return empty MediaContainer
+    ↓
+[PMS stores ratingKey for matched item]
+[gap/tracker.py records unmatched items]
+```
+
+### Metadata Serve Flow (After Match)
+
+```
+[PMS requests full metadata]
+    ↓
+GET /library/metadata/42
+    ↓
+[StashClient.find_scene_by_id("42")]
+    └── GraphQL: findScene(id: "42")
+        └── Returns full scene with performers, tags, studio, date, paths
+    ↓
+[plex_response.scene_to_metadata(scene, stash_base_url)]
+    └── Transform → Plex MediaContainer format
+    ↓
+[Return JSON to PMS]
+[PMS writes metadata to library]
+```
+
+### Gap Detection Flow (Provider Side)
+
+The provider observes matches in real-time. Items that return empty match results are candidates for gaps:
+
+```
+[During scan — match request returns empty]
+    ↓
+[gap/tracker.py.record_unmatched(filename, plex_library_path)]
+    └── Stored in-memory (small footprint during scan)
+    ↓
+[Scan complete — PMS stops sending match requests]
+    ↓
+[gap/tracker.py periodic job (every gap_check_interval_hours)]
+    └── For each unmatched item:
+        └── Does Stash have a scene with this filename? (GraphQL)
+            ├── YES → Stash has it, Plex couldn't match → real gap
+            │   └── Log + expose via /gaps endpoint (for plugin to query)
+            └── NO → Stash doesn't have it either → not a gap
+```
+
+**Integration with plugin gap detection:**
+- Plugin's `reconciliation/engine.py` continues its scheduled gap detection independently
+- Provider gap tracker focuses on scan-time misses (different perspective)
+- Together they give comprehensive gap visibility
+
+---
+
+## Build Order (Dependency-Based)
+
+### Phase 1: `shared_lib/` Foundation
+
+**Goal:** Extractable, testable code that both plugin and provider use.
+
+**Components:**
+1. `shared_lib/stash_client.py` — async httpx GraphQL client
+2. `shared_lib/path_mapper.py` — bidirectional regex engine
+3. `shared_lib/models.py` — shared data models
+
+**Dependencies:** None (pure Python, no Plex or Stash dependency)
+**Why first:** Both plugin changes and provider depend on this. Testable in isolation.
+
+---
+
+### Phase 2: Provider HTTP Skeleton
+
+**Goal:** FastAPI app that starts, responds to discovery, and returns well-formed Plex responses — even with stub data.
+
+**Components:**
+1. `provider/main.py` — FastAPI app, router assembly, lifespan (StashClient init/close)
+2. `provider/config.py` — Pydantic BaseSettings from env
+3. `provider/routes/discovery.py` — static MediaProvider response
+4. `provider/Dockerfile` + `docker-compose.yml`
+
+**Dependencies:** Phase 1 (config uses shared_lib models)
+**Why second:** Unblocks manual testing against real PMS immediately. Can point PMS at stub provider to verify registration works before match logic exists.
+
+---
+
+### Phase 3: Match Route + Path Mapper Integration
+
+**Goal:** PMS can send a match request and get back a Stash scene ID.
+
+**Components:**
+1. `provider/routes/match.py` — POST handler with path mapper + Stash lookup
+2. Path mapper config loading from env
+3. `shared_lib/stash_client.py` — `find_scene_by_path` + `find_scene_by_filename`
+
+**Dependencies:** Phase 1 (stash_client, path_mapper), Phase 2 (app state)
+**Why third:** This is the core value — match is required before metadata serving is useful.
+
+---
+
+### Phase 4: Metadata Serve Route
+
+**Goal:** PMS can fetch full scene metadata after a successful match.
+
+**Components:**
+1. `provider/routes/metadata.py` — GET /library/metadata/{id}
+2. `provider/mappers/plex_response.py` — Stash scene → Plex format
+3. `provider/routes/images.py` — image proxy/redirect
+
+**Dependencies:** Phase 3 (needs match working to know what IDs PMS will request)
+**Why fourth:** Can only meaningfully test with real matches working.
+
+---
+
+### Phase 5: Gap Tracker
+
+**Goal:** Provider observes scan-time misses and exposes gap data.
+
+**Components:**
+1. `provider/gap/tracker.py` — in-memory + periodic persistence
+2. Optional: expose `/gaps` endpoint for plugin to query
+
+**Dependencies:** Phase 4 (needs full match + metadata flow working to distinguish "no match" from "error")
+**Why fifth:** Gap detection is enhancement functionality — core metadata serving must work first.
+
+---
+
+### Phase 6: Plugin Integration (Path Mapping Config)
+
+**Goal:** Plugin's `validation/config.py` understands path mapping config so the plugin's existing reconciler can use the same mapping rules.
+
+**Components:**
+1. Add `path_mappings` to `Stash2PlexConfig` (list of mapping rules)
+2. Plugin's reconciler uses `PathMapper` for Stash→Plex path reconstruction
+3. Update `Stash2Plex.yml` with path_mappings setting
+
+**Dependencies:** Phase 1 (shared_lib/path_mapper)
+**Why last:** Plugin changes can be done independently; provider features are the primary goal of v2.0.
+
+---
+
+## Integration Points
+
+### External Services
+
+| Service | Integration Pattern | Notes |
+|---------|---------------------|-------|
+| Plex Media Server | HTTP (PMS calls provider) | Provider is passive responder; no Plex API calls from provider |
+| Stash GraphQL | httpx POST to /graphql | `ApiKey` header auth; async |
+| Docker networking | `host.docker.internal` | Stash on host, provider in container |
+
+### Internal Boundaries
+
+| Boundary | Communication | Notes |
+|----------|---------------|-------|
+| Plugin ↔ shared_lib | Direct Python import | `shared_lib/` installed as editable package in plugin .venv |
+| Provider ↔ shared_lib | Direct Python import | Installed via Docker build COPY + pip -e |
+| Provider ↔ PMS | HTTP/JSON | PMS initiates all requests; provider never calls PMS |
+| Provider gap ↔ Plugin reconciler | No direct coupling | Independent gap detection perspectives; future: provider exposes `/gaps` API |
+
+---
+
+## Scaling Considerations
+
+This is a single-user home server setup. Scale means: "handles concurrent PMS scan requests without blocking."
+
+| Concern | At 1 user (home server) | Notes |
+|---------|------------------------|-------|
+| Concurrent match requests | FastAPI async handles naturally | PMS sends multiple concurrent match requests during scan |
+| Stash GraphQL rate limits | None documented | Stash has no rate limits; home server OK |
+| Match latency | Target < 5s (within 90s PMS timeout) | Path map + 1 GraphQL call is typically < 500ms |
+| Image serving | Proxy redirect to Stash URL is sufficient | Don't buffer images in provider |
 
 ---
 
 ## Anti-Patterns
 
-### Anti-Pattern 1: Background Polling Thread
+### Anti-Pattern 1: Importing `plexapi` or `stashapi` in Provider
 
-**What people might do:** Create a background thread that polls Plex health every N seconds
-
-```python
-# DON'T DO THIS
-class HealthMonitor:
-    def __init__(self):
-        self.running = True
-        self.thread = threading.Thread(target=self._poll_loop, daemon=True)
-        self.thread.start()
-
-    def _poll_loop(self):
-        while self.running:
-            check_plex_health()
-            time.sleep(60)
-```
+**What people might do:** Reuse the plugin's `plexapi` wrapper or `stashapi` client in the provider service.
 
 **Why it's wrong:**
-- Plugin exits after each invocation — thread dies with process
-- Wastes resources polling when plugin isn't running
-- Creates race conditions between poll thread and worker thread
-- Doesn't survive process restarts
+- `plexapi` is for Plex API writes (the push model) — the provider never writes to Plex
+- `stashapi` auto-installs packages and uses plugin-specific patterns; not suitable for a Docker service
+- Creates unnecessary coupling between provider and plugin dependency trees
 
-**Do this instead:** Use check-on-invocation pattern
-- Check on every plugin invocation
-- Use scheduler to decide if check is due
-- No background threads needed
+**Do this instead:** `shared_lib/stash_client.py` using `httpx` — minimal, async, Docker-friendly.
 
 ---
 
-### Anti-Pattern 2: Immediate Queue Drain on Recovery
+### Anti-Pattern 2: Serving Images Directly from Provider
 
-**What people might do:** Force-drain queue immediately when recovery detected
-
-```python
-# DON'T DO THIS
-if plex_recovered:
-    log_info("Plex recovered, draining queue NOW")
-    while queue.size > 0:
-        job = queue.get()
-        process_job(job)  # Blocks plugin execution
-```
+**What people might do:** Fetch scene images from Stash and stream them through the provider to PMS.
 
 **Why it's wrong:**
-- Blocks hook handler (violates <100ms target)
-- Plugin may timeout before queue drains
-- Competes with existing worker thread
-- No backpressure control
+- Large binary data in the request path blocks FastAPI workers
+- Stash already has authenticated image endpoints — proxy adds zero value
+- Provider could OOM on large libraries during scan
 
-**Do this instead:** Let worker drain naturally
-- Close circuit breaker on recovery
-- Worker resumes processing on next poll cycle
-- Existing rate limiting applies (0.15s between jobs)
-- No special queue drain logic needed
+**Do this instead:** Return Stash image URLs directly in the Plex metadata response. If Stash requires auth, configure PMS to access images via Stash's session token, or expose images via a redirect endpoint.
 
 ---
 
-### Anti-Pattern 3: Manual Circuit Breaker Reset Task
+### Anti-Pattern 3: Writing Plex Metadata from Provider
 
-**What people might do:** Add task to manually reset circuit breaker
-
-```python
-# DON'T DO THIS
-def handle_reset_circuit_breaker():
-    """Force circuit breaker to CLOSED state."""
-    circuit_breaker.reset()
-    log_info("Circuit breaker manually reset")
-```
+**What people might do:** Have the provider also write metadata back to Plex (e.g., via plexapi) when serving metadata.
 
 **Why it's wrong:**
-- Bypasses protection mechanism
-- If Plex still down, circuit reopens immediately
-- Confusing UX (users don't understand when to use)
-- Health check + auto-recovery handles this correctly
+- Provider is a read-only responder — PMS reads from it; PMS writes to its own database
+- Creates a two-writer conflict with the v1.x push plugin
+- Violates the out-of-scope constraint: no Plex → Stash write-back
 
-**Do this instead:** Let recovery detection handle it
-- User runs "Health Check" task to see current state
-- Recovery detection automatically closes circuit when Plex healthy
-- No manual reset needed
+**Do this instead:** Provider only responds to PMS HTTP requests. All Plex metadata writes come from PMS consuming provider responses, or from the plugin's push model. Never both simultaneously.
 
 ---
 
-## Integration Considerations
+### Anti-Pattern 4: Monolithic Path Mapper (One Mega-Regex)
 
-### Stash Plugin Constraints
+**What people might do:** Build a single complex regex to handle all path transformations at once.
 
-**No long-running processes:**
-- Plugin invoked per-event, exits after handling
-- Worker thread runs during invocation, dies on exit
-- State must persist to disk to survive restarts
+**Why it's wrong:**
+- Path mappings differ per Plex library (Adult library vs. regular movies may have different roots)
+- One mega-regex is undebuggable when it fails
+- Config becomes impenetrable for users
 
-**No startup hooks:**
-- Can't run code on Stash startup (Issue #5118)
-- Initialization happens on first hook/task invocation
-- Recovery check runs on first invocation after Plex comes back
-
-**Task timeouts:**
-- Manual tasks have implicit timeout (~2 minutes)
-- Hook handlers should complete in <100ms
-- Recovery check must be lightweight (<50ms when CB CLOSED)
+**Do this instead:** Ordered list of simple rules, first-match-wins. Each rule is independently testable. Users can add, remove, or reorder rules without understanding the others.
 
 ---
 
-### Performance Considerations
+### Anti-Pattern 5: Sharing State Between Plugin and Provider via Filesystem
 
-**Check-on-invocation overhead:**
-- CB state load: ~1ms (single JSON read)
-- Scheduler check: ~0.5ms (timestamp comparison)
-- Total overhead when CB CLOSED: <2ms
-- Health check only runs when CB OPEN (rare)
+**What people might do:** Have the provider read/write the plugin's SQLite queue or JSON state files.
 
-**Health check performance:**
-- Plex `/:/ping` endpoint: ~20-100ms typical
-- Timeout: 5 seconds (prevents hanging plugin)
-- Frequency: max 1/minute when CB OPEN (scheduler throttles)
+**Why it's wrong:**
+- Plugin runs on host; provider runs in Docker — filesystem not shared without explicit volume mounts
+- Race conditions if both write to same files concurrently
+- Tight coupling: breaking change in one breaks the other
 
-**Disk I/O patterns:**
-- CB state saves: on every state transition (rare: ~5/outage)
-- Recovery state saves: on every health check (~1/minute during outage)
-- All saves are atomic (tmp → rename)
-
----
-
-### Error Handling Strategy
-
-**Graceful degradation:**
-- If recovery check fails: log warning, continue processing
-- If CB state corrupt: default to CLOSED (safe)
-- If health check times out: treat as "Plex still down"
-
-**No cascading failures:**
-- Recovery detection errors don't block hook handlers
-- Health check errors don't crash worker
-- State file corruption doesn't prevent plugin startup
+**Do this instead:** Provider has independent state. Gap data is exposed via an HTTP endpoint that the plugin optionally queries. Loose coupling, explicit interface.
 
 ---
 
 ## Sources
 
-**Circuit Breaker Pattern:**
-- [Circuit Breaker - Martin Fowler](https://martinfowler.com/bliki/CircuitBreaker.html) — HIGH confidence: authoritative pattern definition
-- [Python Circuit Breaker Implementation](https://pypi.org/project/pybreaker/) — MEDIUM confidence: production implementation patterns
-- [Circuit Breaker State Persistence](https://github.com/resilience4j/resilience4j#circuit-breaker) — MEDIUM confidence: Java library with persistence examples
+**Plex Provider API:**
+- [Plex Custom Metadata Provider Announcement](https://forums.plex.tv/t/announcement-custom-metadata-providers/934384/) — MEDIUM confidence: official Plex team announcement, beta API
+- [Plex Developer API Docs](https://developer.plex.tv/pms/) — MEDIUM confidence: official docs, but provider spec is beta
+- [plexinc/tmdb-example-provider](https://github.com/plexinc/tmdb-example-provider) — HIGH confidence: official Plex-authored reference implementation
+- [Drewpeifer/plex-meta-tvdb](https://github.com/Drewpeifer/plex-meta-tvdb) — MEDIUM confidence: community implementation showing real endpoint structure
 
-**Health Check Patterns:**
-- [Plex API Endpoints](https://github.com/Arcanemagus/plex-api/wiki/Plex.tv#ping) — HIGH confidence: `/:/ping` endpoint verified
-- [Health Check Pattern - Microsoft](https://learn.microsoft.com/en-us/azure/architecture/patterns/health-endpoint-monitoring) — HIGH confidence: health check best practices
-- [Health Checks for Microservices](https://www.baeldung.com/spring-boot-health-indicators) — MEDIUM confidence: health check design patterns
+**Stash GraphQL API:**
+- [Stash scene.graphql schema](https://github.com/stashapp/stash/blob/develop/graphql/schema/types/scene.graphql) — HIGH confidence: authoritative source
+- [Stash API Wiki](https://github.com/stashapp/stash/wiki/API) — HIGH confidence: official auth documentation
+- [Stash ApiKey PR #1241](https://github.com/stashapp/stash/pull/1241) — HIGH confidence: ApiKey header authentication implementation
 
-**Event-Driven Architecture:**
-- [Event-Driven Architecture Patterns](https://aws.amazon.com/event-driven-architecture/) — MEDIUM confidence: event-driven patterns for non-daemon systems
-- [Stash Plugin Architecture](https://github.com/stashapp/stash/blob/develop/pkg/plugin/README.md) — HIGH confidence: plugin lifecycle and constraints verified
+**FastAPI + Docker:**
+- [FastAPI Docker docs](https://fastapi.tiangolo.com/deployment/docker/) — HIGH confidence: official FastAPI documentation
+- [Python monorepo patterns](https://dev.to/ctrix/mastering-python-monorepos-a-practical-guide-2b4) — MEDIUM confidence: community patterns, multiple sources agree
 
-**State Persistence Patterns:**
-- [Atomic File Writes in Python](https://docs.python.org/3/library/os.html#os.replace) — HIGH confidence: `os.replace()` atomicity guarantees
-- [JSON State Persistence Best Practices](https://realpython.com/python-json/) — MEDIUM confidence: JSON serialization patterns
-- [Check-on-Invocation Pattern](https://martinfowler.com/articles/patterns-of-distributed-systems/check-on-invocation.html) — MEDIUM confidence: pattern description (similar to polling but event-triggered)
-
-**Existing PlexSync Patterns:**
-- `reconciliation/scheduler.py` (lines 47-150) — HIGH confidence: proven check-on-invocation implementation
-- `worker/circuit_breaker.py` (lines 24-140) — HIGH confidence: existing circuit breaker implementation
-- `worker/backoff.py` (lines 60-91) — HIGH confidence: error-specific retry parameters
+**Plex Provider Technical Details:**
+- Plex forum page 2 discussion — 90s timeout, filename in match body, caching behavior — MEDIUM confidence: Plex team responses in forum thread
 
 ---
 
-*Architecture research for: PlexSync outage resilience integration*
-*Researched: 2026-02-15*
-*Key Insight: Check-on-invocation pattern (proven in v1.4) extends naturally to recovery detection. Circuit breaker persistence enables recovery detection without worker running.*
+*Architecture research for: Plex Metadata Provider v2.0 integration*
+*Researched: 2026-02-23*
+*Key insight: Plex's provider API is REST + JSON; any HTTP server qualifies. The complexity is in the path mapping engine (Plex sees different paths than Stash) and keeping the provider stateless enough to restart cleanly. The plugin and provider share code via `shared_lib/` but have independent deployment and dependency trees.*

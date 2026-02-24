@@ -1,521 +1,274 @@
-# Pitfalls Research: Outage Resilience Features
+# Pitfalls Research: Plex Metadata Provider Service
 
-**Domain:** Adding Outage Resilience to Event-Driven Sync System
-**Researched:** 2026-02-15
-**Confidence:** HIGH
+**Domain:** Adding Custom Plex Metadata Provider + Docker service to existing Stash-to-Plex sync plugin
+**Researched:** 2026-02-23
+**Confidence:** HIGH (Plex API, Docker networking), MEDIUM (monorepo integration, gap detection edge cases)
 
-**Context:** PlexSync is an event-driven Stash plugin (NOT a daemon) adding automatic recovery when Plex returns, circuit breaker persistence, health monitoring, and DLQ recovery. The existing system has in-memory circuit breaker, 999-retry PlexServerDown, and check-on-invocation scheduling.
+**Context:** PlexSync v2.0 adds a Plex-side metadata provider service deployed as a Docker container. The provider queries Stash GraphQL API during Plex scans to resolve metadata. Regex-based bidirectional path mapping connects the two filesystems. Bi-directional gap detection (real-time during scans + scheduled) identifies items out of sync. The provider coexists with the v1.x push model.
 
 ---
 
 ## Critical Pitfalls
 
-Mistakes that cause cascading failures, data corruption, or require rewrites.
+Mistakes that cause rewrites, broken Plex scanning, or silent data corruption.
 
-### Pitfall 1: Circuit Breaker Stale State Race Condition
+### Pitfall 1: GUID and ratingKey Cannot Contain Forward Slashes
 
 **What goes wrong:**
-Multiple plugin invocations read stale circuit breaker state from disk, all simultaneously transition to HALF_OPEN, and send a thundering herd of test requests to Plex. The recovering Plex server gets overwhelmed and crashes again, creating a metastable failure loop.
+The provider generates a GUID or ratingKey that contains a forward slash — for example, encoding a Stash scene path like `/data/videos/Studio/Scene Title.mp4` into the identifier. Plex treats the ratingKey as a URL path component and the forward slash breaks URL routing. The metadata endpoint becomes unreachable (`/library/metadata/data/videos/...` parses as nested paths), and Plex silently fails to fetch metadata, leaving items unmatched.
 
 **Why it happens:**
-Event-driven plugins are invoked per-hook (scene.update, task.process_queue), NOT long-running daemons. Each invocation loads circuit breaker state from JSON file, checks if it's due for transition (OPEN→HALF_OPEN after timeout), and saves updated state. But between load-check-save, other invocations can occur. Without distributed locking, multiple instances race:
+Developers naturally want to use the Stash scene path or a combination of IDs in the ratingKey for easy lookup. Paths contain slashes. The Plex API documentation specifies that ratingKeys cannot contain forward slashes, but this constraint is easy to overlook when designing the identifier scheme for a file-path-based provider.
+
+**How to avoid:**
+Use Stash's numeric scene ID as the ratingKey — it is guaranteed slash-free. The GUID format must be:
 
 ```
-Time  | Invocation A                | Invocation B                | Invocation C
-------|----------------------------|----------------------------|----------------------------
-T+0   | Load state: OPEN, opened_at=T-60 | (not started)         | (not started)
-T+1   | Check: elapsed=61s > 60s timeout | Load state: OPEN, opened_at=T-60 | (not started)
-T+2   | Transition to HALF_OPEN    | Check: elapsed=62s > 60s timeout | Load state: OPEN (stale)
-T+3   | Send test request to Plex  | Transition to HALF_OPEN    | Check: stale, transition HALF_OPEN
-T+4   | (writing state...)         | Send test request to Plex  | Send test request to Plex
-T+5   | Write state: HALF_OPEN     | Write state: HALF_OPEN (overwrites A) | Write state: HALF_OPEN (overwrites B)
+tv.plex.agents.custom.stash2plex://scene/{stash_scene_id}
 ```
 
-Result: 3 test requests sent simultaneously instead of 1.
-
-**How to avoid:**
-
-1. **File-based distributed lock with PID tracking:**
-   ```python
-   import fcntl
-   import os
-
-   class CircuitBreakerStateLock:
-       def __init__(self, lock_path):
-           self.lock_path = lock_path
-           self.lock_file = None
-
-       def acquire(self, timeout=5.0):
-           """Acquire exclusive lock or timeout."""
-           self.lock_file = open(self.lock_path, 'w')
-           try:
-               fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-               self.lock_file.write(f"{os.getpid()}\n")
-               self.lock_file.flush()
-               return True
-           except BlockingIOError:
-               # Lock held by another process
-               return False
-
-       def release(self):
-           if self.lock_file:
-               fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_UN)
-               self.lock_file.close()
-   ```
-
-2. **Optimistic concurrency control with version numbers:**
-   ```json
-   {
-     "state": "OPEN",
-     "version": 42,
-     "opened_at": 1707926400.0
-   }
-   ```
-   Before writing, check version matches what was read. If mismatch, reload and retry logic.
-
-3. **Single-writer pattern via daemon thread:**
-   - Circuit breaker transitions happen ONLY in worker daemon thread (already exists)
-   - Hook invocations READ circuit breaker state but don't modify it
-   - State file becomes read-only for hooks, read-write for worker
-   - **RECOMMENDED:** Aligns with existing architecture where worker already manages circuit breaker in memory
-
-4. **Idempotent state transitions:**
-   - Make HALF_OPEN→test request idempotent with cooldown
-   - Track `last_test_request_at` timestamp
-   - Only send test request if >10s since last attempt
-   - Multiple invocations reading stale HALF_OPEN state won't duplicate test requests
+Where `stash_scene_id` is an integer. Never embed file paths, hashes, or any string that could contain slashes in the ratingKey. The provider identifier prefix (`tv.plex.agents.custom.stash2plex`) must use only ASCII letters, numbers, and periods — verified against regex `[a-zA-Z0-9.]+`.
 
 **Warning signs:**
-- Multiple "Circuit breaker transitioned to HALF_OPEN" log entries within same second
-- Plex server receives burst of requests after recovery timeout expires
-- Circuit breaker state file has multiple rapid writes (check mtime changes)
-- Plex goes down again immediately after circuit opens→half-open transition
+- HTTP 404s when Plex fetches metadata from the provider (check provider access logs)
+- Items match successfully but metadata fetch silently fails
+- GUID in Plex database shows truncated or malformed paths
 
 **Phase to address:**
-**Phase 17 (Circuit Breaker Persistence)** — Add file locking BEFORE implementing state persistence. Test with concurrent plugin invocations (simulate rapid hook events).
+Phase 1 (Provider skeleton + GUID design) — establish ratingKey format before any matching logic is written.
 
 ---
 
-### Pitfall 2: Health Check False Positive from Plex Restart Sequence
+### Pitfall 2: Plex Sends Relative Paths, Not Absolute Paths, to the Match Endpoint
 
 **What goes wrong:**
-Health check detects Plex is "up" (port 32400 responds to TCP connect), declares server healthy, circuit breaker closes, and queue processing resumes. But Plex is still initializing its database and returns 503 Service Unavailable for all metadata requests. Queue drains with hundreds of failures, circuit breaker reopens immediately, retry counters increment wastefully.
+The Match endpoint receives a `filename` hint that is a relative path from the Plex library root, not the full absolute path on disk. Code that tries to apply regex path mapping (Stash-side path → Plex-side path) to reconstruct the full path fails because there is no library root prefix in the hint. The provider falls back to title-only matching for every item, defeating the purpose of regex path mapping.
 
 **Why it happens:**
-Plex server startup sequence has multiple stages:
-1. Process starts, binds to port 32400 (TCP connect succeeds)
-2. HTTP server starts, returns 503 for requests (database loading)
-3. Database loads, server transitions to ready state
-4. Metadata API endpoints start responding with 200
-
-Simple health checks (TCP connect, HTTP GET `/`) succeed at stage 2-3 but server can't process real requests. This is a **partial availability** scenario - server appears healthy but isn't functionally ready.
+The Plex documentation states `filename` is "the relative path for the underlying media file" — but developers assume it will be the same full path that Plex stores internally for the file (as seen in `plexapi` `part.file`). They are different: `part.file` is the full absolute path inside Plex's container/mount, while the Match hint `filename` is relative to the library section root.
 
 **How to avoid:**
+Design the Match endpoint to work in two layers:
+1. **Primary match:** Stash GraphQL query using title/year hints (always present). Use `filename` only as a confidence tiebreaker.
+2. **Path-assisted match:** Apply regex mapping to `filename` to derive a Stash-comparable relative path, then query Stash for scenes matching that relative path segment. Do not reconstruct absolute paths from the filename hint alone.
 
-1. **Deep health check with sentinel request:**
-   ```python
-   def is_plex_healthy(plex_client, library_id):
-       """Check if Plex can handle real metadata requests."""
-       try:
-           # Don't just ping, make a lightweight real request
-           sections = plex_client.library.sections()
-           target_section = plex_client.library.section(library_id)
-           # If we can fetch library sections, server is truly ready
-           return True
-       except plexapi.exceptions.ServiceUnavailable:
-           return False  # Server up but not ready
-       except Exception:
-           return False  # Server down or other error
-   ```
-
-2. **Health check with state verification:**
-   ```python
-   def verify_plex_ready(plex_client):
-       """Verify Plex has finished database initialization."""
-       try:
-           # Check server identity (requires DB access)
-           identity = plex_client.machineIdentifier
-           # Check library accessibility
-           libraries = plex_client.library.sections()
-           # If both succeed, database is loaded
-           return len(libraries) > 0
-       except Exception as e:
-           log_debug(f"Plex health check failed: {e}")
-           return False
-   ```
-
-3. **Grace period after health check success:**
-   ```python
-   # Don't close circuit immediately on first success
-   # Require N consecutive successful health checks
-   success_threshold = 3  # Circuit breaker already supports this
-
-   # Add grace period: wait 30s after "healthy" before resuming
-   if circuit_breaker.state == CircuitState.HALF_OPEN:
-       if health_check_success():
-           time.sleep(30)  # Let Plex stabilize
-           if health_check_success():  # Double-check
-               circuit_breaker.record_success()
-   ```
-
-4. **Graduated recovery with canary requests:**
-   ```python
-   # When transitioning HALF_OPEN → CLOSED:
-   # 1. Send 1 canary request, wait for success
-   # 2. Send 5 requests, check 80% success rate
-   # 3. Send 20 requests, check 90% success rate
-   # 4. Fully open queue processing
-   # Catches partial availability scenarios
-   ```
+Configure at least one fallback (Stash scene hash, if available via `guid` hint from a prior agent pass).
 
 **Warning signs:**
-- Health checks report "healthy" but sync requests fail with 503
-- Circuit breaker rapidly cycles HALF_OPEN → CLOSED → OPEN
-- Burst of 503 errors immediately after circuit closes
-- Plex logs show requests arriving before "Database opened" message
+- All Match responses return zero results when using path-based lookup
+- Provider logs show "filename hint" present but path reconstruction returns no match
+- 100% of matches fall through to title-only fallback
 
 **Phase to address:**
-**Phase 18 (Health Monitoring)** — Implement deep health check (sentinel request) NOT shallow check (TCP connect). Test against real Plex restart to verify initialization stages.
+Phase 2 (Match endpoint implementation) — verify Match hint payload format against the live Plex instance before implementing path logic.
 
 ---
 
-### Pitfall 3: Thundering Herd on Automatic Recovery Trigger
+### Pitfall 3: Regex Path Mapping Silently Matches the Wrong Direction
 
 **What goes wrong:**
-Plex comes back online after 2-hour outage. Automatic recovery triggers reconciliation, detecting 500+ stale scenes. All 500 sync jobs enqueue simultaneously, worker attempts to drain queue at maximum rate, Plex gets overwhelmed (CPU spikes, slow responses), and new failures occur. Circuit breaker reopens, recovery fails, and the cycle repeats creating metastable failure.
+Bidirectional path mapping uses one set of regex patterns for Stash→Plex and the reverse for Plex→Stash. A pattern like `^/data/(.+)` applied in the wrong direction matches a path it should not, translates it silently, and the translated path does not exist on the target system. The match returns None (scene not found), which is logged as "item not in Stash" — misidentifying the failure as a gap rather than a mapping error.
 
 **Why it happens:**
-Recovery assumes "Plex is healthy = can handle full load immediately." But recovering systems have reduced capacity:
-- Database caches are cold (disk reads slower than memory)
-- Connection pools are rebuilding
-- OS buffers not warmed up
-- Plex may be catching up on its own background tasks (library scanning, thumbnail generation)
-
-The existing queue has 500+ jobs with `next_retry_at` timestamps in the past. When circuit closes, worker loop processes ALL ready jobs immediately (no artificial throttling).
+Bidirectional mapping requires two distinct regex sets. Developers write the forward mapping, copy it for the reverse, and make a mistake in the capture group or substitution. Because both patterns are valid regex, there is no parse-time error. The failure mode is silent: the mapped path is syntactically valid but semantically wrong.
 
 **How to avoid:**
-
-1. **Backpressure-aware recovery with rate limiting:**
-   ```python
-   class RecoveryManager:
-       def __init__(self, max_recovery_rate=5):  # 5 jobs/sec during recovery
-           self.max_recovery_rate = max_recovery_rate
-           self.recovery_mode = False
-           self.recovery_started_at = None
-
-       def enter_recovery_mode(self):
-           """Called when circuit transitions HALF_OPEN → CLOSED."""
-           self.recovery_mode = True
-           self.recovery_started_at = time.time()
-           log_info(f"Entering recovery mode: max {self.max_recovery_rate} jobs/sec")
-
-       def should_process_job(self):
-           """Rate limit during recovery period (first 5 minutes)."""
-           if not self.recovery_mode:
-               return True
-
-           elapsed = time.time() - self.recovery_started_at
-           if elapsed > 300:  # 5 minutes
-               self.recovery_mode = False
-               log_info("Exiting recovery mode: normal rate resumed")
-               return True
-
-           # Throttle to max_recovery_rate
-           time.sleep(1.0 / self.max_recovery_rate)
-           return True
-   ```
-
-2. **Graduated queue draining with observation windows:**
-   ```python
-   # Phase 1 (0-2 min): Process 5 jobs/sec, monitor error rate
-   # Phase 2 (2-5 min): If error rate <5%, increase to 10 jobs/sec
-   # Phase 3 (5-10 min): If error rate <5%, increase to 20 jobs/sec
-   # Phase 4 (10+ min): Resume normal rate (config.poll_interval)
-
-   def calculate_recovery_rate(elapsed_seconds, error_rate):
-       if error_rate > 0.05:  # >5% errors
-           return 2  # Slow down
-       elif elapsed_seconds < 120:
-           return 5
-       elif elapsed_seconds < 300:
-           return 10
-       elif elapsed_seconds < 600:
-           return 20
-       else:
-           return None  # Normal rate
-   ```
-
-3. **Prioritize recent jobs over stale jobs:**
-   ```python
-   # Don't process queue FIFO during recovery
-   # Sort by recency: jobs enqueued in last hour first
-   # Old jobs (2+ hours) deferred to after recovery period
-
-   def get_recovery_batch(queue, batch_size=10):
-       all_pending = get_pending_jobs(queue)
-       now = time.time()
-
-       # Split by age
-       recent = [j for j in all_pending if now - j['enqueued_at'] < 3600]
-       stale = [j for j in all_pending if now - j['enqueued_at'] >= 3600]
-
-       # Prioritize recent, limit stale
-       batch = recent[:batch_size] + stale[:max(0, batch_size - len(recent))]
-       return batch
-   ```
-
-4. **Adaptive concurrency limits (Little's Law):**
-   ```python
-   # Measure: avg_latency (time per sync) and error_rate
-   # Calculate: optimal_concurrency = target_latency / avg_latency
-   # Adjust: decrease if error_rate rising, increase if stable
-
-   if error_rate > 0.1:  # 10% errors
-       max_concurrent_jobs -= 1
-   elif error_rate < 0.01 and avg_latency < target_latency:
-       max_concurrent_jobs += 1
-   ```
-
-**Warning signs:**
-- Circuit breaker repeatedly transitions CLOSED→OPEN during recovery
-- Plex server CPU spikes to 100% when circuit closes
-- First 50 jobs succeed, then failures start occurring
-- Error rate increases over time during queue draining
-- Plex web UI becomes unresponsive after recovery
-
-**Phase to address:**
-**Phase 19 (Automatic Recovery Triggers)** — Implement graduated recovery with rate limiting BEFORE automatic reconciliation. Test with large backlogs (500+ jobs) after simulated outage.
-
----
-
-### Pitfall 4: DLQ Recovery Without Deduplication
-
-**What goes wrong:**
-User triggers "Recover DLQ" task to reprocess 200 failed jobs. Unknown to user, 150 of those jobs already succeeded on manual retry (via "Sync Scene" task) but stayed in DLQ due to timing/accounting bug. Recovery reprocesses all 200, creating 150 duplicate sync operations and corrupting Plex metadata.
-
-**Why it happens:**
-DLQ is write-only: jobs enter when max retries exhausted, but nothing removes them when manually resolved. No reconciliation between "job in DLQ" and "job actually failed in Plex." DLQ recovery assumes all DLQ items are valid retry candidates without verification.
-
-**How to avoid:**
-
-1. **Pre-recovery validation with Plex state check:**
-   ```python
-   def validate_dlq_item(dlq_item, plex_client, stash_client):
-       """Check if DLQ item still needs recovery."""
-       scene_id = dlq_item['scene_id']
-
-       # Check 1: Does scene still exist in Stash?
-       try:
-           scene = stash_client.find_scene(scene_id)
-           if not scene:
-               log_info(f"Scene {scene_id} deleted from Stash, skip recovery")
-               return False
-       except Exception:
-           return False
-
-       # Check 2: Is Plex metadata already current?
-       try:
-           plex_item = plex_matcher.find_plex_item(scene)
-           if plex_item and is_metadata_current(plex_item, scene):
-               log_info(f"Scene {scene_id} already synced, skip recovery")
-               return False
-       except PlexNotFound:
-           # Item not in Plex, needs sync
-           return True
-
-       # Check 3: Is scene already in active queue?
-       if is_in_queue(scene_id):
-           log_info(f"Scene {scene_id} already queued, skip recovery")
-           return False
-
-       return True  # Needs recovery
-   ```
-
-2. **Idempotent recovery with deduplication tracking:**
-   ```python
-   # Track recovered DLQ items to prevent double-recovery
-   recovered_dlq_items = set()  # Persist to disk
-
-   def recover_dlq_item(item):
-       item_key = f"{item['scene_id']}_{item['update_type']}"
-
-       if item_key in recovered_dlq_items:
-           log_debug(f"Item {item_key} already recovered, skip")
-           return
-
-       if validate_dlq_item(item):
-           enqueue(item)
-           recovered_dlq_items.add(item_key)
-           save_recovered_items(recovered_dlq_items)
-   ```
-
-3. **DLQ item expiration policy:**
-   ```python
-   # Remove DLQ items older than 30 days
-   # Assumption: if not manually recovered in 30 days, likely not important
-   def purge_stale_dlq_items(dlq, max_age_days=30):
-       cutoff = time.time() - (max_age_days * 86400)
-
-       stale_items = []
-       for item in dlq.iterate():
-           if item.get('failed_at', 0) < cutoff:
-               stale_items.append(item)
-
-       for item in stale_items:
-           dlq.delete(item)
-           log_info(f"Purged stale DLQ item: {item['scene_id']}")
-   ```
-
-4. **Reconciliation-aware DLQ recovery:**
-   ```python
-   # Before recovering DLQ, run gap detection
-   # Only recover items that gap detection confirms are missing/stale
-
-   def smart_dlq_recovery(dlq, gap_detector):
-       gaps = gap_detector.detect_all_gaps()
-       gap_scene_ids = {g['scene_id'] for g in gaps}
-
-       for dlq_item in dlq.iterate():
-           if dlq_item['scene_id'] in gap_scene_ids:
-               enqueue(dlq_item)  # Confirmed gap
-           else:
-               log_debug(f"DLQ item {dlq_item['scene_id']} not in gaps, skip")
-   ```
-
-**Warning signs:**
-- Same scene syncs twice after DLQ recovery
-- Plex metadata shows duplicate tags/collections after recovery
-- DLQ recovery logs show "Item already in queue" warnings
-- Users report "DLQ recovery made things worse"
-
-**Phase to address:**
-**Phase 20 (DLQ Recovery UI)** — Add pre-recovery validation BEFORE implementing recovery task. Test with DLQ containing mix of valid failures and already-resolved items.
-
----
-
-### Pitfall 5: Check-on-Invocation Race Condition with Concurrent Hooks
-
-**What goes wrong:**
-Two scene.update hooks fire simultaneously (user bulk-edits 50 scenes). Both invocations check reconciliation state: `last_run_time=T-86400, interval=daily`. Both calculate "24 hours elapsed, trigger reconciliation now." Both trigger reconciliation, scanning Plex library twice simultaneously, creating duplicate gap detection jobs.
-
-**Why it happens:**
-Check-on-invocation pattern reads state, makes decision, then acts. No atomicity between "check if due" and "mark as running." Multiple concurrent invocations see same state and all decide to act.
+- Implement an explicit validation step at startup: pick five known-good Stash scene paths, apply forward mapping, verify the result exists in the Plex library structure, apply reverse mapping to the result, verify you get the original path back. Fail startup if round-trip fails.
+- Store forward and reverse patterns as separate named configs (`stash_to_plex_patterns`, `plex_to_stash_patterns`) — never derive one from the other algorithmically.
+- Log every path translation at DEBUG level: `"Stash /data/foo.mp4 → Plex /media/foo.mp4"`. Silent mappings are undebuggable.
 
 ```python
-# VULNERABLE CODE:
-def on_hook(hook_event):
-    scheduler = ReconciliationScheduler(data_dir)
+def validate_path_mapping_roundtrip(mapper, sample_stash_paths):
+    for stash_path in sample_stash_paths:
+        plex_path = mapper.stash_to_plex(stash_path)
+        if plex_path is None:
+            raise ConfigError(f"Forward mapping failed for: {stash_path}")
+        recovered = mapper.plex_to_stash(plex_path)
+        if recovered != stash_path:
+            raise ConfigError(
+                f"Roundtrip mapping failed: {stash_path} → {plex_path} → {recovered}"
+            )
+```
 
-    if scheduler.is_due(interval='daily'):  # Multiple invocations all see "true"
-        trigger_reconciliation()  # All trigger simultaneously
-        scheduler.record_run(...)  # Race: last write wins
+**Warning signs:**
+- Gap detection reports many scenes as "not in Plex" despite them being there
+- Match success rate suddenly drops after path mapping config change
+- Provider logs show path translations producing paths with double slashes or wrong roots
+
+**Phase to address:**
+Phase 3 (Regex path mapping engine) — roundtrip validation must be a required startup check, not an optional debug flag.
+
+---
+
+### Pitfall 4: Provider Registration URL Must Be Reachable from Plex's Network Context
+
+**What goes wrong:**
+The provider is registered in Plex using `http://localhost:8008` or `http://127.0.0.1:8008`. This works when Plex and the provider are on the same host with host networking. But if Plex runs in Docker with bridge networking (common for Unraid, Synology, and NAS setups), `localhost` inside the Plex container resolves to the container itself — not the host. Plex cannot reach the provider. All metadata requests fail silently; Plex falls back to built-in agents.
+
+**Why it happens:**
+During development the provider is tested from a browser or curl on the host machine, where `localhost:8008` works fine. The developer registers the URL from the host's perspective. But Plex makes HTTP requests to the registered URL from within its own network context, where `localhost` has a different meaning.
+
+**How to avoid:**
+- For Docker bridge mode (most NAS deployments): register the provider using the Docker bridge gateway IP (`172.17.0.1`) or the host's LAN IP (e.g., `192.168.1.x:8008`).
+- For Docker host mode: `localhost` works from Plex's perspective because Plex shares the host network stack.
+- For both containers on a shared Docker network: use the service name (`http://stash2plex-provider:8008`).
+
+Document all three cases explicitly in the deployment guide. Provide a startup check where the provider logs its own URL and network mode on startup.
+
+**Warning signs:**
+- Provider is running (accessible from browser on host) but Plex shows no metadata from the custom provider
+- Plex Media Server logs show connection refused or timeout to the provider URL
+- Provider access logs show no requests from Plex at all
+
+**Phase to address:**
+Phase 1 (Provider skeleton + Docker setup) — test with Plex in bridge mode before writing any metadata logic.
+
+---
+
+### Pitfall 5: host.docker.internal Does Not Work on Linux Without Extra Config
+
+**What goes wrong:**
+The provider uses `host.docker.internal` to reach the Stash instance running on the host (e.g., `http://host.docker.internal:9999/graphql`). This works on Docker Desktop for Mac and Windows, where Docker Desktop injects this DNS entry automatically. On Linux (the dominant NAS/server platform where users actually run Stash), `host.docker.internal` is not defined by default. The provider fails to connect to Stash GraphQL with a DNS resolution error at startup. The container crashes or runs in a permanently degraded state.
+
+**Why it happens:**
+Developers test on Mac with Docker Desktop, where `host.docker.internal` is pre-configured. They assume it is a universal Docker feature. It is not — on Linux Docker (not Docker Desktop), it requires an explicit `extra_hosts` entry in `docker-compose.yml`:
+
+```yaml
+extra_hosts:
+  - "host.docker.internal:host-gateway"
 ```
 
 **How to avoid:**
-
-1. **Atomic check-and-set with file locking:**
-   ```python
-   import fcntl
-
-   def try_trigger_reconciliation(scheduler, interval):
-       """Atomically check if due and mark as running."""
-       lock_path = os.path.join(scheduler.data_dir, 'reconciliation.lock')
-
-       try:
-           lock_file = open(lock_path, 'w')
-           # Non-blocking acquire
-           fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-           try:
-               # Inside lock: check if still due
-               if scheduler.is_due(interval):
-                   # Mark as in-progress BEFORE releasing lock
-                   state = scheduler.load_state()
-                   state.last_run_time = time.time()  # Prevent other invocations
-                   scheduler.save_state(state)
-
-                   # Now safe to trigger (lock released)
-                   trigger_reconciliation()
-                   return True
-               return False
-           finally:
-               fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-               lock_file.close()
-       except BlockingIOError:
-           # Another invocation holds lock, skip
-           log_debug("Reconciliation already in progress, skip")
-           return False
-   ```
-
-2. **Cooldown window with timestamp precision:**
-   ```python
-   def is_due_with_cooldown(scheduler, interval, cooldown_seconds=300):
-       """Require 5-minute cooldown between runs to prevent races."""
-       state = scheduler.load_state()
-       now = time.time()
-
-       # Check interval
-       interval_secs = INTERVAL_SECONDS[interval]
-       if now - state.last_run_time < interval_secs:
-           return False
-
-       # Check cooldown (prevents concurrent invocations)
-       if now - state.last_run_time < interval_secs + cooldown_seconds:
-           # We're in the window where multiple invocations might trigger
-           # Add randomized delay to desynchronize
-           time.sleep(random.uniform(0, 5))
-           # Reload state (another invocation may have updated)
-           state = scheduler.load_state()
-           if now - state.last_run_time < interval_secs:
-               return False  # Another invocation triggered
-
-       return True
-   ```
-
-3. **Single-threaded reconciliation via worker queue:**
-   ```python
-   # Instead of triggering reconciliation directly from hooks:
-   # 1. Hook checks if due
-   # 2. If due, enqueue special "reconciliation" job
-   # 3. Worker processes reconciliation jobs sequentially
-
-   def on_hook(hook_event):
-       if scheduler.is_due('daily'):
-           enqueue_reconciliation_job()  # Worker deduplicates
-
-   def worker_loop():
-       job = queue.get()
-       if job['type'] == 'reconciliation':
-           # Only one worker, sequential processing
-           run_reconciliation()
-       elif job['type'] == 'sync':
-           sync_scene(job['scene_id'])
-   ```
-
-4. **Idempotent reconciliation with run ID:**
-   ```python
-   # Track current reconciliation run ID
-   # Multiple invocations enqueue gaps with same run_id
-   # Deduplicate at queue level
-
-   state.current_run_id = f"recon_{int(time.time())}"
-
-   for gap in detected_gaps:
-       job = {
-           'scene_id': gap['scene_id'],
-           'reconciliation_run_id': state.current_run_id
-       }
-       enqueue(job)  # Queue deduplicates by (scene_id, run_id)
-   ```
+- In `docker-compose.yml`, always include `extra_hosts: ["host.docker.internal:host-gateway"]` for Linux compatibility.
+- Alternatively, use the `--add-host=host.docker.internal:host-gateway` flag.
+- Document that the Stash URL config should use `host.docker.internal` for host-based Stash instances, and explain the Linux requirement.
+- Add a startup connectivity check that attempts to reach the configured Stash URL and logs a clear error if unreachable: `"Cannot reach Stash at {url} — check host.docker.internal config on Linux"`.
 
 **Warning signs:**
-- Multiple "Starting reconciliation" log entries within seconds
-- Gap detection runs twice, finding same gaps
-- Reconciliation state file shows rapid updates (multiple mtimes/second)
-- Queue receives duplicate jobs for same scenes
+- Provider logs show "Name or service not known: host.docker.internal" at startup
+- Provider works on developer's Mac but fails for users running on Linux NAS
+- Stash GraphQL connection errors despite Stash being accessible from the host browser
 
 **Phase to address:**
-**Phase 19 (Automatic Recovery Triggers)** — Add file locking for check-on-invocation BEFORE implementing automatic reconciliation. Test with concurrent hook events (bulk scene updates).
+Phase 1 (Docker setup) — test on Linux Docker, not just Docker Desktop, before publishing the docker-compose.yml.
+
+---
+
+### Pitfall 6: 90-Second Plex Timeout Kills Stash GraphQL Queries During Large Library Operations
+
+**What goes wrong:**
+During a Plex library scan of a large library (1,000+ scenes), the provider handles many concurrent Match requests. Each Match request queries Stash GraphQL. If Stash is under load (background scan, tag update, etc.), GraphQL responses slow to 5-10 seconds. Plex enforces a hard 90-second timeout on all provider requests. Under concurrent load, request queuing causes latency to compound. Requests start timing out. Plex marks items as unmatched and stops retrying them for the current scan cycle.
+
+**Why it happens:**
+The provider was tested with a small library where Stash responds in <100ms. Under concurrent scan load, the simple `requests.get(stash_graphql_url, ...)` call blocks without a short timeout, and 20 simultaneous slow GraphQL queries back up the provider's HTTP server.
+
+**How to avoid:**
+- Set an explicit timeout on all Stash GraphQL requests: `requests.post(url, timeout=10)` — short enough to fail fast before the 90-second Plex timeout.
+- Implement a local request cache: identical Match queries (same title + year) return cached results for 5 minutes, reducing Stash load during bulk scans.
+- Use async request handling in the provider HTTP server (FastAPI with async routes, not Flask with synchronous handlers) to prevent one slow Stash query from blocking other concurrent requests.
+- Add a Stash circuit breaker in the provider: if Stash responds slowly >3 times in 60 seconds, return empty Match results for 30 seconds rather than queueing more slow queries.
+
+**Warning signs:**
+- Provider logs show requests completing in 8-15 seconds during scans (Stash load indicator)
+- Plex scan logs show provider timeout errors for specific items
+- Items that were previously matched become unmatched after a full library rescan
+
+**Phase to address:**
+Phase 2 (Match endpoint) — implement caching and short timeouts from day one; do not defer as an optimization.
+
+---
+
+### Pitfall 7: Monorepo Docker Build Context Cannot Access Parent Directory
+
+**What goes wrong:**
+The monorepo structure has `shared/` at the repo root, used by both the existing Stash plugin and the new `provider/` service. The provider's `Dockerfile` sits in `provider/` and tries to `COPY ../shared/ ./shared/` to include the shared code. Docker refuses this: build context cannot reference files outside the build context directory. The build fails with `COPY failed: forbidden path outside the build context`.
+
+**Why it happens:**
+This is a fundamental Docker constraint: the build context is the directory passed to `docker build` (typically the Dockerfile's directory). Any `COPY` or `ADD` instruction must reference paths within that context. When the Dockerfile is in a subdirectory but needs sibling or parent files, the natural `../` reference is forbidden.
+
+**How to avoid:**
+Set the build context to the repository root, not the `provider/` directory. Use a `docker-compose.yml` at the repo root:
+
+```yaml
+services:
+  stash2plex-provider:
+    build:
+      context: .              # Repo root is build context
+      dockerfile: provider/Dockerfile
+```
+
+In the Dockerfile, reference paths from the repo root:
+
+```dockerfile
+COPY shared/ /app/shared/
+COPY provider/ /app/provider/
+WORKDIR /app/provider
+```
+
+Alternatively, install `shared/` as a local package via `pip install -e ../shared` using a `pyproject.toml`, but this requires the shared package to be properly structured as an installable Python package.
+
+**Warning signs:**
+- `docker build` fails with `forbidden path outside the build context`
+- Developer works around it by copying `shared/` into `provider/` manually — this creates a diverging copy
+- Tests pass locally (using relative imports) but Docker image has import errors at runtime
+
+**Phase to address:**
+Phase 1 (Monorepo restructure + Docker setup) — establish the build context pattern before writing any provider code.
+
+---
+
+### Pitfall 8: Gap Detection Timestamps Between Stash and Plex Are Not Comparable
+
+**What goes wrong:**
+The gap detection logic compares Stash's `updated_at` timestamp against Plex's `updatedAt` field to determine if a scene is "stale in Plex." Stash stores timestamps in UTC ISO 8601. Plex's `updatedAt` field represents when Plex last refreshed its internal metadata record — not when Stash was updated. These measure different events: Stash update time vs. Plex metadata write time. They are not comparable. Gap detection either misses all gaps (Plex's `updatedAt` is always newer because Plex refreshes periodically) or flags everything as stale (Stash's update time is always newer).
+
+**Why it happens:**
+The naive assumption is: "if Stash was updated after Plex last saw this item, the item needs re-sync." But Plex's `updatedAt` is modified by ANY Plex metadata operation — including thumbnail generation, sort order updates, or agent re-runs unrelated to Stash. The two clocks measure different things.
+
+**How to avoid:**
+Use the existing `sync_timestamps.json` (already tracking "when did Stash2Plex last sync this scene?") as the reference point for gap detection. The correct comparison is:
+
+```
+Gap if: stash.updated_at > sync_timestamps[scene_id].last_synced_at
+```
+
+Not:
+```
+Gap if: stash.updated_at > plex.updatedAt  # Wrong — different clocks
+```
+
+For items with no sync timestamp at all (never synced), flag as a gap regardless of timestamps.
+
+**Warning signs:**
+- Gap detection reports 0 gaps even when known-stale scenes exist
+- Gap detection reports all scenes as stale after any Plex library maintenance
+- Periodic gap detection consistently flags the same scenes as gaps even after re-sync
+
+**Phase to address:**
+Phase 4 (Bi-directional gap detection) — design the comparison logic using `sync_timestamps.json` as the authority before writing any gap detection queries.
+
+---
+
+### Pitfall 9: Real-Time Gap Detection During Plex Scan Overwhelms Stash GraphQL
+
+**What goes wrong:**
+The provider intercepts Plex scan events and runs a Stash GraphQL lookup for every scene Plex scans. During a full library rescan (1,000+ items), the provider fires 1,000 simultaneous GraphQL queries against Stash. Stash's embedded HTTP server is not built for high concurrent load — it processes requests sequentially or with minimal concurrency. Response times climb from 50ms to 30+ seconds. The provider's 90-second Plex timeout window fills up. Plex scan stalls. Stash becomes unresponsive for the duration of the scan.
+
+**Why it happens:**
+The real-time gap detection design pattern assumes the provider can query Stash for every Plex scan event. Under normal per-scene hook usage this is fine. During a full rescan, Plex fires scan events for every item in rapid succession, with no rate limiting from Plex's side.
+
+**How to avoid:**
+- **Batch gap detection:** Do not query Stash per-item during real-time scan. Instead, record which scenes Plex scanned (write to a local SQLite log) and then run a batch comparison against Stash after the scan completes (detect via scan completion hook or polling).
+- **Rate limit real-time queries:** If per-item queries are needed, use a token bucket (max 10 queries/second to Stash) and queue excess requests.
+- **Scheduled gap detection for bulk:** For full library comparisons, use the scheduled gap detection (already planned) rather than real-time interception. Reserve real-time detection for individual scene-level events only.
+
+**Warning signs:**
+- Stash UI becomes unresponsive during Plex library rescans
+- Provider logs show Stash GraphQL requests queuing up with increasing latency
+- Plex scan takes much longer than usual (provider is a bottleneck)
+
+**Phase to address:**
+Phase 4 (Bi-directional gap detection) — design the real-time vs. scheduled detection split upfront; do not build real-time detection that relies on per-item GraphQL queries.
 
 ---
 
@@ -525,12 +278,14 @@ Shortcuts that seem reasonable but create long-term problems.
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
 |----------|-------------------|----------------|-----------------|
-| Skip file locking for state persistence | Simpler code, no lock contention handling | Race conditions with concurrent invocations, duplicate reconciliation runs | NEVER (PlexSync has concurrent hooks) |
-| Use shallow health check (TCP connect) | Fast response, simple implementation | False positives during Plex startup, premature queue draining | Only if combined with grace period or graduated recovery |
-| Recover entire DLQ without validation | Simple "replay all" logic | Duplicate syncs if items already resolved manually | Only for small DLQs (<10 items) where duplicates are acceptable |
-| Hard-code recovery rate limits | No adaptive logic needed | Can't handle varying Plex capacity (beefy server vs. RPi) | Acceptable for MVP if config-overrideable |
-| Store circuit breaker state only in memory | No file I/O overhead | State lost on crash, circuit reopens unnecessarily | NEVER (defeats purpose of persistence) |
-| Poll Plex health every 10 seconds during outage | Fast recovery detection | Wastes resources during long outages, Plex sees failed requests | Only if adaptive (slow down after N failures) |
+| Use Flask instead of FastAPI for provider | Simpler, familiar, no async complexity | Synchronous handler blocks under concurrent Plex scan load; hits 90s timeout at scale | Only for prototype/single-user; never for library rescans |
+| Hardcode Stash URL as localhost in provider | Works on developer machine | Breaks for every Docker deployment on a different host | Never (always make configurable) |
+| Skip roundtrip validation of regex path mapping | Faster startup, simpler code | Silent mapping failures appear as "scene not in Stash" gaps | Never — validation catches config errors before they corrupt gap state |
+| Store GUIDs with file paths embedded | Easy human debugging | Forward slashes in paths break Plex URL routing | Never |
+| Single docker-compose.yml per-service | Simpler per-service builds | Cannot share parent directory code; leads to duplicated `shared/` copies | Never (sets up divergence) |
+| Query Stash without per-request timeout | Simpler requests code | One slow Stash query blocks all concurrent provider requests; cascading timeout | Never (always set timeout <= 10s) |
+| Compare Plex updatedAt to Stash updated_at for gaps | Straightforward, matches field names | Measures different events; produces incorrect gap detection in both directions | Never |
+| Use sync_timestamps.json from plugin directory in provider | No new state file, shared truth | Provider must know plugin data dir path; creates coupling and Docker volume dependency | Acceptable if volume path is configurable |
 
 ---
 
@@ -540,12 +295,16 @@ Common mistakes when connecting to external services.
 
 | Integration | Common Mistake | Correct Approach |
 |-------------|----------------|------------------|
-| Plex Health Check | Assume port 32400 open = server ready | Make sentinel request to metadata API, verify DB loaded |
-| Circuit Breaker Persistence | Write state file without atomic rename | Use temp file + fsync + rename pattern to prevent corruption |
-| Automatic Recovery | Close circuit immediately on first health check success | Require N consecutive successes (half-open threshold) |
-| DLQ Recovery | Replay all items blindly | Validate items still need recovery (check Plex current state) |
-| Reconciliation Scheduling | Check interval based on wall-clock time | Use elapsed time since last run + cooldown to prevent races |
-| Queue Draining | Process all ready jobs at max rate | Rate-limit during recovery period (graduated draining) |
+| Plex Provider API (Match) | Assume `filename` hint is absolute path | Treat as relative-to-library path; use title/year as primary match signals |
+| Plex Provider API (registration) | Register with `localhost` URL | Register with host LAN IP or Docker service name, depending on network topology |
+| Plex Provider API (GUID) | Embed file paths in ratingKey | Use integer Stash scene ID only; no slashes permitted |
+| Plex Provider API (90s timeout) | No timeout on upstream Stash calls | Set 10s timeout on all GraphQL calls; cache repeat queries for 5 min |
+| Plex Provider API (images) | Assume images URL is private/internal | Image URLs must be publicly accessible (or accessible to Plex's network); provider must serve them |
+| Stash GraphQL (from Docker) | Use `host.docker.internal` without Linux config | Add `extra_hosts: ["host.docker.internal:host-gateway"]` in docker-compose for Linux |
+| Stash GraphQL (concurrent scan) | Fire one query per Plex scan event | Batch queries; rate-limit to max 10/sec; cache results per scan session |
+| Regex path mapping (bidirectional) | Derive reverse pattern from forward | Write forward and reverse as separate explicit configs; validate roundtrip on startup |
+| sync_timestamps.json (gap detection) | Compare Plex `updatedAt` to Stash `updated_at` | Compare Stash `updated_at` to `sync_timestamps.json[scene_id].last_synced_at` |
+| Docker build (monorepo) | `COPY ../shared/` from service Dockerfile | Set build context to repo root; reference `shared/` from root in Dockerfile |
 
 ---
 
@@ -555,11 +314,39 @@ Patterns that work at small scale but fail as usage grows.
 
 | Trap | Symptoms | Prevention | When It Breaks |
 |------|----------|------------|----------------|
-| Health check polling every second | Plex logs fill with /identity requests, CPU waste | Adaptive interval: 1s during HALF_OPEN, 60s during OPEN | >30 minute outages (1800+ unnecessary health checks) |
-| No backpressure during recovery | Plex CPU spikes to 100%, queue draining stalls | Rate limit to 5-10 jobs/sec for first 5 minutes | Backlogs >100 jobs |
-| File lock contention on every hook | Hook latency increases with concurrent events | Use lock only for reconciliation trigger, not every hook | >10 concurrent hook invocations |
-| Unbounded DLQ growth | DLQ inspection becomes slow, memory issues | Expire items >30 days old, cap DLQ at 1000 items | DLQ >10,000 items |
-| Gap detection on every startup | Stash startup delayed 30+ seconds | Only run if >1 hour since last startup | Libraries >5,000 scenes |
+| Synchronous Flask handler for Match endpoint | One slow Stash query blocks all concurrent Plex scan requests | Use FastAPI with async handlers; set short Stash query timeout | Libraries > 50 items (Plex scans concurrent) |
+| No cache on Match endpoint | Stash gets 1,000 identical title queries during rescan | Cache Match results by (title, year, type) for 5 minutes | Libraries > 100 items in single scan |
+| Full Stash library dump for gap detection | Gap scan takes 10+ minutes for 5,000-scene library | Paginate Stash GraphQL queries; use cursor-based pagination | Libraries > 500 scenes |
+| Per-item Stash query during real-time scan interception | Stash becomes unresponsive during Plex rescan | Batch or rate-limit real-time scan queries | Libraries > 20 items scanned simultaneously |
+| Storing full file paths in GUID/ratingKey | Hits Plex URL routing limit on deeply nested paths | Use integer scene IDs as ratingKeys | Any library with paths > ~100 chars |
+| Docker bridge networking without ADVERTISE_IP | Plex reports wrong URL, remote access breaks | Set ADVERTISE_IP in docker-compose or use host networking | Any remote access scenario |
+
+---
+
+## Security Mistakes
+
+Domain-specific security issues for a metadata provider serving local network.
+
+| Mistake | Risk | Prevention |
+|---------|------|------------|
+| Provider accepts all requests without auth token validation | Any process on local network can inject false metadata into Plex | Validate Plex-provided request headers (X-Plex-Token) or use a shared secret in config; at minimum bind to 127.0.0.1 if single-host |
+| Stash API key logged at DEBUG level | API key visible in log files shared for debugging | Redact credentials in all log output; use same obfuscation pattern as existing plugin |
+| Provider serves Stash image URLs with auth token in URL | Token exposed in Plex's request logs and metadata store | Proxy images through provider (strip token from external URL), or use short-lived signed URLs |
+| Regex path mapping patterns exposed in provider /info endpoint | Reveals internal filesystem layout | Return only provider identifier and capabilities from /info; never expose config in API responses |
+
+---
+
+## UX Pitfalls
+
+Configuration and operational experience issues.
+
+| Pitfall | User Impact | Better Approach |
+|---------|-------------|-----------------|
+| Provider requires manual Plex URL for registration | Users must find their server's internal URL, prone to copy errors | Auto-detect Plex URL from docker-compose network; provide registration CLI command |
+| Silent match failure (no provider logs exposed) | Users cannot tell why scenes don't get metadata | Provider must log every Match request outcome (matched / no match / error) at INFO level |
+| Path mapping regex errors fail at scan time | Users get "no metadata" with no explanation | Validate regex patterns at provider startup; refuse to start with invalid or non-roundtripping patterns |
+| Gap detection reports same gaps repeatedly | Users re-sync scenes that keep appearing as gaps | Implement "suppressed gap" tracking: mark gap as resolved after sync; only re-flag if Stash is updated again |
+| docker-compose.yml requires separate management from Stash setup | Users must manage two compose files | Provide a single `docker-compose.yml` at repo root that includes both Stash (if applicable) and provider |
 
 ---
 
@@ -567,12 +354,14 @@ Patterns that work at small scale but fail as usage grows.
 
 Things that appear complete but are missing critical pieces.
 
-- [ ] **Circuit Breaker Persistence:** Persists state to disk, BUT no file locking → race conditions with concurrent invocations
-- [ ] **Health Monitoring:** Checks Plex port 32400, BUT doesn't verify database loaded → false positives during startup
-- [ ] **Automatic Recovery:** Triggers reconciliation when circuit closes, BUT no rate limiting → thundering herd
-- [ ] **DLQ Recovery:** UI to replay failed jobs, BUT no pre-validation → duplicate syncs for already-resolved items
-- [ ] **Reconciliation Scheduling:** Check-on-invocation pattern, BUT no atomic check-and-set → duplicate runs
-- [ ] **Queue Draining:** Processes backlog after recovery, BUT FIFO order → starves recent jobs during recovery
+- [ ] **Provider registers with Plex:** URL is set in Plex UI and shows green status — but verify Plex can actually make HTTP requests TO the provider (check provider access logs for incoming requests from Plex's IP)
+- [ ] **Match endpoint returns results:** Returns results in development — but verify with `filename` hint as a relative path, not absolute (Plex sends relative, not absolute)
+- [ ] **GUID format is correct:** GUIDs parse as valid URLs — but verify no forward slashes in the ratingKey portion (common mistake: encoding a path in the ID)
+- [ ] **Path mapping works:** Forward mapping translates correctly — but verify reverse mapping too (roundtrip test) and verify with paths that have spaces, special characters, and Unicode
+- [ ] **host.docker.internal resolves:** Works on Mac during development — but verify on Linux with `extra_hosts` config (Linux Docker does not inject this by default)
+- [ ] **Gap detection finds gaps:** Detects gaps in a test run — but verify it is comparing against `sync_timestamps.json` (not Plex `updatedAt`) as the reference timestamp
+- [ ] **Docker build succeeds:** `docker build` passes — but verify `shared/` is correctly included via root build context, not copied into the service directory (which creates a diverging duplicate)
+- [ ] **Plex scan completes with provider active:** Small library scan works — but verify with a full rescan (1,000+ items) to confirm no timeout cascades or Stash overload
 
 ---
 
@@ -582,12 +371,14 @@ When pitfalls occur despite prevention, how to recover.
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| Thundering herd overwhelmed Plex | MEDIUM | 1. Manually pause queue processing 2. Restart Plex 3. Clear retry timestamps 4. Resume with rate limit |
-| Stale circuit breaker state race | LOW | 1. Stop all plugin processes 2. Delete state file 3. Restart with lock enabled |
-| DLQ duplicates corrupted metadata | HIGH | 1. Identify affected scenes (query DLQ timestamps) 2. Manually fix Plex metadata 3. Re-sync scenes |
-| False positive health check | LOW | 1. Circuit opens automatically after failures 2. Implement deep health check 3. Deploy update |
-| Concurrent reconciliation runs | MEDIUM | 1. Check for duplicate gaps in queue 2. Deduplicate by scene_id 3. Add file locking |
-| Health check polling storm | LOW | 1. Increase poll interval in config 2. Restart plugin 3. Verify Plex CPU normal |
+| GUID format has slashes; items unmatched | HIGH | 1. Change ratingKey format 2. Force Plex to "Fix Match" on all affected items (plexapi script) 3. Re-register provider with correct GUID scheme |
+| Provider URL unreachable from Plex | LOW | 1. Check provider access logs for zero requests from Plex 2. Re-register with correct host IP 3. Verify firewall/Docker network allows connection |
+| host.docker.internal DNS failure on Linux | LOW | 1. Add `extra_hosts: ["host.docker.internal:host-gateway"]` to docker-compose.yml 2. Restart provider container |
+| Regex path mapping misconfigured | MEDIUM | 1. Enable DEBUG logging for path translation 2. Fix patterns 3. Restart provider 4. Trigger Plex rescan to re-match previously failed items |
+| Gap detection false positives (wrong timestamp source) | MEDIUM | 1. Clear gap detection state 2. Fix comparison to use sync_timestamps.json 3. Re-run gap detection |
+| Docker build COPY context failure | LOW | 1. Move docker-compose.yml build context to repo root 2. Update Dockerfile COPY paths |
+| Stash overwhelmed by concurrent Match queries | MEDIUM | 1. Add rate limiting (token bucket) to provider 2. Add result cache 3. Restart both services 4. Trigger Plex rescan |
+| Sync timestamps not accessible from provider | MEDIUM | 1. Mount plugin data directory as Docker volume 2. Configure provider with correct path to sync_timestamps.json |
 
 ---
 
@@ -597,69 +388,44 @@ How roadmap phases should address these pitfalls.
 
 | Pitfall | Prevention Phase | Verification |
 |---------|------------------|--------------|
-| Circuit breaker race condition | Phase 17 (Circuit Breaker Persistence) | Test with 10 concurrent hook invocations, verify single HALF_OPEN transition |
-| Health check false positive | Phase 18 (Health Monitoring) | Test against real Plex restart, verify circuit doesn't close during initialization |
-| Thundering herd on recovery | Phase 19 (Automatic Recovery) | Simulate 500-job backlog, verify graduated draining with <5% error rate |
-| DLQ recovery duplicates | Phase 20 (DLQ Recovery UI) | Create DLQ with resolved items, verify recovery validates before enqueue |
-| Check-on-invocation race | Phase 19 (Automatic Recovery) | Trigger 5 concurrent hooks at reconciliation boundary, verify single run |
-| Queue drain backpressure | Phase 19 (Automatic Recovery) | Monitor Plex CPU during 500-job recovery, verify <80% utilization |
+| GUID/ratingKey contains slashes | Phase 1 (Provider skeleton) | Verify GUID regex matches `[a-zA-Z0-9.]+://[^/]+/[0-9]+` pattern only |
+| Relative path filename hint misunderstood | Phase 2 (Match endpoint) | Test Match endpoint with actual Plex scan request payload (not mocked) |
+| Regex path mapping wrong direction | Phase 3 (Path mapping engine) | Run roundtrip validation on 10 sample paths at startup; test fails fast |
+| Provider URL unreachable from Plex bridge mode | Phase 1 (Docker setup) | Test registration and metadata fetch from Plex running in bridge-mode Docker |
+| host.docker.internal fails on Linux | Phase 1 (Docker setup) | Test docker-compose.yml on Linux host, not just Docker Desktop for Mac |
+| 90s Plex timeout under concurrent load | Phase 2 (Match endpoint) | Load test with 100 concurrent Match requests; all complete in <5s |
+| Monorepo Docker COPY context failure | Phase 1 (Monorepo restructure) | Verify `docker build` from repo root includes shared/ without manual copying |
+| Gap detection uses wrong timestamp | Phase 4 (Gap detection) | Unit test: scene with stash.updated_at > last_synced_at flags as gap; scene with stash.updated_at < last_synced_at does not |
+| Real-time scan overwhelms Stash | Phase 4 (Gap detection) | Simulate 500-item Plex rescan; verify Stash response time stays under 500ms throughout |
 
 ---
 
 ## Sources
 
-### Circuit Breaker Patterns & Persistence
-- [Building Resilient Systems: Circuit Breakers and Retry Patterns](https://dasroot.net/posts/2026/01/building-resilient-systems-circuit-breakers-retry-patterns/)
-- [How to Configure Circuit Breaker Patterns](https://oneuptime.com/blog/post/2026-02-02-circuit-breaker-patterns/view)
-- [The Complete Guide to Resilience Patterns in Distributed Systems](https://technori.com/2026/02/24230-the-complete-guide-to-resilience-patterns-in-distributed-systems/gabriel/)
-- [Circuit Breaker Pattern for Serverless Applications](https://resources.fenergo.com/engineering-at-fenergo/circuit-breaker-pattern-for-serverless-applications) — MemoryDB persistence for stateless functions
-- [Distributed Circuit Breakers in Event-Driven Architectures on AWS](https://sodkiewiczm.medium.com/distributed-circuit-breakers-in-event-driven-architectures-on-aws-95774da2ce7e)
+### Plex Custom Metadata Provider API
+- [Announcement: Custom Metadata Providers - Plex Forum](https://forums.plex.tv/t/announcement-custom-metadata-providers/934384/) — Primary source for provider pitfalls from early adopters
+- [Announcement: Custom Metadata Providers - Page 2](https://forums.plex.tv/t/announcement-custom-metadata-providers/934384?page=2) — Developer complaints: 90s timeout, relative path hints, image URL requirements
+- [Plex Media Server Developer Documentation](https://developer.plex.tv/pms/) — Authoritative API spec: GUID format, Match endpoint, required fields
+- [TMDB Example Provider - GitHub](https://github.com/plexinc/tmdb-example-provider) — Official reference implementation showing GUID construction, route structure
+- [Preferences for new custom metadata providers](https://forums.plex.tv/t/preferences-for-new-custom-metadata-providers/936354) — Confirmed: provider preferences not yet implemented
 
-### Health Check Anti-Patterns
-- [How to Implement Health Check Design](https://oneuptime.com/blog/post/2026-01-30-health-check-design/view)
-- [Implementing health checks — AWS Builders Library](https://aws.amazon.com/builders-library/implementing-health-checks/) — Dependency health check false positives, fail-open pattern
-- [Microservices Pattern: Health Check API](https://microservices.io/patterns/observability/health-check-api.html)
+### Docker Networking
+- [Docker Host Networking: Linux vs. Mac differences](https://wikitwist.com/docker-host-networking-explained-differences-on-linux-macos-and-windows/) — host.docker.internal platform-specific behavior
+- [Plex Docker Networking Options - DeepWiki](https://deepwiki.com/plexinc/pms-docker/2.3-networking-options) — Bridge vs. host mode, ADVERTISE_IP requirements
+- [Docker Compose depends_on with health checks](https://oneuptime.com/blog/post/2026-01-16-docker-compose-depends-on-healthcheck/view) — Startup ordering for multi-service compose
 
-### Thundering Herd & Recovery Triggers
-- [Mastering Exponential Backoff in Distributed Systems](https://betterstack.com/community/guides/monitoring/exponential-backoff/)
-- [Retry Storm Antipattern — Azure Architecture Center](https://learn.microsoft.com/en-us/azure/architecture/antipatterns/retry-storm/)
-- [Distributed Systems Horror Stories: The Thundering Herd Problem](https://encore.dev/blog/thundering-herd-problem)
-- [The Thundering Herd Problem and Its Solutions](https://www.nottldr.com/SystemSage/the-thundering-herd-problem-and-its-solutions-0ie2hx3)
+### Monorepo / Docker Build Context
+- [Python Monorepo: Shared Code and Docker](https://lightrun.com/answers/auxilincom-docker-compose-starter-how-do-you-handle-code-sharing-between-different-services-in-the-same-monorepo/) — COPY context limitation and root-context solution
 
-### Queue Backpressure & Recovery
-- [Avoiding insurmountable queue backlogs — AWS Builders Library](https://aws.amazon.com/builders-library/avoiding-insurmountable-queue-backlogs/)
-- [How to Implement Backpressure Handling in OpenTelemetry Pipelines](https://oneuptime.com/blog/post/2026-02-06-backpressure-handling-opentelemetry-pipelines/view)
-- [Understanding Back Pressure in Message Queues](https://akashrajpurohit.com/blog/understanding-back-pressure-in-message-queues-a-guide-for-developers/)
-- [Backpressure explained — the resisted flow of data through software](https://medium.com/@jayphelps/backpressure-explained-the-flow-of-data-through-software-2350b3e77ce7)
+### Bidirectional Sync / Gap Detection
+- [The Engineering Challenges of Bi-Directional Sync](https://www.stacksync.com/blog/the-engineering-challenges-of-bi-directional-sync-why-two-one-way-pipelines-fail) — Two-pipeline approach fundamental flaws
+- [Distributed Systems: Unreliable Clocks](https://medium.com/@franciscofrez/the-problems-of-distributed-systems-part-3-unreliable-clocks-a10c0fba0de4) — Timestamp comparison pitfalls across systems
 
-### DLQ & Poison Message Handling
-- [Dead Letter Queue (DLQ): What It Is and How to Implement It in a Node.js Application](https://devdiaryacademy.medium.com/dead-letter-queue-dlq-what-it-is-and-how-to-implement-it-in-a-node-js-application-3c6d4b6a9400)
-- [Message reprocessing: How to implement the dead letter queue](https://www.redpanda.com/blog/reliable-message-processing-with-dead-letter-queue)
-- [Apache Kafka Dead Letter Queue: A Comprehensive Guide](https://www.confluent.io/learn/kafka-dead-letter-queue/)
-- [Dead Letter Queues (DLQ): The Complete, Developer-Friendly Guide](https://swenotes.com/2025/09/25/dead-letter-queues-dlq-the-complete-developer-friendly-guide/)
-
-### Cascade Failure Prevention
-- [How to Avoid Cascading Failures in Distributed Systems](https://www.infoq.com/articles/anatomy-cascading-failure/)
-- [Circuit Breakers: Preventing Cascade Failures in Distributed Systems](https://medium.com/towardsdev/circuit-breakers-preventing-cascade-failures-in-distributed-systems-7a3a921636c3)
-- [What are Cascading Failures? — BMC Software](https://www.bmc.com/blogs/cascading-failures/)
-
-### Event-Driven Architecture & State Persistence
-- [Common Pitfalls in Event-Driven Architectures](https://medium.com/insiderengineering/common-pitfalls-in-event-driven-architectures-de84ad8f7f25)
-- [Persistence in Event Driven Architectures](https://dzone.com/articles/persistence-in-event-driven-architectures)
-- [Exploring event-driven architecture in microservices: patterns, pitfalls and best practices](https://www.researchgate.net/publication/388709044_Exploring_event-driven_architecture_in_microservices-_patterns_pitfalls_and_best_practices)
-
-### Race Conditions & Distributed Locking
-- [Handling Race Condition in Distributed System — GeeksforGeeks](https://www.geeksforgeeks.org/computer-networks/handling-race-condition-in-distributed-system/)
-- [The Art of Staying in Sync: How Distributed Systems Avoid Race Conditions](https://medium.com/@alexglushenkov/the-art-of-staying-in-sync-how-distributed-systems-avoid-race-conditions-f59b58817e02)
-- [Race Conditions in a Distributed System](https://medium.com/hippo-engineering-blog/race-conditions-in-a-distributed-system-ea6823ee2548)
-- [Distributed Locking and Race Condition Prevention](https://dzone.com/articles/distributed-locking-and-race-condition-prevention)
-
-### File Corruption & Atomic Writes
-- [Storage resilience: atomic writes, safer temp cleanup, repair/restore tools](https://github.com/anomalyco/opencode/issues/7733) — Temp + fsync + rename pattern
-- [Registry corruption (empty array) after crash during atomic rename](https://github.com/openclaw/openclaw/issues/1469) — Real-world JSON corruption
+### File Timestamp Handling
+- [Stop using utcnow and utcfromtimestamp - Paul Ganssle](https://blog.ganssle.io/articles/2019/11/utcnow.html) — Python datetime timezone-aware comparison
 
 ---
 
-*Pitfalls research for: PlexSync outage resilience features (v1.5 milestone)*
-*Researched: 2026-02-15*
-*Focus: Event-driven architecture constraints, non-daemon process state management, concurrent invocation safety*
+*Pitfalls research for: PlexSync v2.0 — Plex Metadata Provider Service milestone*
+*Researched: 2026-02-23*
+*Focus: Custom Plex metadata provider API gotchas, Docker networking for multi-service setup, regex path mapping edge cases, bi-directional gap detection timestamp pitfalls, monorepo Docker build context*

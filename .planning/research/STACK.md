@@ -1,354 +1,396 @@
-# Stack Research: Outage Resilience
+# Stack Research: Plex Metadata Provider Service (v2.0)
 
-**Domain:** Outage Resilience for Stash-to-Plex Sync Plugin (v1.5)
-**Researched:** 2026-02-15
-**Confidence:** HIGH
+**Domain:** Plex Custom Metadata Provider HTTP Service + Stash GraphQL Integration
+**Researched:** 2026-02-23
+**Confidence:** HIGH (framework comparison), MEDIUM (Plex provider API specifics — PMS 1.43 still beta)
+
+---
+
+## Framework Decision: Python (FastAPI) — Recommended
+
+Three languages were evaluated: Python/FastAPI, Go, and Rust. The recommendation is **Python with FastAPI**. Rationale follows.
+
+### Why Not Go
+
+Go would give ~5x more raw throughput and ~100ms lower p99 latency than FastAPI. That performance headroom is irrelevant here: the bottleneck is the round-trip to the Stash GraphQL API and the Plex → provider network hop, not the provider's own compute. The real cost is operational: Go introduces a second language into a codebase with 29,348 lines of Python, 910+ tests, and deeply Python-specific patterns (pydantic models, plexapi, diskcache). The shared code problem is unsolvable cleanly — path mapping rules, config validation, and Stash query logic would need to be duplicated or RPC'd across languages.
+
+### Why Not Rust
+
+Same ops argument, worse DX. Rust compile times (~30–60s clean builds) slow iteration on the provider's XML/JSON response marshaling, which needs to track Plex API changes. Async Rust is powerful but fighting the borrow checker for metadata transformation code is cost without benefit. Rust makes sense for a dedicated, stable, compute-bound service. This isn't that.
+
+### Why Python/FastAPI
+
+- **Shared code is real**: `shared/` directory holds path mapping, Stash GraphQL client, and config validation. All of it is Python. The provider can import it directly — no RPC, no duplication.
+- **FastAPI's async model fits the workload**: the provider's hot path is `POST /match` → `await stash_graphql_query()` → return JSON. Pure async I/O. FastAPI + uvicorn handles this well.
+- **Pydantic v2 already in requirements.txt**: Plex MediaContainer/Metadata response models get type-safe serialization for free with the library already present.
+- **Performance is adequate**: FastAPI handles 1,000–5,000 req/s on a single worker. Plex calls the provider once per file during a library scan — not a hot path. A library of 10,000 items scanned in one batch is ~10,000 requests spread over minutes.
+- **Docker isolates the new service**: the provider runs in its own container. Python's startup overhead and GIL are non-issues inside a long-running container.
+
+---
 
 ## Recommended Stack
 
-### Core Technologies (NEW for v1.5)
+### Core Technologies (NEW — provider service)
 
 | Technology | Version | Purpose | Why Recommended |
 |------------|---------|---------|-----------------|
-| json (stdlib) | 2.0.9 | Circuit breaker state persistence | Already validated in reconciliation scheduler (reconciliation/scheduler.py). Atomic write pattern (write to .tmp, os.replace) prevents corruption on crashes. Human-readable for debugging. Zero dependencies. |
-| diskcache | >=5.6.0 | Alternative state persistence (optional) | Already in requirements.txt (5.6.3 installed). Thread-safe, process-safe, dict-like API. Use if multi-process scenarios emerge or atomic transactions needed beyond JSON pattern. NOT required for initial implementation. |
+| FastAPI | >=0.115.14 | HTTP framework for Plex provider endpoints | Async-first, Pydantic v2 native, auto-generates OpenAPI spec for the Plex provider interface. Supports both JSON and XML responses. 0.115.14 is latest stable (Jul 2025). |
+| uvicorn | >=0.34.0 | ASGI server | FastAPI's recommended production server. Single-worker sufficient; Plex scan traffic is bursty, not sustained high-concurrency. |
+| pydantic v2 | >=2.0.0 | Response model validation + serialization | Already in requirements.txt. Models Plex MediaContainer, Metadata, Match response shapes. Type-safe construction prevents malformed responses. |
+| httpx | >=0.28.1 | Async HTTP client for Stash GraphQL calls | Replaces requests for async context inside FastAPI. Supports HTTP/1.1 and HTTP/2, connection pooling, timeout control. Used via `AsyncClient` singleton. |
+| APScheduler | >=3.11.0 | Scheduled gap detection (full comparison sweep) | AsyncIOScheduler integrates with FastAPI lifespan. Runs bi-directional gap detection on configurable interval (hourly/daily). Thread-safe, persistence optional. |
 
-### Existing Technologies (REUSE for v1.5)
+### Core Technologies (REUSE — existing plugin)
 
 | Technology | Version | Purpose | Why Reuse |
 |------------|---------|---------|-----------|
-| plexapi | >=4.17.0 | Health check via server.query('/identity') | v4.18.0 installed. No dedicated ping/health methods exist in plexapi. Use server.query('/identity') or try PlexServer init with timeout to detect connectivity. Lightweight XML response validates Plex is reachable. |
-| threading.Timer | stdlib | Check-on-invocation recovery trigger | Pattern validated in reconciliation/scheduler.py. Use is_due() pattern on each plugin invocation to check if queue drain should be attempted after circuit breaker recovery. |
-| time.time() | stdlib | Timestamps for recovery detection | Used in circuit_breaker.py for OPEN→HALF_OPEN timeout. Reuse for state persistence timestamps (circuit_opened_at, last_health_check). |
+| stashapi | >=0.2.59 | Stash GraphQL client | Already in requirements.txt (stashapp-tools). Provides `findScenes`, `findScene`, title/performer/tag query methods. Use as the provider's Stash query layer. |
+| pydantic v2 | >=2.0.0 | Config validation for provider settings | Same config validation pattern as existing plugin. Provider config (provider port, stash URL, path mappings) uses same Pydantic model approach. |
+| plexapi | >=4.17.0 | Gap detection — compare Plex items against Stash | Already in requirements.txt. Bi-directional gap detection needs to enumerate Plex library items; plexapi handles this. |
+| diskcache | >=5.6.0 | Cache Stash query results in provider | Already in requirements.txt. Cache `findScene` results keyed by path or hash to avoid hammering Stash GraphQL on repeated Plex lookups. 5-minute TTL sufficient. |
+| tenacity | >=9.0.0 | Retry Stash GraphQL calls | Already in requirements.txt. Stash GraphQL endpoint can be temporarily unavailable during plugin restarts. Same retry pattern as Plex API calls. |
+| re (stdlib) | stdlib | Regex path mapping engine | Python stdlib regex engine. No external dependency. Path mapping rules are user-configured regex patterns with named groups. |
 
-### Supporting Libraries (DO NOT ADD)
+### Supporting Libraries (NEW — provider service)
 
-| Library | Version | Purpose | Why NOT Recommended |
-|---------|---------|---------|---------------------|
-| pybreaker | >=1.0.0 | Circuit breaker with Redis persistence | **AVOID** - Requires Redis server (external dependency). PlexSync circuit_breaker.py already implements 3-state pattern (CLOSED/OPEN/HALF_OPEN) in 140 lines. Adding external dependency contradicts single-file plugin deployment model. Use JSON persistence for existing circuit breaker instead. |
-| APScheduler | >=3.11.0 | Advanced scheduling | **NOT NEEDED** - Overkill for outage resilience. Check-on-invocation pattern (validated in reconciliation/scheduler.py) handles recovery triggers without timers/daemons. Plugin is invoked per-event, not long-running. |
-| redis-py | >=5.0.0 | Circuit breaker state storage | **AVOID** - Requires Redis server. Stash plugin users won't have Redis. JSON file persistence (stdlib) sufficient for state across restarts. |
+| Library | Version | Purpose | When to Use |
+|---------|---------|---------|-------------|
+| python-multipart | >=0.0.20 | Form data parsing (if Plex sends form-encoded match hints) | Only if Plex sends `application/x-www-form-urlencoded` match requests. The Plex API docs show JSON body for match, but older PMS versions may differ. |
+| pytest-asyncio | >=0.24.0 | Async test support for provider endpoints | Already in dev requirements or add now. Required for testing async FastAPI routes and async Stash GraphQL client. |
+| pytest-httpx | >=0.35.0 | Mock httpx requests in tests | Replaces responses/requests-mock for testing async Stash GraphQL calls inside the provider. Pairs with httpx. |
 
 ### Development Tools
 
 | Tool | Purpose | Notes |
 |------|---------|-------|
-| pytest | Test circuit breaker persistence | Already in use (999 tests). Add tests for circuit breaker state save/load, recovery detection, health check logic. |
-| pytest-mock | Mock plexapi server.query('/identity') | Already in use. Mock server.query to simulate Plex outages, recoveries, partial failures. |
+| Docker + docker-compose | Container build and local dev | Provider runs as separate container alongside Stash. `docker-compose.yml` at repo root wires provider + (optionally) Stash. Multi-stage build: `python:3.11-slim-bookworm` base, ~150MB final image. |
+| uv | Python package manager inside Docker | Faster than pip for Docker builds. Optional but recommended if dev team adopts it. Otherwise pip with `--no-cache-dir`. |
+| FastAPI built-in `/docs` (Swagger UI) | Provider API documentation | FastAPI auto-generates OpenAPI spec. Useful for verifying Plex provider conformance during development without Plex pointing at the service. |
+
+---
+
+## Plex Provider API Requirements (verified from official docs)
+
+The provider must implement three HTTP endpoints. PMS 1.43.0+ required, API version 1.2.0.
+
+| Endpoint | Method | Purpose | Notes |
+|----------|--------|---------|-------|
+| `GET /` | GET | Provider registration — returns MediaProvider definition | Returns identifier, title, supported Types, Feature list. Plex fetches this to register the provider. |
+| `POST /library/metadata/matches` | POST | Match feature — find Stash scene matching Plex hints | Body: `{type, title, year, filename, guid, ...}`. Returns MediaContainer with Metadata[] ordered by confidence. |
+| `GET /library/metadata/{ratingKey}` | GET | Metadata feature — full metadata for a ratingKey | ratingKey must encode enough to reconstruct Stash scene ID (e.g., scene UUID or path hash). Returns MediaContainer with single Metadata object. |
+| `GET /library/metadata/{ratingKey}/images` | GET | Image assets (recommended, not required) | Returns poster/backdrop URLs pointing to Stash screenshot/preview endpoints. |
+
+**Response format:** JSON (provider returns `Content-Type: application/json`; Plex requests JSON via `Accept: application/json`). MediaContainer wraps Metadata[].
+
+**Authentication:** PMS sends `X-Plex-Token` header but current spec says "only unauthenticated requests are currently supported" — do NOT validate the token (it belongs to the user's Plex account, not a service account). Accept all requests.
+
+**Supported headers to read:**
+- `X-Plex-Language` (IETF tag, e.g. `en-US`) — return localized metadata if available
+- `X-Plex-Country` (ISO 3166 country code)
+- `X-Plex-Container-Size` / `X-Plex-Container-Start` — pagination (required for `/children`)
+
+**Provider identifier format:** `tv.plex.agents.custom.stash2plex` (alphanumeric + periods only).
+
+---
+
+## Path Mapping Engine
+
+The regex path mapping engine translates Plex file paths (as Plex sees them on the filesystem or via network share) to Stash file paths (as Stash indexes them). This is the critical matching component.
+
+**Recommendation: Python `re` stdlib — no external library needed.**
+
+Pattern: user configures a list of `(pattern, replacement)` tuples in the provider config. The engine applies them in order, stopping on first match.
+
+```python
+import re
+from typing import Optional
+
+MAPPING_RULES: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'^/mnt/plex/(?P<rest>.+)'), r'/data/stash/\g<rest>'),
+    (re.compile(r'^//nas/media/(?P<rest>.+)'), r'/mnt/stash/\g<rest>'),
+]
+
+def plex_to_stash_path(plex_path: str) -> Optional[str]:
+    for pattern, replacement in MAPPING_RULES:
+        if m := pattern.match(plex_path):
+            return m.expand(replacement)
+    return None  # No mapping found — fall back to filename/hash matching
+```
+
+Named groups allow non-trivial remappings (not just prefix swaps). Bidirectional: add separate `stash_to_plex_path()` using inverse rules for gap detection.
+
+**Why not `pathlib` substitution or simple `str.replace`:** regex handles drive-letter normalization, UNC paths, case-insensitive matching on Windows-hosted Plex, and partial path segment replacement. The complexity is justified by real user setups (SMB mounts, Docker volume remaps, NAS paths).
+
+---
+
+## Stash GraphQL Client (in provider)
+
+**Use `stashapi` (stashapp-tools 0.2.59) — do not write a raw GraphQL client.**
+
+stashapp-tools is the official community Python client for Stash's GraphQL API. It provides `find_scene()`, `find_scenes()`, and scene metadata access. Version 0.2.59 (Sep 2025) is current.
+
+For the provider's async context (FastAPI/httpx), wrap stashapi calls in `asyncio.to_thread()` if stashapi is synchronous, or use httpx directly for the two specific queries needed:
+
+```python
+# Two queries needed for the provider's match flow:
+# 1. Find scene by file path → GET scene metadata
+FIND_SCENE_BY_PATH = """
+query FindSceneByPath($path: String!) {
+  findScenes(scene_filter: { path: { value: $path, modifier: EQUALS } }) {
+    scenes {
+      id title date details
+      performers { name }
+      tags { name }
+      studio { name }
+      files { path }
+    }
+  }
+}
+"""
+
+# 2. Find scene by ID (for /library/metadata/{ratingKey} endpoint)
+FIND_SCENE_BY_ID = """
+query FindSceneById($id: ID!) {
+  findScene(id: $id) {
+    id title date details rating100
+    performers { name }
+    tags { name }
+    studio { name }
+    files { path }
+    urls
+  }
+}
+"""
+```
+
+**If stashapi's sync client conflicts with async:** use `httpx.AsyncClient` directly with the two GraphQL queries above. This is 50 lines, no dependency on stashapi sync internals.
+
+---
+
+## Docker Setup
+
+**Base image:** `python:3.11-slim-bookworm` — current recommended slim for production FastAPI (confirmed Feb 2026 community consensus).
+
+**Multi-stage build pattern:**
+
+```dockerfile
+# Stage 1: dependency install
+FROM python:3.11-slim-bookworm AS deps
+WORKDIR /app
+COPY provider/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Stage 2: runtime
+FROM python:3.11-slim-bookworm AS runtime
+WORKDIR /app
+COPY --from=deps /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY provider/ ./provider/
+COPY shared/ ./shared/
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+EXPOSE 8080
+CMD ["uvicorn", "provider.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
+```
+
+**Why single worker:** Plex scan traffic is bursty in short bursts, not sustained high-concurrency. uvicorn's async event loop handles concurrent requests without multiple workers. Multiple workers complicate APScheduler (gap detection would run N times). Single worker + async is cleaner.
+
+**docker-compose.yml** (monorepo root):
+
+```yaml
+services:
+  stash2plex-provider:
+    build:
+      context: .
+      dockerfile: provider/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - STASH_URL=http://stash:9999
+      - STASH_API_KEY=${STASH_API_KEY}
+      - PROVIDER_PORT=8080
+    volumes:
+      - ./provider/config.yml:/app/config.yml:ro
+    restart: unless-stopped
+```
+
+The Plex server needs network access to the provider container. In practice: either Plex is also in Docker (same network) or the provider port is published to the host and Plex accesses it via `http://host:8080`.
+
+---
+
+## Monorepo Structure
+
+```
+Stash2Plex/                    # existing repo root
+├── Stash2Plex.py              # existing plugin (unchanged)
+├── worker/                    # existing
+├── plex/                      # existing
+├── shared/                    # NEW — shared between plugin and provider
+│   ├── path_mapping.py        # Regex bidirectional path mapper
+│   ├── stash_client.py        # Stash GraphQL query helpers
+│   └── models.py              # Shared pydantic models (scene, config)
+└── provider/                  # NEW — Plex metadata provider service
+    ├── Dockerfile
+    ├── requirements.txt
+    ├── main.py                # FastAPI app, lifespan, route wiring
+    ├── routes/
+    │   ├── registration.py    # GET / — MediaProvider definition
+    │   ├── match.py           # POST /library/metadata/matches
+    │   └── metadata.py        # GET /library/metadata/{ratingKey}
+    ├── services/
+    │   ├── match_service.py   # Match logic: path map → Stash query → confidence
+    │   └── metadata_service.py # Metadata fetch and Plex response assembly
+    ├── scheduler.py           # APScheduler gap detection jobs
+    └── config.py              # Provider-specific Pydantic config model
+```
+
+**Shared code strategy:** `shared/` is a Python package (with `__init__.py`) importable by both the Stash plugin and the provider. The plugin imports it as a sibling package (already in sys.path via Stash plugin loader). The provider Docker image COPYs the `shared/` directory.
+
+---
+
+## Scheduling: Gap Detection
+
+**Use APScheduler 3.x AsyncIOScheduler integrated with FastAPI lifespan.**
+
+APScheduler is already evaluated for v1.5 but rejected because the Stash plugin is not a long-running daemon. The provider service IS a long-running Docker container — the original objection no longer applies.
+
+```python
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+
+scheduler = AsyncIOScheduler()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    scheduler.add_job(
+        run_gap_detection,
+        trigger="interval",
+        hours=config.gap_detection_interval_hours,
+        id="gap_detection",
+        replace_existing=True,
+    )
+    scheduler.start()
+    yield
+    scheduler.shutdown()
+
+app = FastAPI(lifespan=lifespan)
+```
+
+**Why APScheduler over `schedule` library:** APScheduler supports asyncio natively (AsyncIOScheduler runs jobs in the same event loop as FastAPI), supports cron/interval/date triggers, and is production-grade. The `schedule` library is synchronous-only and would require a thread, complicating the async architecture. APScheduler 3.11.x is stable and actively maintained (latest: 3.11.2.post1).
+
+**Gap detection architecture:** the scheduled job uses plexapi to enumerate all items in configured Plex libraries, maps each Plex file path to a Stash path via the regex engine, and queries Stash for each scene. Gaps are logged and optionally enqueued into the existing v1.x plugin queue for push-model sync.
+
+---
 
 ## Installation
 
 ```bash
-# NO NEW DEPENDENCIES REQUIRED
-# All capabilities available in existing stack:
-# - json (stdlib) for circuit breaker state persistence
-# - plexapi >=4.17.0 (already installed) for health checks
-# - threading.Timer (stdlib) for check-on-invocation pattern
-# - diskcache >=5.6.0 (already installed) as optional alternative
+# provider/requirements.txt (new file)
+fastapi>=0.115.14
+uvicorn[standard]>=0.34.0
+httpx>=0.28.1
+APScheduler>=3.11.0
+pydantic>=2.0.0
+stashapi>=0.2.59
+plexapi>=4.17.0
+diskcache>=5.6.0
+tenacity>=9.0.0
 
-# Existing requirements.txt unchanged:
-# persist-queue>=1.1.0
-# stashapi
-# plexapi>=4.17.0
-# tenacity>=9.0.0
-# pydantic>=2.0.0
-# diskcache>=5.6.0
+# provider/requirements-dev.txt (new file)
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+pytest-httpx>=0.35.0
+httpx>=0.28.1  # required by pytest-httpx
 ```
+
+**Existing plugin requirements.txt: unchanged.** The provider runs in a separate Docker container with its own dependency set. No new packages are added to the Stash plugin.
+
+---
 
 ## Alternatives Considered
 
 | Category | Recommended | Alternative | When to Use Alternative |
 |----------|-------------|-------------|-------------------------|
-| State Persistence | json (stdlib) | diskcache | If multi-process scenarios emerge (unlikely for Stash plugin). diskcache adds thread-safety guarantees beyond JSON, but atomic write pattern (write to .tmp, os.replace) already prevents corruption. Use JSON unless complexity justifies dict-like API. |
-| State Persistence | json (stdlib) | shelve (stdlib) | **AVOID** - shelve with writeback=True caches all entries in memory (memory consumption), slow close(). JSON is simpler and sufficient for small state (5-10 fields). |
-| Circuit Breaker Lib | Custom (circuit_breaker.py) | pybreaker | If Redis infrastructure exists (not typical for Stash users). pybreaker supports CircuitRedisStorage but requires redis-py + Redis server. Custom implementation is 140 lines, no dependencies, already validated. |
-| Health Check | plexapi server.query('/identity') | HTTP request with requests library | If plexapi removed from requirements (unlikely). server.query() wraps HTTP requests with proper auth, timeout handling, XML parsing. Reuse existing dependency. |
-| Recovery Trigger | Check-on-invocation (is_due pattern) | Threading.Timer with daemon thread | If plugin becomes long-running (contradicts Stash plugin model). Check-on-invocation validated in reconciliation/scheduler.py. Each plugin invocation checks if recovery attempt should occur (elapsed time since circuit opened). |
+| HTTP framework | FastAPI | Flask + Blueprints | Never for this project. Flask lacks async-native support; sync Flask with Plex API calls would block during Stash GraphQL lookups. FastAPI's async is not optional here. |
+| HTTP framework | FastAPI | Go net/http or Gin | If the team decides to fully decouple the provider from the Python codebase and accept no shared code. Would require duplicating path mapping, config models, and Stash query logic in Go. Not recommended. |
+| HTTP framework | FastAPI | Rust Axum | If extreme performance is required (>50,000 req/s). Not justified for Plex scan traffic (hundreds of requests per scan). |
+| ASGI server | uvicorn | gunicorn + uvicorn workers | If multiple workers needed (sustained high-concurrency). Single uvicorn worker is preferred to avoid APScheduler running N times per interval. Add gunicorn only if worker count needs to scale. |
+| GraphQL client | stashapi (stashapp-tools) | gql 4.0.0 + HTTPXAsyncTransport | If stashapi's sync model is a blocking problem in async context. gql with HTTPXAsyncTransport is a clean async-native GraphQL client. Use if `asyncio.to_thread(stashapi_call)` adds unacceptable latency. |
+| GraphQL client | stashapi (stashapp-tools) | Raw httpx POST | For the two specific queries needed (find by path, find by ID). Raw httpx is 50 lines, no extra dep. Recommended if stashapi pulls in unnecessary transitive deps in the provider container. |
+| Scheduler | APScheduler | Celery + Redis | Never for this project. Celery requires Redis/RabbitMQ broker. Massively overkill for a single recurring gap-detection job in a single-container service. |
+| Scheduler | APScheduler | cron (system) | If provider runs outside Docker (bare metal). System cron is simpler but can't access the FastAPI app context (shared Stash client, config). APScheduler inside the process has direct access. |
+| Path mapping | re (stdlib) | pathlib + string ops | For simple prefix-only mappings. Use `pathlib` if all user mappings are guaranteed to be prefix swaps. In practice, SMB/UNC/Docker volume paths need regex. Default to regex. |
+
+---
 
 ## What NOT to Use
 
 | Avoid | Why | Use Instead |
 |-------|-----|-------------|
-| pybreaker library | Requires Redis server (CircuitRedisStorage). Adds external dependency for persistence when JSON file suffices. Circuit breaker already implemented in worker/circuit_breaker.py (140 lines, 3-state, no deps). | Extend existing CircuitBreaker class with save_state()/load_state() methods using JSON. |
-| shelve for state | Complexity for small state. shelve is dict-like persistent storage but overkill for 5-10 fields. writeback=True caches all entries in memory, slow close(). | json with atomic write pattern (write to .tmp, os.replace). Pattern validated in reconciliation/scheduler.py save_state(). |
-| requests library for health check | Duplicate dependency when plexapi already wraps HTTP requests. plexapi.server.query('/identity') handles auth (X-Plex-Token header), timeout, XML parsing. | plexapi.server.query('/identity') or catch PlexServer init timeout. |
-| External cron for recovery trigger | Breaks single-file plugin deployment. Requires system-level config. Stash scheduled tasks only support JavaScript (not Python). | Check-on-invocation pattern: on each plugin invocation, load circuit breaker state, check if recovery_timeout elapsed, attempt health check if OPEN→HALF_OPEN transition due. |
-| APScheduler for recovery trigger | Overkill for simple time-based check. Adds dependency (not in requirements.txt). Stash plugins are NOT long-running daemons — invoked per-event, then exit. | Check-on-invocation: scheduler.is_due() pattern from reconciliation/scheduler.py. Load state, check elapsed time, trigger recovery attempt if due. |
-| Redis for state storage | Requires Redis server installation and configuration. Stash plugin users won't have Redis. State persistence needs are minimal (circuit breaker state across process restarts). | JSON file with atomic write. Sufficient for state: circuit state enum, opened_at timestamp, failure/success counts. |
+| Flask | Synchronous by default. The match endpoint awaits a Stash GraphQL call; Flask would block the entire process during each Plex request. | FastAPI with async def route handlers. |
+| Django | 10x more framework than needed. No ORM needed (Stash is the data source). Startup overhead in a lightweight container. | FastAPI. |
+| Go (separate service) | Requires duplicating path mapping logic, Stash GraphQL queries, and config parsing in a second language. Shared code via RPC is more complex than the shared Python package approach. | FastAPI + `shared/` Python package. |
+| Celery | Requires Redis or RabbitMQ broker. Gap detection is one job on a cron interval — APScheduler handles this with zero infrastructure overhead. | APScheduler AsyncIOScheduler. |
+| gql library (as default) | gql 4.0.0 adds a dependency for something stashapi (already required) already provides. Only add gql if stashapi's sync model causes actual problems in async. | stashapi (stashapp-tools), or raw httpx if stashapi sync causes issues. |
+| XML response generation | Plex supports JSON (`Accept: application/json`). XML is default but new providers should use JSON. Generating XML in Python requires lxml or ElementTree and is error-prone compared to Pydantic JSON serialization. | FastAPI JSONResponse with Pydantic models. Set `Content-Type: application/json`. |
+| gunicorn multi-worker (default) | Multiple uvicorn workers cause APScheduler gap detection to run once per worker per interval. Requires sticky sessions or external state to coordinate. | Single uvicorn worker (`--workers 1`). Scale via multiple container replicas only if scan traffic justifies it (unlikely). |
+| SQLite in provider | No persistent state needed in the provider itself. Match results cache → diskcache. Gap detection results → logged + optionally forwarded to plugin queue. No new SQLite tables. | diskcache for response caching, in-memory for transient state. |
+
+---
 
 ## Stack Patterns by Variant
 
-### Circuit Breaker State Persistence
+**If Stash and Plex are on the same Docker network:**
+- Provider container joins same network, accesses Stash via service name (`http://stash:9999`)
+- No port exposure needed for Stash → provider calls
+- Plex accesses provider via container name or published port
 
-**Pattern: JSON file with atomic write**
-```python
-# In worker/circuit_breaker.py (NEW methods)
+**If Stash is on bare metal (not Docker):**
+- Provider container accesses Stash via host IP + port (`http://host.docker.internal:9999` on Mac/Windows, `http://172.17.0.1:9999` on Linux)
+- Set `STASH_URL` env var accordingly in docker-compose
 
-import json
-import os
+**If stashapi sync is a problem in async context:**
+- Replace stashapi calls with `await asyncio.to_thread(stashapi.find_scene, scene_id)` first
+- If still blocking, replace stashapi with raw `httpx.AsyncClient` POST to Stash GraphQL endpoint
+- The two required queries are simple enough to inline (50 lines each)
 
-STATE_FILE = 'circuit_breaker_state.json'
+**If gap detection interval needs to be dynamic:**
+- Store APScheduler job ID and use `scheduler.reschedule_job()` on config reload
+- Config reload triggered by `POST /admin/reload-config` endpoint (optional, not in MVP)
 
-def save_state(self, data_dir: str) -> None:
-    """Save circuit breaker state to JSON file atomically."""
-    state = {
-        'state': self._state.value,  # 'closed', 'open', 'half_open'
-        'opened_at': self._opened_at,
-        'failure_count': self._failure_count,
-        'success_count': self._success_count,
-    }
-    state_path = os.path.join(data_dir, STATE_FILE)
-    tmp_path = state_path + '.tmp'
-    with open(tmp_path, 'w') as f:
-        json.dump(state, f, indent=2)
-    os.replace(tmp_path, state_path)  # Atomic on POSIX
-
-def load_state(self, data_dir: str) -> None:
-    """Load circuit breaker state from JSON file."""
-    state_path = os.path.join(data_dir, STATE_FILE)
-    if os.path.exists(state_path):
-        with open(state_path, 'r') as f:
-            data = json.load(f)
-        self._state = CircuitState(data['state'])
-        self._opened_at = data['opened_at']
-        self._failure_count = data['failure_count']
-        self._success_count = data['success_count']
-```
-
-**Why this pattern:**
-- Atomic write (os.replace) prevents corruption on crashes
-- Human-readable JSON for debugging circuit breaker stuck states
-- Minimal state (4 fields) — JSON overhead negligible
-- Pattern validated in reconciliation/scheduler.py (save_state, load_state)
-
-### Health Check Implementation
-
-**Pattern: plexapi server.query('/identity') with timeout**
-```python
-# In worker/processor.py or new worker/health.py
-
-def check_plex_health(plex_client: PlexClient, timeout: float = 5.0) -> bool:
-    """
-    Check if Plex server is reachable.
-
-    Returns:
-        True if Plex responds to /identity request within timeout.
-    """
-    try:
-        # PlexServer.query() method makes raw API requests
-        plex_client.server.query('/identity', timeout=timeout)
-        return True
-    except Exception as e:
-        log_debug(f"Plex health check failed: {e}")
-        return False
-```
-
-**Why this approach:**
-- /identity endpoint is lightweight (returns server UUID, version, platform XML)
-- plexapi.server.query() handles auth (X-Plex-Token), timeout, HTTP errors
-- No additional dependencies beyond existing plexapi
-- Alternative: catch PlexServer init timeout, but query() is more explicit
-
-**Source:** [PlexAPI Server Documentation](https://python-plexapi.readthedocs.io/en/latest/modules/server.html) — server.query() method, timeout parameter
-
-### Recovery Trigger (Check-on-Invocation)
-
-**Pattern: Reuse reconciliation/scheduler.py is_due() logic**
-```python
-# In worker/circuit_breaker.py (extend existing state property)
-
-@property
-def should_attempt_recovery(self) -> bool:
-    """
-    Check if recovery attempt should be made.
-
-    Returns True if circuit is OPEN and recovery_timeout has elapsed.
-    This is checked on each plugin invocation (check-on-invocation pattern).
-    """
-    if self._state == CircuitState.OPEN and self._opened_at is not None:
-        elapsed = time.time() - self._opened_at
-        return elapsed >= self._recovery_timeout
-    return False
-```
-
-**Integration in processor.py:**
-```python
-# In SyncWorker._process_jobs() or startup
-def check_recovery_trigger(self):
-    """
-    Check if circuit breaker recovery should be attempted.
-
-    Called on each plugin invocation. If recovery timeout elapsed,
-    attempts health check to transition OPEN → HALF_OPEN.
-    """
-    if self.circuit_breaker.should_attempt_recovery:
-        log_info("Circuit breaker recovery timeout elapsed, checking Plex health...")
-        if check_plex_health(self.plex_client):
-            log_info("Plex health check passed, transitioning to HALF_OPEN")
-            # Circuit breaker state property automatically transitions OPEN → HALF_OPEN
-            # on next can_execute() call when timeout elapsed
-            self.circuit_breaker.state  # Trigger state property to transition
-        else:
-            log_debug("Plex health check failed, circuit remains OPEN")
-```
-
-**Why this pattern:**
-- Stash plugins invoked per-event (Scene.Update, Task.Start) — check on each invocation
-- No daemon thread/timer needed (contradicts Stash plugin lifecycle)
-- Pattern validated in reconciliation/scheduler.py (is_due checks elapsed time)
-- Gracefully handles rapid plugin invocations (checks elapsed time, avoids spam)
-
-### Queue Drain After Recovery
-
-**Pattern: Trigger process_queue task on circuit close**
-```python
-# In worker/circuit_breaker.py (_close method)
-
-def _close(self) -> None:
-    """Transition to CLOSED state and trigger queue drain."""
-    self._state = CircuitState.CLOSED
-    self._opened_at = None
-    self._failure_count = 0
-    self._success_count = 0
-
-    # NEW: Log recovery for observability
-    log_info("Circuit breaker closed after recovery, queue drain will resume")
-
-    # Save state to persist across restarts
-    if hasattr(self, '_data_dir') and self._data_dir:
-        self.save_state(self._data_dir)
-```
-
-**Queue drain logic (in SyncWorker):**
-```python
-# In worker/processor.py (_process_jobs loop)
-def _process_jobs(self):
-    """Process jobs from queue, respecting circuit breaker state."""
-    while self.running:
-        if not self.circuit_breaker.can_execute():
-            # Circuit OPEN — check if recovery should be attempted
-            if self.circuit_breaker.should_attempt_recovery:
-                self.check_recovery_trigger()
-            time.sleep(1.0)  # Backoff while circuit open
-            continue
-
-        # Circuit CLOSED or HALF_OPEN — process queue
-        try:
-            job = self.queue.get(timeout=1.0)
-            if job:
-                self._process_job(job)
-        except Empty:
-            time.sleep(1.0)
-```
-
-**Why this approach:**
-- Worker loop already checks can_execute() before processing jobs
-- Add recovery check when circuit OPEN (check_recovery_trigger)
-- Queue drain resumes automatically when circuit transitions CLOSED
-- No manual trigger needed — worker loop handles queue processing
+---
 
 ## Version Compatibility
 
 | Package A | Compatible With | Notes |
 |-----------|-----------------|-------|
-| json@2.0.9 (stdlib) | Python 3.9+ | Built-in. No compatibility concerns. Plugin already requires Python 3.9+ (PythonDepManager). |
-| plexapi@4.18.0 | Python 3.9+ | server.query() method exists in 4.17.0+. /identity endpoint is core Plex API (stable across versions). |
-| diskcache@5.6.0 | Python 3.9+ | Already in requirements.txt. Optional for state persistence if JSON pattern insufficient. |
-| threading.Timer (stdlib) | Python 3.9+ | Built-in. Used in reconciliation scheduler (validated pattern). |
+| FastAPI 0.115.14 | pydantic>=2.0.0 | FastAPI 0.115.x requires pydantic v2. Already in requirements.txt. |
+| FastAPI 0.115.14 | uvicorn>=0.34.0 | FastAPI 0.115.x compatible with uvicorn 0.34.x. |
+| APScheduler 3.11.x | Python 3.9+ | AsyncIOScheduler requires Python 3.7+. Plugin already requires 3.9+. |
+| httpx 0.28.1 | Python 3.8+ | Full async support. Compatible with Python 3.9+ (plugin baseline). |
+| pytest-asyncio 0.24.x | pytest 8.x | Requires pytest 8.x. If currently on older pytest, upgrade. |
+| pytest-httpx 0.35.x | httpx 0.28.x | Version-matched: pytest-httpx minor version must match httpx minor version. |
+| stashapi 0.2.59 | Python 3.9+ | Developed on Python 3.11, maintains 3.9+ compatibility. |
 
-## Integration Considerations
-
-### Circuit Breaker State Persistence
-
-**When to save state:**
-- On state transitions: CLOSED→OPEN, OPEN→HALF_OPEN, HALF_OPEN→CLOSED, HALF_OPEN→OPEN
-- After record_success() / record_failure() that change counts
-- Use atomic write pattern (write to .tmp, os.replace) to prevent corruption
-
-**State file location:**
-- Use plugin data_dir (passed to SyncWorker)
-- Same directory as stats.json, reconciliation_state.json, sync_timestamps.json
-- File: circuit_breaker_state.json
-
-**Load state timing:**
-- Load in SyncWorker.__init__() after circuit breaker creation
-- Before worker thread starts (ensure state loaded before first can_execute())
-
-### Plex Health Check
-
-**Timeout considerations:**
-- Use short timeout (5 seconds) for health checks
-- Distinguish from sync operation timeouts (30-60 seconds)
-- Health check is lightweight — /identity returns ~200 bytes XML
-
-**When to health check:**
-- On recovery trigger (circuit OPEN, recovery_timeout elapsed)
-- NOT on every can_execute() call (avoid health check spam)
-- NOT on CLOSED→OPEN transition (failure already occurred)
-
-**Error handling:**
-- Catch all exceptions (requests.RequestException, plexapi.exceptions.*)
-- Health check failure keeps circuit OPEN (does NOT reopen circuit)
-- Log at DEBUG level (avoid log spam during prolonged outages)
-
-### Recovery Trigger Pattern
-
-**Check-on-invocation mechanics:**
-- Each plugin invocation loads circuit breaker state (if persisted)
-- Check should_attempt_recovery in worker loop (when circuit OPEN)
-- Elapsed time check prevents spam (recovery_timeout default: 60 seconds)
-
-**Integration with existing patterns:**
-- Reconciliation scheduler uses same pattern (is_due checks elapsed time)
-- No conflicts with existing worker loop (add recovery check in OPEN branch)
-
-**Graceful handling of rapid invocations:**
-- If plugin invoked rapidly while circuit OPEN, recovery check occurs max once per recovery_timeout
-- State property transition (OPEN→HALF_OPEN) happens automatically on elapsed timeout
-
-### Performance Impact
-
-**State persistence overhead:**
-- JSON serialize/deserialize: <1ms for 4 fields
-- Atomic write (write to .tmp, os.replace): <5ms
-- Save on state transitions (infrequent: ~5-10 per outage cycle)
-- Negligible impact compared to Plex API calls (100-500ms)
-
-**Health check overhead:**
-- /identity request: ~50-200ms when Plex healthy
-- Timeout on failure: 5 seconds (configurable)
-- Frequency: once per recovery_timeout (default 60s) when circuit OPEN
-- Does NOT block hook handlers (worker runs in daemon thread)
-
-**Queue drain performance:**
-- No change from existing behavior
-- Worker loop already polls queue with 1 second timeout
-- Recovery check adds <1ms when circuit OPEN
+---
 
 ## Sources
 
-### Circuit Breaker State Persistence
-- [Python JSON Documentation](https://docs.python.org/3/library/json.html) — HIGH confidence: stdlib, version 2.0.9, basic serialization
-- [pybreaker PyPI](https://pypi.org/project/pybreaker/) — HIGH confidence: Redis persistence, CircuitRedisStorage, not recommended for PlexSync
-- [DiskCache Documentation](https://grantjenks.com/docs/diskcache/) — HIGH confidence: thread-safe dict-like persistence, already in requirements.txt
-- [shelve — Python Object Persistence](https://docs.python.org/3/library/shelve.html) — HIGH confidence: stdlib, not recommended (complexity, memory consumption)
-- [DiskCache vs persist-queue comparison](https://github.com/grantjenks/python-diskcache) — MEDIUM confidence: feature comparison, use cases
-- Existing codebase: `reconciliation/scheduler.py` save_state()/load_state() pattern (JSON + atomic write) — validated
-
-### Plex Health Check
-- [PlexAPI Server Documentation](https://python-plexapi.readthedocs.io/en/latest/modules/server.html) — HIGH confidence: server.query() method, timeout parameter, no dedicated health/ping methods
-- [Plex API Documentation — Server Identity](https://plexapi.dev/api-reference/server/get-server-capabilities) — MEDIUM confidence: /identity endpoint structure
-- [Plex Healthcheck Gist](https://gist.github.com/dimo414/aaaee1c639d292a64b72f4644606fbf0) — LOW confidence: community pattern, not official docs
-- [pms-docker healthcheck.sh](https://github.com/plexinc/pms-docker/blob/master/root/healthcheck.sh) — MEDIUM confidence: official Docker healthcheck uses /identity endpoint
-- Existing codebase: `worker/circuit_breaker.py` (3-state pattern validated, 999 tests) — HIGH confidence
-
-### Recovery Trigger Pattern
-- Existing codebase: `reconciliation/scheduler.py` is_due() pattern — HIGH confidence: validated check-on-invocation pattern
-- [Event-Driven Architecture Patterns (Solace)](https://solace.com/event-driven-architecture-patterns/) — MEDIUM confidence: recovery patterns, DLQ pattern
-- [How to Handle Event-Driven Architecture Failures (TechTarget)](https://www.techtarget.com/searchapparchitecture/tip/How-to-handle-typical-event-driven-architecture-failures) — MEDIUM confidence: recovery mechanisms, event replay
-- [Rebuilding Read Models and Dead-Letter Queues](https://event-driven.io/en/rebuilding_read_models_skipping_events/) — MEDIUM confidence: DLQ recovery trigger patterns
+- [Plex Developer Documentation — Metadata Providers](https://developer.plex.tv/pms/index.html#section/API-Info/Metadata-Providers) — HIGH confidence: official API spec, endpoints, response format verified
+- [Plex Custom Metadata Providers Forum Announcement](https://forums.plex.tv/t/announcement-custom-metadata-providers/934384/) — MEDIUM confidence: community confirmation, PMS 1.43.0+ requirement, beta status confirmed
+- [plexinc/tmdb-example-provider (GitHub)](https://github.com/plexinc/tmdb-example-provider) — HIGH confidence: official Plex reference implementation (TypeScript/Express), confirms endpoint structure and response shapes
+- [Drewpeifer/plex-meta-tvdb (GitHub)](https://github.com/Drewpeifer/plex-meta-tvdb) — MEDIUM confidence: community implementation confirming MediaContainer JSON response format
+- [FastAPI Release Notes](https://fastapi.tiangolo.com/release-notes/) — HIGH confidence: 0.115.14 current stable confirmed
+- [FastAPI Docker Deployment Guide](https://fastapi.tiangolo.com/deployment/docker/) — HIGH confidence: official uvicorn + slim base image pattern
+- [APScheduler 3.x Documentation](https://apscheduler.readthedocs.io/en/3.x/userguide.html) — HIGH confidence: AsyncIOScheduler + FastAPI lifespan integration pattern
+- [stashapp-tools PyPI](https://pypi.org/project/stashapp-tools/) — HIGH confidence: version 0.2.59 current (Sep 2025)
+- [Stash GraphQL scene.graphql schema (GitHub)](https://github.com/stashapp/stash/blob/develop/graphql/schema/types/scene.graphql) — HIGH confidence: verified scene fields (title, date, performers, tags, studio, files, details)
+- [httpx PyPI](https://www.python-httpx.org/) — HIGH confidence: 0.28.1 current, async client confirmed
+- [gql 4.0.0 documentation](https://gql.readthedocs.io/en/stable/) — MEDIUM confidence: async alternative if stashapi sync model blocks
+- Go vs FastAPI performance benchmarks (multiple sources, 2024–2025) — MEDIUM confidence: consistent 5–12x Go throughput advantage; I/O-bound workload narrows gap significantly
 
 ---
-*Stack research for: PlexSync Outage Resilience Features (v1.5)*
-*Researched: 2026-02-15*
-*Key Recommendation: NO NEW DEPENDENCIES — extend existing circuit breaker with JSON state persistence, plexapi health checks, check-on-invocation recovery triggers*
+
+*Stack research for: Plex Metadata Provider Service (v2.0)*
+*Researched: 2026-02-23*
+*Key Recommendation: Python FastAPI (not Go, not Rust) — shared code with existing plugin justifies language consistency over performance headroom. Provider runs in Docker; separation of concerns achieved at container boundary, not language boundary.*
