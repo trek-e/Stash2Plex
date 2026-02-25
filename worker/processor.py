@@ -323,9 +323,7 @@ class SyncWorker:
         from sync_queue.operations import get_pending, ack_job, nack_job, fail_job
 
         # Track recently-processed scene IDs to skip duplicates within this session.
-        # Capped to prevent unbounded memory growth in long-running workers.
         _recently_synced: set = set()
-        _DEDUP_CAP = 50000  # Reset after this many to bound memory
 
         while self.running:
             try:
@@ -417,8 +415,8 @@ class SyncWorker:
                 retry_count = item.get('retry_count', 0)
 
                 # Skip duplicate scene IDs (queue may have multiple entries from
-                # overlapping reconciliation runs or repeated hooks)
-                if scene_id is not None and retry_count == 0 and scene_id in _recently_synced:
+                # overlapping reconciliation runs, repeated hooks, or retry copies)
+                if scene_id is not None and scene_id in _recently_synced:
                     ack_job(self.queue, item)
                     log_debug(f"Job {pqid} skipped — scene {scene_id} already synced this session")
                     continue
@@ -460,8 +458,6 @@ class SyncWorker:
                     # Track for dedup (skip future duplicates of this scene)
                     if scene_id is not None:
                         _recently_synced.add(scene_id)
-                        if len(_recently_synced) > _DEDUP_CAP:
-                            _recently_synced.clear()
 
                     # Brief pause between jobs to avoid overwhelming Plex
                     time.sleep(0.15)
