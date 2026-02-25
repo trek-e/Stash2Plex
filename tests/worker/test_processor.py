@@ -1697,3 +1697,536 @@ class TestRecoveryStateExtension:
         # Load and verify
         state = scheduler.load_state()
         assert state.recovery_started_at == 0.0
+
+
+class TestUnknownExceptionRetryProgression:
+    """Tests for catch-all exception handler retry progression.
+
+    Unknown exceptions must increment retry_count and eventually DLQ,
+    not loop forever via bare nack_job().
+    """
+
+    def test_unknown_error_increments_retry_count(self, processor_worker):
+        """Unknown exception uses _prepare_for_retry to track attempts."""
+        job = {
+            'scene_id': 42,
+            'pqid': 1,
+            'data': {'path': '/test.mp4'},
+        }
+
+        with patch.object(processor_worker, '_process_job', side_effect=RuntimeError("kaboom")):
+            with patch.object(processor_worker, '_requeue_with_metadata') as mock_requeue:
+                with patch.object(processor_worker, '_prepare_for_retry', wraps=processor_worker._prepare_for_retry) as mock_prep:
+                    # Simulate the worker loop error handling inline
+                    import time
+                    _job_start = time.perf_counter()
+                    try:
+                        processor_worker._process_job(job)
+                    except RuntimeError as e:
+                        _job_elapsed = time.perf_counter() - _job_start
+                        processor_worker.circuit_breaker.record_failure()
+                        updated_job = processor_worker._prepare_for_retry(job, e)
+                        max_retries = processor_worker.max_retries
+                        job_retry_count = updated_job.get('retry_count', 0)
+
+                        if job_retry_count >= max_retries:
+                            pass  # Would go to DLQ
+                        else:
+                            processor_worker._requeue_with_metadata(updated_job)
+
+                    mock_prep.assert_called_once()
+                    mock_requeue.assert_called_once()
+                    requeued = mock_requeue.call_args[0][0]
+                    assert requeued['retry_count'] == 1
+                    assert requeued['last_error_type'] == 'RuntimeError'
+                    assert 'next_retry_at' in requeued
+
+    def test_unknown_error_reaches_dlq_after_max_retries(self, processor_worker):
+        """Unknown exception moves job to DLQ once max_retries exhausted."""
+        job = {
+            'scene_id': 42,
+            'pqid': 1,
+            'data': {'path': '/test.mp4'},
+            'retry_count': processor_worker.max_retries - 1,  # One away from limit
+        }
+
+        with patch.object(processor_worker, '_process_job', side_effect=RuntimeError("kaboom")):
+            import time
+            _job_start = time.perf_counter()
+            try:
+                processor_worker._process_job(job)
+            except RuntimeError as e:
+                _job_elapsed = time.perf_counter() - _job_start
+                updated_job = processor_worker._prepare_for_retry(job, e)
+                job_retry_count = updated_job.get('retry_count', 0)
+
+                if job_retry_count >= processor_worker.max_retries:
+                    processor_worker.dlq.add(updated_job, e, job_retry_count)
+                    processor_worker._stats.record_failure(
+                        type(e).__name__, _job_elapsed, to_dlq=True
+                    )
+
+            # DLQ should have received the job
+            processor_worker.dlq.add.assert_called_once()
+            dlq_job = processor_worker.dlq.add.call_args[0][0]
+            assert dlq_job['retry_count'] == processor_worker.max_retries
+            assert dlq_job['scene_id'] == 42
+
+
+class TestPrepareForRetry:
+    """Tests for _prepare_for_retry() retry metadata injection."""
+
+    def test_first_retry_sets_count_to_one(self, processor_worker):
+        """First retry increments retry_count from 0 to 1."""
+        job = {'scene_id': 1, 'data': {}}
+        error = ConnectionError("timeout")
+
+        result = processor_worker._prepare_for_retry(job, error)
+
+        assert result['retry_count'] == 1
+        assert result['last_error_type'] == 'ConnectionError'
+        assert 'next_retry_at' in result
+
+    def test_preserves_existing_retry_count(self, processor_worker):
+        """Subsequent retries increment from existing count."""
+        job = {'scene_id': 1, 'data': {}, 'retry_count': 3}
+        error = ConnectionError("timeout")
+
+        result = processor_worker._prepare_for_retry(job, error)
+
+        assert result['retry_count'] == 4
+
+    def test_next_retry_at_is_in_future(self, processor_worker):
+        """next_retry_at is always after current time."""
+        import time
+        job = {'scene_id': 1, 'data': {}}
+        error = ConnectionError("timeout")
+        before = time.time()
+
+        result = processor_worker._prepare_for_retry(job, error)
+
+        assert result['next_retry_at'] >= before
+
+    def test_mutates_original_job(self, processor_worker):
+        """_prepare_for_retry modifies job dict in place and returns it."""
+        job = {'scene_id': 1, 'data': {}}
+        error = ConnectionError("timeout")
+
+        result = processor_worker._prepare_for_retry(job, error)
+
+        assert result is job  # Same object
+
+
+class TestIsReadyForRetry:
+    """Tests for _is_ready_for_retry() backoff check."""
+
+    def test_no_next_retry_at_is_ready(self, processor_worker):
+        """Job without next_retry_at is always ready."""
+        job = {'scene_id': 1}
+        assert processor_worker._is_ready_for_retry(job) is True
+
+    def test_past_retry_time_is_ready(self, processor_worker):
+        """Job past its backoff delay is ready."""
+        import time
+        job = {'scene_id': 1, 'next_retry_at': time.time() - 10}
+        assert processor_worker._is_ready_for_retry(job) is True
+
+    def test_future_retry_time_not_ready(self, processor_worker):
+        """Job still in backoff delay is not ready."""
+        import time
+        job = {'scene_id': 1, 'next_retry_at': time.time() + 60}
+        assert processor_worker._is_ready_for_retry(job) is False
+
+
+class TestRequeueWithMetadata:
+    """Tests for _requeue_with_metadata() ack-then-enqueue pattern."""
+
+    def test_acks_old_job_and_enqueues_new(self, processor_worker):
+        """Old job is ack'd, new job with metadata is put back."""
+        job = {
+            'scene_id': 42,
+            'update_type': 'metadata',
+            'data': {'path': '/test.mp4'},
+            'enqueued_at': 1000.0,
+            'job_key': 'scene_42',
+            'retry_count': 2,
+            'next_retry_at': 2000.0,
+            'last_error_type': 'TransientError',
+        }
+
+        processor_worker._requeue_with_metadata(job)
+
+        # Old job ack'd
+        processor_worker.queue.ack.assert_called_once_with(job)
+        # New job enqueued
+        processor_worker.queue.put.assert_called_once()
+        new_job = processor_worker.queue.put.call_args[0][0]
+        assert new_job['scene_id'] == 42
+        assert new_job['retry_count'] == 2
+        assert new_job['next_retry_at'] == 2000.0
+        assert new_job['last_error_type'] == 'TransientError'
+        assert new_job['data'] == {'path': '/test.mp4'}
+
+    def test_new_job_gets_fresh_pqid(self, processor_worker):
+        """Re-enqueued job gets a new pqid (not the old one)."""
+        job = {
+            'pqid': 999,
+            'scene_id': 42,
+            'update_type': 'metadata',
+            'data': {},
+        }
+
+        processor_worker._requeue_with_metadata(job)
+
+        new_job = processor_worker.queue.put.call_args[0][0]
+        assert new_job['pqid'] != 999  # Fresh counter value
+
+
+class TestStartStop:
+    """Tests for start() and stop() lifecycle."""
+
+    def test_start_sets_running_and_spawns_thread(self, processor_worker):
+        """start() sets running=True and creates daemon thread."""
+        with patch.object(processor_worker, '_worker_loop'):
+            processor_worker.start()
+
+            assert processor_worker.running is True
+            assert processor_worker.thread is not None
+            assert processor_worker.thread.daemon is True
+
+            processor_worker.stop()
+
+    def test_start_cleans_up_old_dlq_entries(self, processor_worker):
+        """start() deletes DLQ entries older than retention period."""
+        with patch.object(processor_worker, '_worker_loop'):
+            processor_worker.start()
+
+            processor_worker.dlq.delete_older_than.assert_called_once_with(days=30)
+
+            processor_worker.stop()
+
+    def test_start_when_already_running_is_noop(self, processor_worker):
+        """Calling start() twice doesn't spawn a second thread."""
+        with patch.object(processor_worker, '_worker_loop'):
+            processor_worker.start()
+            first_thread = processor_worker.thread
+
+            processor_worker.start()  # second call
+            assert processor_worker.thread is first_thread
+
+            processor_worker.stop()
+
+    def test_stop_sets_running_false(self, processor_worker):
+        """stop() sets running=False so loop exits."""
+        with patch.object(processor_worker, '_worker_loop'):
+            processor_worker.start()
+            processor_worker.stop()
+
+            assert processor_worker.running is False
+
+
+class TestWorkerLoop:
+    """Integration tests for _worker_loop() orchestration.
+
+    These test the actual loop by controlling get_pending() to feed
+    exactly one job, then stopping the loop via running=False.
+    """
+
+    def _make_job(self, scene_id=1, **overrides):
+        """Helper to create a test job dict."""
+        job = {
+            'pqid': scene_id,
+            'scene_id': scene_id,
+            'update_type': 'metadata',
+            'data': {'path': f'/test/{scene_id}.mp4'},
+            'enqueued_at': 1000.0,
+            'job_key': f'scene_{scene_id}',
+        }
+        job.update(overrides)
+        return job
+
+    def _run_one_iteration(self, worker, job, process_side_effect=None):
+        """Run _worker_loop for exactly one job, then stop.
+
+        Patches sync_queue.operations (the import source) so that
+        _worker_loop's lazy `from sync_queue.operations import ...`
+        picks up the mocks.
+        """
+        call_count = 0
+
+        def feed_one_job(queue, timeout=2):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return job
+            worker.running = False
+            return None
+
+        mock_get_pending = Mock(side_effect=feed_one_job)
+        mock_ack = Mock()
+        mock_nack = Mock()
+        mock_fail = Mock()
+
+        process_mock = Mock(return_value='high')
+        if process_side_effect:
+            process_mock = Mock(side_effect=process_side_effect)
+
+        # Patch at the source module — _worker_loop does
+        # `from sync_queue.operations import get_pending, ack_job, ...`
+        with patch('sync_queue.operations.get_pending', mock_get_pending), \
+             patch('sync_queue.operations.ack_job', mock_ack), \
+             patch('sync_queue.operations.nack_job', mock_nack), \
+             patch('sync_queue.operations.fail_job', mock_fail), \
+             patch.object(worker, '_process_job', process_mock):
+            worker.running = True
+            worker._worker_loop()
+
+        return {
+            'process_job': process_mock,
+            'ack_job': mock_ack,
+            'nack_job': mock_nack,
+            'fail_job': mock_fail,
+            'get_pending': mock_get_pending,
+        }
+
+    def test_successful_job_is_acked(self, processor_worker):
+        """Successful job processing acks the job and records success."""
+        job = self._make_job()
+
+        mocks = self._run_one_iteration(processor_worker, job)
+
+        mocks['process_job'].assert_called_once_with(job)
+        mocks['ack_job'].assert_called_once_with(processor_worker.queue, job)
+        assert processor_worker._stats.jobs_succeeded >= 1
+
+    def test_permanent_error_goes_to_dlq_immediately(self, processor_worker):
+        """PermanentError skips retries and goes straight to DLQ."""
+        from worker.processor import PermanentError
+        job = self._make_job()
+
+        mocks = self._run_one_iteration(
+            processor_worker, job,
+            process_side_effect=PermanentError("bad data"),
+        )
+
+        mocks['fail_job'].assert_called_once()
+        processor_worker.dlq.add.assert_called_once()
+        mocks['ack_job'].assert_not_called()
+
+    def test_transient_error_requeues_with_retry_metadata(self, processor_worker):
+        """TransientError triggers retry with backoff metadata."""
+        from worker.processor import TransientError
+        job = self._make_job()
+
+        with patch.object(processor_worker, '_requeue_with_metadata') as mock_requeue:
+            mocks = self._run_one_iteration(
+                processor_worker, job,
+                process_side_effect=TransientError("timeout"),
+            )
+
+            mock_requeue.assert_called_once()
+            requeued = mock_requeue.call_args[0][0]
+            assert requeued['retry_count'] == 1
+
+    def test_transient_error_exhausted_goes_to_dlq(self, processor_worker):
+        """TransientError at max_retries goes to DLQ."""
+        from worker.processor import TransientError
+        job = self._make_job(retry_count=processor_worker.max_retries - 1)
+
+        mocks = self._run_one_iteration(
+            processor_worker, job,
+            process_side_effect=TransientError("timeout"),
+        )
+
+        mocks['fail_job'].assert_called_once()
+        processor_worker.dlq.add.assert_called_once()
+
+    def test_plex_server_down_nacks_without_retry_count(self, processor_worker):
+        """PlexServerDown nacks job (no retry_count increment — circuit breaker handles it)."""
+        from plex.exceptions import PlexServerDown
+        job = self._make_job()
+
+        mocks = self._run_one_iteration(
+            processor_worker, job,
+            process_side_effect=PlexServerDown("connection refused"),
+        )
+
+        mocks['nack_job'].assert_called_once_with(processor_worker.queue, job)
+        mocks['fail_job'].assert_not_called()
+        processor_worker.dlq.add.assert_not_called()
+
+    def test_plex_not_found_retry_progression(self, processor_worker):
+        """PlexNotFound uses extended retry params (12 retries, not 5)."""
+        from plex.exceptions import PlexNotFound
+        job = self._make_job()
+
+        with patch.object(processor_worker, '_requeue_with_metadata') as mock_requeue:
+            mocks = self._run_one_iteration(
+                processor_worker, job,
+                process_side_effect=PlexNotFound("not in library"),
+            )
+
+            mock_requeue.assert_called_once()
+            # PlexNotFound gets 12 retries, so first failure should requeue
+            mocks['fail_job'].assert_not_called()
+
+    def test_unknown_exception_requeues_with_retry(self, processor_worker):
+        """Unknown exceptions now use retry progression (not bare nack)."""
+        job = self._make_job()
+
+        with patch.object(processor_worker, '_requeue_with_metadata') as mock_requeue:
+            mocks = self._run_one_iteration(
+                processor_worker, job,
+                process_side_effect=RuntimeError("unexpected"),
+            )
+
+            mock_requeue.assert_called_once()
+            requeued = mock_requeue.call_args[0][0]
+            assert requeued['retry_count'] == 1
+            assert requeued['last_error_type'] == 'RuntimeError'
+
+    def test_unknown_exception_exhausted_goes_to_dlq(self, processor_worker):
+        """Unknown exception at max_retries goes to DLQ."""
+        job = self._make_job(retry_count=processor_worker.max_retries - 1)
+
+        mocks = self._run_one_iteration(
+            processor_worker, job,
+            process_side_effect=RuntimeError("unexpected"),
+        )
+
+        mocks['fail_job'].assert_called_once()
+        processor_worker.dlq.add.assert_called_once()
+
+    def test_dedup_skips_recently_synced_scene(self, processor_worker):
+        """Second job for same scene_id is acked and skipped."""
+        job1 = self._make_job(scene_id=42)
+        job2 = self._make_job(scene_id=42)
+
+        call_count = 0
+
+        def feed_two_jobs(queue, timeout=2):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return job1
+            if call_count == 2:
+                return job2
+            processor_worker.running = False
+            return None
+
+        with patch('sync_queue.operations.get_pending', Mock(side_effect=feed_two_jobs)), \
+             patch('sync_queue.operations.ack_job') as mock_ack, \
+             patch('sync_queue.operations.nack_job'), \
+             patch('sync_queue.operations.fail_job'), \
+             patch.object(processor_worker, '_process_job', return_value='high') as mock_process:
+            processor_worker.running = True
+            processor_worker._worker_loop()
+
+        # _process_job called once (first job), second was deduped
+        mock_process.assert_called_once()
+        # Both jobs acked (first for success, second for dedup skip)
+        assert mock_ack.call_count == 2
+
+    def test_backoff_delay_not_elapsed_nacks_job(self, processor_worker):
+        """Job with future next_retry_at is nacked back to queue."""
+        import time
+        job = self._make_job(next_retry_at=time.time() + 600)
+
+        mocks = self._run_one_iteration(processor_worker, job)
+
+        mocks['nack_job'].assert_called_once()
+        mocks['process_job'].assert_not_called()
+
+    def test_circuit_breaker_open_skips_processing(self, processor_worker):
+        """When circuit breaker is open, no jobs are processed."""
+        processor_worker.circuit_breaker.can_execute = Mock(return_value=False)
+        # Make health check a no-op
+        processor_worker._last_health_check = float('inf')
+
+        iteration = 0
+
+        def stop_after_one(*args, **kwargs):
+            nonlocal iteration
+            iteration += 1
+            if iteration >= 1:
+                processor_worker.running = False
+            return False
+
+        processor_worker.circuit_breaker.can_execute = Mock(side_effect=stop_after_one)
+        # Avoid sleeping in tests
+        processor_worker.config.poll_interval = 0
+
+        with patch.object(processor_worker, '_process_job') as mock_process:
+            processor_worker.running = True
+            processor_worker._worker_loop()
+
+        mock_process.assert_not_called()
+
+
+class TestFetchStashImage:
+    """Tests for _fetch_stash_image() with auth headers."""
+
+    def test_successful_image_fetch(self, processor_worker):
+        """Returns image bytes on success."""
+        mock_response = MagicMock()
+        mock_response.read.return_value = b'\x89PNG...'
+        mock_response.__enter__ = Mock(return_value=mock_response)
+        mock_response.__exit__ = Mock(return_value=False)
+
+        with patch('urllib.request.urlopen', return_value=mock_response):
+            result = processor_worker._fetch_stash_image('http://stash:9999/image.jpg')
+
+        assert result == b'\x89PNG...'
+
+    def test_adds_api_key_header(self, processor_worker):
+        """Includes ApiKey header when config has stash_api_key."""
+        processor_worker.config.stash_api_key = 'secret123'
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = b'image'
+        mock_response.__enter__ = Mock(return_value=mock_response)
+        mock_response.__exit__ = Mock(return_value=False)
+
+        with patch('urllib.request.urlopen', return_value=mock_response) as mock_open:
+            processor_worker._fetch_stash_image('http://stash:9999/image.jpg')
+
+        req = mock_open.call_args[0][0]
+        assert req.get_header('Apikey') == 'secret123'
+
+    def test_returns_none_on_url_error(self, processor_worker):
+        """Returns None when image fetch fails."""
+        import urllib.error
+        with patch('urllib.request.urlopen', side_effect=urllib.error.URLError("down")):
+            result = processor_worker._fetch_stash_image('http://stash:9999/image.jpg')
+
+        assert result is None
+
+    def test_returns_none_on_generic_error(self, processor_worker):
+        """Returns None on unexpected exceptions."""
+        with patch('urllib.request.urlopen', side_effect=RuntimeError("unexpected")):
+            result = processor_worker._fetch_stash_image('http://stash:9999/image.jpg')
+
+        assert result is None
+
+
+class TestLogDlqStatus:
+    """Tests for _log_dlq_status() startup logging."""
+
+    def test_logs_warning_when_dlq_has_items(self, processor_worker, capsys):
+        """Logs DLQ count and recent entries when items present."""
+        processor_worker.dlq.get_count.return_value = 3
+        processor_worker.dlq.get_recent.return_value = [
+            {'id': 1, 'scene_id': 10, 'error_type': 'TransientError', 'error_message': 'timeout'},
+        ]
+
+        processor_worker._log_dlq_status()
+
+        processor_worker.dlq.get_recent.assert_called_once_with(limit=5)
+
+    def test_no_log_when_dlq_empty(self, processor_worker):
+        """Skips logging when DLQ has no items."""
+        processor_worker.dlq.get_count.return_value = 0
+
+        processor_worker._log_dlq_status()
+
+        processor_worker.dlq.get_recent.assert_not_called()

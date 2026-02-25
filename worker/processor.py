@@ -550,11 +550,25 @@ class SyncWorker:
 
                 except Exception as e:
                     _job_elapsed = time.perf_counter() - _job_start
-                    # Unknown error: treat as transient with circuit breaker
+                    # Unknown error: treat as transient with retry progression
                     self.circuit_breaker.record_failure()
-                    log_warn(f"Job {pqid} unexpected error (treating as transient): {e}")
-                    nack_job(self.queue, item)
-                    self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=False)
+                    self._rate_limiter.record_result(success=False)
+
+                    # Add retry metadata so job eventually reaches DLQ
+                    job = self._prepare_for_retry(item, e)
+                    max_retries = self.max_retries  # Standard limit for unknown errors
+                    job_retry_count = job.get('retry_count', 0)
+
+                    if job_retry_count >= max_retries:
+                        log_warn(f"Job {pqid} unexpected error exceeded max retries ({max_retries}), moving to DLQ: {e}")
+                        fail_job(self.queue, item)
+                        self.dlq.add(job, e, job_retry_count)
+                        self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
+                    else:
+                        delay = job.get('next_retry_at', 0) - time.time()
+                        log_warn(f"Job {pqid} unexpected error (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s: {e}")
+                        self._requeue_with_metadata(job)
+                        self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=False)
 
             except Exception as e:
                 # Worker loop error: log and continue
