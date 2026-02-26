@@ -1,0 +1,24 @@
+services:
+  provider:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${PROVIDER_PORT:-9090}:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - S2P_STASH_URL=${S2P_STASH_URL}
+      - S2P_STASH_API_KEY=${S2P_STASH_API_KEY}
+      - S2P_PLEX_URL=${S2P_PLEX_URL:-http://host.docker.internal:32400}
+      - S2P_PLEX_TOKEN=${S2P_PLEX_TOKEN:-}
+      - S2P_LOG_LEVEL=${S2P_LOG_LEVEL:-info}
+    volumes:
+      - ./provider_config:/config
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
