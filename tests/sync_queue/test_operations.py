@@ -486,3 +486,181 @@ class TestCreateSyncJob:
 
         required_keys = {"scene_id", "update_type", "data", "enqueued_at", "job_key"}
         assert set(job.keys()) == required_keys
+
+
+# =============================================================================
+# get_queued_scene_ids() Tests
+# =============================================================================
+
+
+def _make_queue_db(queue_path, rows):
+    """Helper: create a queue DB with the persist-queue schema and given rows.
+
+    rows: list of (data_blob, timestamp_float, status_int)
+    """
+    import pickle
+
+    queue_path.mkdir(parents=True, exist_ok=True)
+    db_path = queue_path / "data.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "CREATE TABLE ack_queue_default "
+        "(_id INTEGER PRIMARY KEY AUTOINCREMENT, data BLOB, timestamp FLOAT, status INTEGER)"
+    )
+    for data_blob, ts, status in rows:
+        conn.execute(
+            "INSERT INTO ack_queue_default (data, timestamp, status) VALUES (?, ?, ?)",
+            (data_blob, ts, status),
+        )
+    conn.commit()
+    conn.close()
+
+
+def _job_blob(scene_id):
+    """Pickle a minimal job dict for a given scene_id."""
+    import pickle
+    return pickle.dumps({"scene_id": scene_id, "update_type": "metadata"})
+
+
+class TestGetQueuedSceneIds:
+    """Tests for get_queued_scene_ids() function."""
+
+    def test_returns_empty_set_when_no_db(self, tmp_path):
+        """Returns empty set when queue directory/db does not exist."""
+        from sync_queue.operations import get_queued_scene_ids
+
+        result = get_queued_scene_ids(str(tmp_path / "nonexistent"))
+        assert result == set()
+
+    def test_returns_pending_scene_ids(self, tmp_path):
+        """Returns scene_ids for pending (status 0 and 1) rows."""
+        from sync_queue.operations import get_queued_scene_ids
+
+        queue_path = tmp_path / "queue"
+        now = time.time()
+        _make_queue_db(queue_path, [
+            (_job_blob(10), now, 0),  # inited -> pending
+            (_job_blob(20), now, 1),  # ready -> pending
+        ])
+
+        result = get_queued_scene_ids(str(queue_path))
+        assert result == {10, 20}
+
+    def test_returns_in_progress_scene_ids(self, tmp_path):
+        """Returns scene_ids for in-progress (status 2) rows."""
+        from sync_queue.operations import get_queued_scene_ids
+
+        queue_path = tmp_path / "queue"
+        now = time.time()
+        _make_queue_db(queue_path, [
+            (_job_blob(30), now, 2),  # unack -> in-progress
+        ])
+
+        result = get_queued_scene_ids(str(queue_path))
+        assert result == {30}
+
+    def test_includes_recently_completed_scene_ids(self, tmp_path):
+        """Returns scene_ids for recently-completed (status 5) rows within window.
+
+        This is the fix for the infinite requeue loop: scenes that were just
+        processed must not be re-enqueued by a concurrent reconciliation run.
+        """
+        from sync_queue.operations import get_queued_scene_ids
+
+        queue_path = tmp_path / "queue"
+        now = time.time()
+        _make_queue_db(queue_path, [
+            (_job_blob(100), now - 60, 5),   # completed 1 minute ago -> within window
+            (_job_blob(200), now - 3600, 5), # completed 1 hour ago -> within 24h window
+        ])
+
+        result = get_queued_scene_ids(str(queue_path), completed_window=86400.0)
+        assert 100 in result
+        assert 200 in result
+
+    def test_excludes_old_completed_scene_ids(self, tmp_path):
+        """Excludes completed (status 5) rows older than completed_window.
+
+        Old completed rows should not block legitimate re-sync operations.
+        """
+        from sync_queue.operations import get_queued_scene_ids
+
+        queue_path = tmp_path / "queue"
+        now = time.time()
+        _make_queue_db(queue_path, [
+            (_job_blob(999), now - 90000, 5),  # completed 25 hours ago -> outside 24h window
+        ])
+
+        result = get_queued_scene_ids(str(queue_path), completed_window=86400.0)
+        assert 999 not in result
+
+    def test_completed_window_zero_excludes_all_completed(self, tmp_path):
+        """completed_window=0 skips all completed rows (legacy behaviour)."""
+        from sync_queue.operations import get_queued_scene_ids
+
+        queue_path = tmp_path / "queue"
+        now = time.time()
+        _make_queue_db(queue_path, [
+            (_job_blob(42), now - 10, 5),   # just completed
+        ])
+
+        result = get_queued_scene_ids(str(queue_path), completed_window=0)
+        assert 42 not in result
+
+    def test_excludes_failed_scene_ids(self, tmp_path):
+        """Does not return scene_ids for failed (status 9) rows."""
+        from sync_queue.operations import get_queued_scene_ids
+
+        queue_path = tmp_path / "queue"
+        now = time.time()
+        _make_queue_db(queue_path, [
+            (_job_blob(77), now, 9),  # ack_failed -> DLQ candidate
+        ])
+
+        result = get_queued_scene_ids(str(queue_path))
+        assert 77 not in result
+
+    def test_mixed_statuses(self, tmp_path):
+        """Returns correct set across mixed pending, in-progress, and completed statuses."""
+        from sync_queue.operations import get_queued_scene_ids
+
+        queue_path = tmp_path / "queue"
+        now = time.time()
+        _make_queue_db(queue_path, [
+            (_job_blob(1), now, 0),           # pending
+            (_job_blob(2), now, 1),           # pending
+            (_job_blob(3), now, 2),           # in-progress
+            (_job_blob(4), now - 3600, 5),    # completed 1h ago -> within window
+            (_job_blob(5), now - 90000, 5),   # completed 25h ago -> excluded
+            (_job_blob(6), now, 9),           # failed -> excluded
+        ])
+
+        result = get_queued_scene_ids(str(queue_path), completed_window=86400.0)
+        assert result == {1, 2, 3, 4}
+        assert 5 not in result  # too old
+        assert 6 not in result  # failed
+
+    def test_prevents_infinite_requeue_scenario(self, tmp_path):
+        """Regression test for the infinite requeue loop bug.
+
+        Simulates the scenario: worker just processed a batch (all rows status=5),
+        a concurrent reconciliation run calls get_queued_scene_ids — it must see
+        those recently-completed scene_ids and skip re-enqueue.
+        """
+        from sync_queue.operations import get_queued_scene_ids
+
+        queue_path = tmp_path / "queue"
+        now = time.time()
+
+        # Worker just processed 5 scenes — they are all status=5, inserted recently
+        _make_queue_db(queue_path, [
+            (_job_blob(sid), now - i, 5)
+            for i, sid in enumerate([101, 102, 103, 104, 105])
+        ])
+
+        existing = get_queued_scene_ids(str(queue_path), completed_window=86400.0)
+
+        # All recently-completed scenes must appear as "already in queue"
+        assert {101, 102, 103, 104, 105}.issubset(existing), (
+            "Completed scenes should be visible to dedup to prevent infinite requeue"
+        )

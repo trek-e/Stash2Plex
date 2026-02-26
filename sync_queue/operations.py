@@ -247,18 +247,32 @@ def clear_pending_items(queue_path: str) -> int:
         conn.close()
 
 
-def get_queued_scene_ids(queue_path: str) -> set:
+def get_queued_scene_ids(queue_path: str, completed_window: float = 86400.0) -> set:
     """
-    Get scene_ids for all items currently in queue (pending or in-progress).
+    Get scene_ids for all items currently in queue (pending, in-progress, or recently completed).
 
     Queries SQLite directly and deserializes job data to extract scene_ids.
     Used for deduplication before batch enqueue operations.
 
+    Includes recently-completed items (status=5) to prevent re-enqueue of scenes that
+    were just processed in an ongoing batch.  Without this guard, a concurrent
+    reconciliation or Sync-All run sees completed rows as "not in queue" and re-enqueues
+    them, creating an infinite requeue loop.
+
+    The completed_window uses the queue row's insertion timestamp (set when the job was
+    first enqueued, not when it was acked), so it acts as a "was this scene touched in
+    a recent batch?" check.  The default 24-hour window is intentionally generous:
+    any scene processed within the last day won't be re-enqueued by a concurrent run,
+    while scenes that genuinely need a re-sync (updated in Stash long after their last
+    queue entry) will pass through normally.
+
     Args:
         queue_path: Path to queue directory (contains data.db)
+        completed_window: How far back (in seconds) to include completed items.
+            Defaults to 86400 (24 hours).  Pass 0 to skip completed rows entirely.
 
     Returns:
-        Set of scene_id integers currently in queue
+        Set of scene_id integers currently in queue (pending, in-progress, or recently completed)
     """
     db_path = os.path.join(queue_path, 'data.db')
     if not os.path.exists(db_path):
@@ -274,9 +288,23 @@ def get_queued_scene_ids(queue_path: str) -> set:
             return set()
 
         table_name = table[0]
-        cursor = conn.execute(
-            f"SELECT data FROM {table_name} WHERE status IN (0, 1, 2)"
-        )
+
+        # Always include pending (0, 1) and in-progress (2) rows.
+        # Also include recently-completed (status=5) rows so that a concurrent
+        # reconciliation or Sync-All run doesn't re-enqueue items that were just
+        # processed — the root cause of the infinite requeue loop.
+        if completed_window > 0:
+            cutoff = time.time() - completed_window
+            cursor = conn.execute(
+                f"SELECT data FROM {table_name} "
+                f"WHERE status IN (0, 1, 2) "
+                f"OR (status = 5 AND timestamp > ?)",
+                (cutoff,),
+            )
+        else:
+            cursor = conn.execute(
+                f"SELECT data FROM {table_name} WHERE status IN (0, 1, 2)"
+            )
 
         scene_ids = set()
         for row in cursor:
