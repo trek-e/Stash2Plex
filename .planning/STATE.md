@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-02-23)
 
 Milestone: v2.0 Plex Metadata Provider
 Phase: 24 of 27 (Provider HTTP Skeleton)
-Plan: 02 (24-01 complete)
+Plan: 03 (24-02 complete — phase 24 done)
 Status: In progress
-Last activity: 2026-02-26 — 24-01 complete: FastAPI provider package with Plex manifest, stub routes, structured logging, pydantic-settings config
+Last activity: 2026-02-26 — 24-02 complete: Docker infrastructure (Dockerfile, docker-compose.yml, .dockerignore) for provider containerization
 
-Progress: [███░░░░░░░] ~15%
+Progress: [████░░░░░░] ~20%
 
 ## Performance Metrics
 
@@ -30,6 +30,7 @@ Progress: [███░░░░░░░] ~15%
 | 23 | 01 | 5 min | 2 | shared_lib + PathMapper |
 | 23 | 02 | 3 min | 2 | StashClient async GraphQL client, 12 TDD tests |
 | 24 | 01 | 8 min | 2 | FastAPI provider package with Plex manifest, stub routes, structured logging |
+| 24 | 02 | 2 min | 2 | Docker infrastructure: Dockerfile, docker-compose.yml, .dockerignore |
 
 ## Accumulated Context
 
@@ -49,6 +50,14 @@ Key decisions from 24-01:
 - Health endpoint reads stash_reachable from request.app.state (set in lifespan) — avoids global module state between test runs
 - Plex protocol envelope pattern: all responses wrapped in MediaProvider or MediaContainer dicts
 - docs_url=None, redoc_url=None — machine-to-machine protocol, no Swagger UI
+
+Key decisions from 24-02:
+- Build context is repo root (.) so both shared_lib/ and provider/ are COPY-able in one build invocation
+- shared_lib/ COPY placed before provider/ — shared_lib changes less frequently, maximizes layer cache hits
+- requirements.txt copied separately before application code — pip layer only rebuilds on dependency changes
+- Exec-form CMD ["uvicorn", ...] not shell form — SIGTERM reaches uvicorn directly for lifespan graceful shutdown
+- extra_hosts: host.docker.internal:host-gateway — Linux gets automatic host IP resolution (macOS already has it)
+- curl installed in Dockerfile for healthcheck CMD compatibility
 
 Key decisions from 23-01:
 - stash_pattern is a re.sub replacement template (\1, \2), not a match regex — _template_to_match_pattern derives the stash match regex at init time
@@ -73,9 +82,9 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-26
-Stopped at: 24-01 complete — FastAPI provider package with manifest, stub routes, structured logging, config (PROV-01, INFR-04 satisfied)
-Resume file: .planning/phases/24-provider-http-skeleton/24-01-SUMMARY.md
-Next step: Plan 24-02 — Docker containerization (Dockerfile + docker-compose.yml)
+Stopped at: 24-02 complete — Docker infrastructure (Dockerfile, docker-compose.yml, .dockerignore). Phase 24 complete (PROV-05, INFR-03 satisfied)
+Resume file: .planning/phases/24-provider-http-skeleton/24-02-SUMMARY.md
+Next step: Phase 25 — Match endpoint implementation (POST /library/metadata/matches with real Stash lookup)
 
 ---
-*Last updated: 2026-02-26 after 24-01 complete*
+*Last updated: 2026-02-26 after 24-02 complete*

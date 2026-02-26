@@ -13,7 +13,7 @@ Requirements for Plex metadata provider milestone. Each maps to roadmap phases.
 - [ ] **PROV-02**: Match endpoint accepts Plex scan request and returns match candidates from Stash via path mapping + fallback
 - [ ] **PROV-03**: Metadata endpoint returns full scene metadata (title, summary, date, performers, tags, studio, artwork) for a matched scene
 - [ ] **PROV-04**: Provider responds within Plex's 90-second timeout under concurrent scan load
-- [ ] **PROV-05**: Provider deployed as Docker container with configurable Stash/Plex connection settings
+- [x] **PROV-05**: Provider deployed as Docker container with configurable Stash/Plex connection settings
 
 ### Path Mapping
 
@@ -33,7 +33,7 @@ Requirements for Plex metadata provider milestone. Each maps to roadmap phases.
 
 - [x] **INFR-01**: Monorepo structure with shared_lib/ package importable by both plugin and provider
 - [x] **INFR-02**: Stash GraphQL client in shared_lib/ queries scenes by path and by ID
-- [ ] **INFR-03**: Docker container handles Linux host networking (host.docker.internal workaround)
+- [x] **INFR-03**: Docker container handles Linux host networking (host.docker.internal workaround)
 - [x] **INFR-04**: Provider configuration via environment variables and/or config file
 
 ## Future Requirements
@@ -71,7 +71,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROV-02 | Phase 25 | Pending |
 | PROV-03 | Phase 26 | Pending |
 | PROV-04 | Phase 25 | Pending |
-| PROV-05 | Phase 24 | Pending |
+| PROV-05 | Phase 24 | Complete |
 | PATH-01 | Phase 23 | Complete |
 | PATH-02 | Phase 23 | Complete |
 | PATH-03 | Phase 25 | Pending |
@@ -82,7 +82,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GAPD-04 | Phase 27 | Pending |
 | INFR-01 | Phase 23 | Complete |
 | INFR-02 | Phase 23 | Complete |
-| INFR-03 | Phase 24 | Pending |
+| INFR-03 | Phase 24 | Complete |
 | INFR-04 | Phase 24 | Complete |
 
 **Coverage:**

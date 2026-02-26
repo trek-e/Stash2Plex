@@ -38,7 +38,7 @@
 **Milestone Goal:** Add a Plex Custom Metadata Provider service that Plex queries during library scans to resolve and serve Stash scene metadata, with regex-based bidirectional path mapping and bi-directional gap detection between libraries.
 
 - [x] **Phase 23: Foundation + Shared Library** — Monorepo structure, shared_lib package, bidirectional path mapping engine, async Stash GraphQL client (1/2 plans done)
-- [ ] **Phase 24: Provider HTTP Skeleton** — FastAPI provider registers with Plex, Docker container deployed, Plex shows Stash2Plex in agent list
+- [x] **Phase 24: Provider HTTP Skeleton** — FastAPI provider registers with Plex, Docker container deployed, Plex shows Stash2Plex in agent list (completed 2026-02-26)
 - [ ] **Phase 25: Match Endpoint** — Plex scan requests return Stash scene IDs via path mapping + fallback; startup roundtrip validation; 90s timeout compliance
 - [ ] **Phase 26: Metadata Serve Route** — Plex displays full scene metadata (title, date, studio, performers, tags, summary, artwork) after a successful match
 - [ ] **Phase 27: Gap Detection** — Scan-time gaps logged in real time; scheduled bi-directional comparison runs; gap report accessible via API endpoint
@@ -69,7 +69,7 @@ Plans:
   2. The provider container starts with Stash and Plex connection details supplied as environment variables (no hardcoded values)
   3. `docker-compose up` brings the provider online; `docker-compose down` stops it cleanly
   4. The provider URL registered in Plex is reachable from Plex's network context on both Linux and macOS Docker deployments
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [ ] 24-01-PLAN.md — FastAPI provider application (config, logging, routes, models)
 - [ ] 24-02-PLAN.md — Docker infrastructure (Dockerfile, docker-compose.yml, build + verify)
@@ -122,7 +122,7 @@ Plans:
 | 21. Outage Visibility & History | v1.5 | 2/2 | Complete | 2026-02-15 |
 | 22. DLQ Recovery for Outage Jobs | v1.5 | 2/2 | Complete | 2026-02-15 |
 | 23. Foundation + Shared Library | 2/2 | Complete    | 2026-02-24 | - |
-| 24. Provider HTTP Skeleton | 1/2 | In Progress|  | - |
+| 24. Provider HTTP Skeleton | 2/2 | Complete   | 2026-02-26 | - |
 | 25. Match Endpoint | v2.0 | 0/? | Not started | - |
 | 26. Metadata Serve Route | v2.0 | 0/? | Not started | - |
 | 27. Gap Detection | v2.0 | 0/? | Not started | - |
