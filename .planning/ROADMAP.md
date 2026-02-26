@@ -69,7 +69,10 @@ Plans:
   2. The provider container starts with Stash and Plex connection details supplied as environment variables (no hardcoded values)
   3. `docker-compose up` brings the provider online; `docker-compose down` stops it cleanly
   4. The provider URL registered in Plex is reachable from Plex's network context on both Linux and macOS Docker deployments
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 24-01-PLAN.md — FastAPI provider application (config, logging, routes, models)
+- [ ] 24-02-PLAN.md — Docker infrastructure (Dockerfile, docker-compose.yml, build + verify)
 
 ### Phase 25: Match Endpoint
 **Goal**: Plex library scans successfully match files to Stash scenes via the provider
@@ -119,7 +122,7 @@ Plans:
 | 21. Outage Visibility & History | v1.5 | 2/2 | Complete | 2026-02-15 |
 | 22. DLQ Recovery for Outage Jobs | v1.5 | 2/2 | Complete | 2026-02-15 |
 | 23. Foundation + Shared Library | 2/2 | Complete    | 2026-02-24 | - |
-| 24. Provider HTTP Skeleton | v2.0 | 0/? | Not started | - |
+| 24. Provider HTTP Skeleton | v2.0 | 0/2 | In progress | - |
 | 25. Match Endpoint | v2.0 | 0/? | Not started | - |
 | 26. Metadata Serve Route | v2.0 | 0/? | Not started | - |
 | 27. Gap Detection | v2.0 | 0/? | Not started | - |
