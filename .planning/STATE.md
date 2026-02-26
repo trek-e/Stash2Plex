@@ -5,17 +5,17 @@
 See: .planning/PROJECT.md (updated 2026-02-23)
 
 **Core value:** Reliable sync — when metadata changes in Stash, it eventually reaches Plex — even if Plex was temporarily unavailable
-**Current focus:** v2.0 Phase 23 — Foundation + Shared Library
+**Current focus:** v2.0 Phase 24 — Provider HTTP Skeleton
 
 ## Current Position
 
 Milestone: v2.0 Plex Metadata Provider
-Phase: 23 of 27 (Foundation + Shared Library)
-Plan: 03 (23-02 complete)
+Phase: 24 of 27 (Provider HTTP Skeleton)
+Plan: 02 (24-01 complete)
 Status: In progress
-Last activity: 2026-02-24 — 23-02 complete: StashClient async GraphQL client, StashScene model, INFR-01+INFR-02 satisfied
+Last activity: 2026-02-26 — 24-01 complete: FastAPI provider package with Plex manifest, stub routes, structured logging, pydantic-settings config
 
-Progress: [██░░░░░░░░] ~12%
+Progress: [███░░░░░░░] ~15%
 
 ## Performance Metrics
 
@@ -29,6 +29,7 @@ Progress: [██░░░░░░░░] ~12%
 |-------|------|----------|-------|-------|
 | 23 | 01 | 5 min | 2 | shared_lib + PathMapper |
 | 23 | 02 | 3 min | 2 | StashClient async GraphQL client, 12 TDD tests |
+| 24 | 01 | 8 min | 2 | FastAPI provider package with Plex manifest, stub routes, structured logging |
 
 ## Accumulated Context
 
@@ -41,6 +42,13 @@ Key decisions entering v2.0:
 - Docker build context must be repo root so shared_lib/ is COPY-able into provider image
 - ratingKey format locked as integer scene ID only — never embed file paths (Plex URL routing silently breaks)
 - host.docker.internal requires extra_hosts on Linux; add from day one in docker-compose.yml
+
+Key decisions from 24-01:
+- python-json-logger v4 uses pythonjsonlogger.json import path — same as v3 spec, compatible
+- get_settings() uses lru_cache(maxsize=1); ValidationError caught to print named S2P_FIELD vars and exit(1)
+- Health endpoint reads stash_reachable from request.app.state (set in lifespan) — avoids global module state between test runs
+- Plex protocol envelope pattern: all responses wrapped in MediaProvider or MediaContainer dicts
+- docs_url=None, redoc_url=None — machine-to-machine protocol, no Swagger UI
 
 Key decisions from 23-01:
 - stash_pattern is a re.sub replacement template (\1, \2), not a match regex — _template_to_match_pattern derives the stash match regex at init time
@@ -64,10 +72,10 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-24
-Stopped at: v1.5.11 released — fixed infinite retry loop for unknown exceptions, 30 new worker tests (coverage 54%→78%). Phase 23 complete, ready for Phase 24.
-Resume file: .planning/phases/23-foundation-shared-library/.continue-here.md
-Next step: Advance to Phase 24 — Provider HTTP Skeleton
+Last session: 2026-02-26
+Stopped at: 24-01 complete — FastAPI provider package with manifest, stub routes, structured logging, config (PROV-01, INFR-04 satisfied)
+Resume file: .planning/phases/24-provider-http-skeleton/24-01-SUMMARY.md
+Next step: Plan 24-02 — Docker containerization (Dockerfile + docker-compose.yml)
 
 ---
-*Last updated: 2026-02-24 after v1.5.11 release*
+*Last updated: 2026-02-26 after 24-01 complete*
