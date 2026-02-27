@@ -82,9 +82,9 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-27
-Stopped at: Bug-fix session — v1.5.14/15/16 released (infinite requeue loop fix + packaging fix). No v2.0 phase work.
+Stopped at: Resumed and reviewed status. No new work — ready for Phase 25.
 Resume file: .planning/phases/24-provider-http-skeleton/.continue-here.md
 Next step: Phase 25 — Match endpoint implementation (discuss or plan)
 
 ---
-*Last updated: 2026-02-27 after v1.5.16 release*
+*Last updated: 2026-02-27*
