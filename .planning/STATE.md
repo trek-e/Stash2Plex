@@ -81,10 +81,10 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-26
-Stopped at: 24-02 complete — Docker infrastructure (Dockerfile, docker-compose.yml, .dockerignore). Phase 24 complete (PROV-05, INFR-03 satisfied)
-Resume file: .planning/phases/24-provider-http-skeleton/24-02-SUMMARY.md
-Next step: Phase 25 — Match endpoint implementation (POST /library/metadata/matches with real Stash lookup)
+Last session: 2026-02-27
+Stopped at: Bug-fix session — v1.5.14/15/16 released (infinite requeue loop fix + packaging fix). No v2.0 phase work.
+Resume file: .planning/phases/24-provider-http-skeleton/.continue-here.md
+Next step: Phase 25 — Match endpoint implementation (discuss or plan)
 
 ---
-*Last updated: 2026-02-26 after 24-02 complete*
+*Last updated: 2026-02-27 after v1.5.16 release*
