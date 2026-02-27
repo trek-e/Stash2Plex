@@ -247,7 +247,7 @@ def clear_pending_items(queue_path: str) -> int:
         conn.close()
 
 
-def get_queued_scene_ids(queue_path: str, completed_window: float = 86400.0) -> set:
+def get_queued_scene_ids(queue_path: str, completed_window: float = 604800.0) -> set:
     """
     Get scene_ids for all items currently in queue (pending, in-progress, or recently completed).
 
@@ -261,15 +261,16 @@ def get_queued_scene_ids(queue_path: str, completed_window: float = 86400.0) -> 
 
     The completed_window uses the queue row's insertion timestamp (set when the job was
     first enqueued, not when it was acked), so it acts as a "was this scene touched in
-    a recent batch?" check.  The default 24-hour window is intentionally generous:
-    any scene processed within the last day won't be re-enqueued by a concurrent run,
-    while scenes that genuinely need a re-sync (updated in Stash long after their last
-    queue entry) will pass through normally.
+    a recent batch?" check.  The default 7-day window (604800s) is generous enough to
+    cover long-running sync sessions while allowing genuine re-syncs (scenes updated in
+    Stash more than a week after their last queue entry) to pass through normally.
+    Callers that need a persistent already-synced guard should additionally check
+    sync_timestamps from load_sync_timestamps().
 
     Args:
         queue_path: Path to queue directory (contains data.db)
         completed_window: How far back (in seconds) to include completed items.
-            Defaults to 86400 (24 hours).  Pass 0 to skip completed rows entirely.
+            Defaults to 604800 (7 days).  Pass 0 to skip completed rows entirely.
 
     Returns:
         Set of scene_id integers currently in queue (pending, in-progress, or recently completed)

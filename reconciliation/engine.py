@@ -477,6 +477,8 @@ class GapDetectionEngine:
 
         Deduplicates:
         - Against scenes already in queue (via get_queued_scene_ids)
+        - Against scenes already synced (via sync_timestamps — persistent guard not
+          bounded by queue row age, preventing re-enqueue after 24h+ sessions)
         - Across gap types (same scene may appear in multiple lists)
 
         Args:
@@ -487,12 +489,21 @@ class GapDetectionEngine:
         Returns:
             Tuple of (enqueued_count, skipped_already_queued, skipped_no_metadata)
         """
-        from sync_queue.operations import enqueue, get_queued_scene_ids
+        from sync_queue.operations import enqueue, get_queued_scene_ids, load_sync_timestamps
+        from datetime import datetime, timezone
         import os
 
-        # Load existing queue scene IDs for deduplication
+        # Load existing queue scene IDs for deduplication.
+        # completed_window=604800 (7 days) extends the guard window so that scenes
+        # completed during a long-running session are not re-enqueued after 24h.
         queue_path = os.path.join(self.data_dir, 'queue')
-        existing_in_queue = get_queued_scene_ids(queue_path)
+        existing_in_queue = get_queued_scene_ids(queue_path, completed_window=604800.0)
+
+        # Load sync timestamps for persistent already-synced guard.
+        # This is the primary defence against infinite requeue: if a scene has a
+        # sync_timestamp >= its Stash updated_at, it was already synced with current
+        # data and must not be re-enqueued regardless of how old its queue row is.
+        sync_timestamps = load_sync_timestamps(self.data_dir)
 
         # Track scenes we've already enqueued in this run (cross-gap-type dedup)
         enqueued_this_run = set()
@@ -507,7 +518,7 @@ class GapDetectionEngine:
             scene_id = gap.scene_id
             scene_data = gap.scene_data
 
-            # Skip if already in queue
+            # Skip if already in queue (pending, in-progress, or recently completed)
             if scene_id in existing_in_queue:
                 skipped_count += 1
                 continue
@@ -516,6 +527,29 @@ class GapDetectionEngine:
             if scene_id in enqueued_this_run:
                 skipped_count += 1
                 continue
+
+            # Persistent already-synced guard: skip if sync_timestamp >= updated_at.
+            # This prevents re-enqueue of scenes processed in sessions older than the
+            # queue completed_window — the root cause of the infinite requeue loop.
+            # detect_stale_syncs and detect_missing already filter by sync_timestamps
+            # before producing gaps, but detect_empty_metadata does not — it re-detects
+            # based on current Plex state, which may be empty due to Plex processing lag.
+            if scene_id in sync_timestamps:
+                updated_at_str = scene_data.get('updated_at')
+                if updated_at_str:
+                    try:
+                        updated_at_epoch = datetime.fromisoformat(
+                            updated_at_str.replace('Z', '+00:00')
+                        ).timestamp()
+                        if sync_timestamps[scene_id] >= updated_at_epoch:
+                            log_debug(
+                                f"Scene {scene_id} already synced (sync={sync_timestamps[scene_id]:.0f} "
+                                f">= updated_at={updated_at_epoch:.0f}), skipping re-enqueue"
+                            )
+                            skipped_count += 1
+                            continue
+                    except (ValueError, AttributeError):
+                        pass  # Can't parse updated_at — allow enqueue as safe fallback
 
             # Build job data
             job_data = self._build_job_data(scene_data)
