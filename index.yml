@@ -9,6 +9,6 @@
   version: 1.5.15
   date: "2026-02-26 00:00:00"
   path: Stash2Plex.zip
-  sha256: 773c58b8a5d1b5ac50c84cf691e1fd0374159c067216f31cb7315e3b3221700c
+  sha256: b0b997cac993c2f317eadad96a2fffd0e470a548e2f15aa9b680a48cbfe792eb
   requires:
     - PythonDepManager
