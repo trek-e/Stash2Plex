@@ -813,7 +813,7 @@ def handle_process_queue():
             worker.stop()
 
         # Check initial queue state
-        from sync_queue.operations import get_stats, get_pending, ack_job, fail_job
+        from sync_queue.operations import get_stats, get_pending, ack_job, nack_job, fail_job
         stats = get_stats(queue_path)
         total = stats['pending'] + stats['in_progress']
 
@@ -868,6 +868,16 @@ def handle_process_queue():
                 skipped_dupes += 1
                 continue
 
+            # Honour per-job backoff delay (e.g. PlexNotFound retry window).
+            # The SQLiteAckQueue has no knowledge of next_retry_at — it lives
+            # inside the job payload — so we must check it here before processing.
+            # Without this guard the batch loop immediately re-dequeues a just-
+            # re-enqueued job and retries it, causing the 3-5x rapid retry storm.
+            if not worker_local._is_ready_for_retry(job):
+                nack_job(queue, job)
+                time.sleep(0.1)  # Avoid tight spin; backoff-expired jobs will be ready soon
+                continue
+
             try:
                 worker_local._process_job(job)
                 ack_job(queue, job)
@@ -893,6 +903,10 @@ def handle_process_queue():
                     failed += 1
                 else:
                     worker_local._requeue_with_metadata(job)
+                    # Mark as processed so this batch run doesn't immediately re-pull
+                    # the re-enqueued job (it belongs to the next retry window).
+                    if scene_id != '?':
+                        processed_scenes.add(scene_id)
 
             except TransientError as e:
                 last_error = e
