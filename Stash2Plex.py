@@ -825,6 +825,7 @@ def handle_process_queue():
         log_progress(0)
 
         from worker.processor import SyncWorker, TransientError, PermanentError
+        from plex.exceptions import PlexNotFound
 
         # Configure device identity before Plex operations
         configure_plex_device_identity(data_dir)
@@ -877,6 +878,21 @@ def handle_process_queue():
 
                 # Brief pause between jobs to avoid overwhelming Plex
                 time.sleep(0.15)
+
+            except PlexNotFound as e:
+                # Item not in Plex library yet (not scanned).
+                # Does NOT count against circuit breaker — item-level, not outage.
+                log_warn(f"Scene {scene_id}: {type(e).__name__}: {e}")
+                job = worker_local._prepare_for_retry(job, e)
+                max_retries = worker_local._get_max_retries_for_error(e)
+
+                if job.get('retry_count', 0) >= max_retries:
+                    log_warn(f"Scene {scene_id}: max retries exceeded, moving to DLQ")
+                    fail_job(queue, job)
+                    dlq.add(job, e, job.get('retry_count', 0))
+                    failed += 1
+                else:
+                    worker_local._requeue_with_metadata(job)
 
             except TransientError as e:
                 last_error = e
