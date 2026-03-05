@@ -1,7 +1,8 @@
 # requires: PythonDepManager
+id: Stash2Plex
 name: Stash2Plex
 description: Sync metadata from Stash to Plex with queue-based reliability
-version: 1.5.18
+version: 1.5.19
 url: https://github.com/trek-e/Stash2Plex
 
 exec:
