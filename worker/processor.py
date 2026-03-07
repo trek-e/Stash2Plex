@@ -325,6 +325,12 @@ class SyncWorker:
         # Track recently-processed scene IDs to skip duplicates within this session.
         _recently_synced: set = set()
 
+        # Track consecutive not-ready nacks to detect when ALL items are waiting
+        # for backoff. Without this, the worker spins dequeuing and nacking
+        # thousands of not-ready items per second (the "queue balloon" bug).
+        _consecutive_not_ready = 0
+        _earliest_retry_at = float('inf')
+
         while self.running:
             try:
                 _dbg = getattr(self.config, 'debug_logging', False)
@@ -402,13 +408,48 @@ class SyncWorker:
 
                 # Check if backoff delay has elapsed
                 if not self._is_ready_for_retry(item):
+                    next_retry = item.get('next_retry_at', 0)
+                    _earliest_retry_at = min(_earliest_retry_at, next_retry)
+                    _consecutive_not_ready += 1
+
                     if _dbg:
-                        remaining = item.get('next_retry_at', 0) - time.time()
+                        remaining = next_retry - time.time()
                         _dbg_id = item.get('pqid') or item.get('scene_id')
-                        log_info(f"[DEBUG] Job {_dbg_id} backoff not elapsed ({remaining:.1f}s remaining)")
+                        log_info(f"[DEBUG] Job {_dbg_id} backoff not elapsed ({remaining:.1f}s remaining), streak={_consecutive_not_ready}")
+
                     nack_job(self.queue, item)
-                    time.sleep(0.1)  # Small delay to avoid tight loop
+
+                    # If we've cycled through many not-ready items without finding
+                    # a ready one, all items are waiting for backoff. Sleep until
+                    # the earliest retry time instead of spinning.
+                    # Threshold: after 50 consecutive not-ready nacks (or queue.size,
+                    # whichever is larger), assume everything is waiting.
+                    queue_size = max(self.queue.size, 50)
+                    if _consecutive_not_ready >= queue_size:
+                        sleep_until = _earliest_retry_at - time.time()
+                        # Clamp to [1, 30] seconds — don't sleep too long (stop() responsiveness)
+                        # and don't sleep too short (avoid hot loop)
+                        sleep_secs = max(1.0, min(30.0, sleep_until))
+                        if _dbg:
+                            log_info(f"[DEBUG] All {_consecutive_not_ready} items waiting for backoff, sleeping {sleep_secs:.1f}s")
+                        else:
+                            log_debug(f"All {_consecutive_not_ready} items waiting for backoff, sleeping {sleep_secs:.1f}s")
+                        # Sleep in small chunks so stop() can interrupt
+                        remaining_sleep = sleep_secs
+                        while remaining_sleep > 0 and self.running:
+                            chunk = min(remaining_sleep, 0.5)
+                            time.sleep(chunk)
+                            remaining_sleep -= chunk
+                        # Reset counters for next cycle
+                        _consecutive_not_ready = 0
+                        _earliest_retry_at = float('inf')
+                    else:
+                        time.sleep(0.1)  # Small delay between individual nacks
                     continue
+
+                # Item is ready — reset not-ready streak
+                _consecutive_not_ready = 0
+                _earliest_retry_at = float('inf')
 
                 scene_id = item.get('scene_id')
                 pqid = item.get('pqid') or scene_id
