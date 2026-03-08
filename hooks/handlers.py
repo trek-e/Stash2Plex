@@ -158,7 +158,8 @@ def on_scene_update(
     data_dir: Optional[str] = None,
     sync_timestamps: Optional[dict[int, float]] = None,
     stash=None,
-    is_identification: bool = False
+    is_identification: bool = False,
+    scan_already_checked: bool = False
 ) -> bool:
     """
     Handle scene update event with fast enqueue.
@@ -174,6 +175,8 @@ def on_scene_update(
         sync_timestamps: Dict mapping scene_id to last sync timestamp
         stash: StashInterface for fetching scene file path
         is_identification: True if triggered by stash-box identification event
+        scan_already_checked: True if caller already verified no scan is running
+            (avoids duplicate GraphQL roundtrip)
 
     Returns:
         True if job was enqueued, False if filtered out or validation failed
@@ -183,7 +186,7 @@ def on_scene_update(
     # Skip if scan/generate job is running (but allow identification events through —
     # they fire while the identify job is still in the queue, and the entry point
     # already verified this is a legitimate identification event)
-    if not is_identification and is_scan_running(stash):
+    if not scan_already_checked and not is_identification and is_scan_running(stash):
         log_trace(f"Scene {scene_id} skipped - scan job active")
         return False
 

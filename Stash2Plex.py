@@ -522,7 +522,8 @@ def handle_hook(hook_context: dict, stash=None):
                     data_dir=data_dir,
                     sync_timestamps=sync_timestamps,
                     stash=stash,
-                    is_identification=is_identification
+                    is_identification=is_identification,
+                    scan_already_checked=True  # main() already checked at entry
                 )
                 log_trace(f"on_scene_update completed for scene {scene_id}")
             except Exception as e:
@@ -1636,11 +1637,13 @@ def main():
         print(json.dumps({"output": "disabled"}))
         return
 
-    # Recovery detection (runs on every invocation, lightweight when circuit CLOSED)
-    maybe_check_recovery()
-
-    # Auto-reconciliation check (runs on every invocation, lightweight)
-    maybe_auto_reconcile()
+    # Recovery detection and auto-reconciliation only run for tasks, not hooks.
+    # Hooks must return fast (<100ms target) because Stash blocks the save until
+    # the plugin process exits. Running these on every hook invocation added
+    # unnecessary latency to every scene save.
+    if not is_hook:
+        maybe_check_recovery()
+        maybe_auto_reconcile()
 
     # Handle hook or task
     if is_hook:
@@ -1660,11 +1663,17 @@ def main():
 
     # Give worker time to process pending jobs before exiting
     # Worker thread is daemon, so it dies when main process exits
+    # Skip for hooks — Stash blocks the save until the plugin exits, so waiting
+    # here adds latency to every scene save. The worker will drain on the next
+    # task invocation or via 'Process Queue'.
     # Skip for management tasks that don't enqueue work
     # Skip if worker lock was not acquired (another process is draining)
     management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status', 'process_queue', 'reconcile_all', 'reconcile_recent', 'reconcile_7days', 'health_check', 'outage_summary', 'recover_outage_jobs'}
     task_mode = args.get("mode", "") if not is_hook else ""
-    if worker and queue_manager and task_mode not in management_modes and _worker_lock_fd is not None:
+    if is_hook:
+        # Hooks: return immediately after enqueue. Worker drain happens on tasks.
+        pass
+    elif worker and queue_manager and task_mode not in management_modes and _worker_lock_fd is not None:
         import time
         from worker.stats import SyncStats
         from sync_queue.operations import get_stats as get_queue_stats
