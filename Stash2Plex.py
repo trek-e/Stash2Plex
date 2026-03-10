@@ -719,7 +719,8 @@ def handle_clear_match_cache():
     try:
         data_dir = get_plugin_data_dir()
         from plex.cache import MatchCache
-        cache = MatchCache(data_dir)
+        cache_dir = os.path.join(data_dir, 'cache')
+        cache = MatchCache(cache_dir)
         stats = cache.get_stats()
         count = stats['count']
         if count == 0:
