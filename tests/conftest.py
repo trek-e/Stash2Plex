@@ -99,6 +99,7 @@ def mock_plex_item():
     item.studio = "Test Studio"
     item.summary = "Test description for the scene."
     item.ratingKey = 12345
+    item.key = "/library/metadata/12345"
     item.guid = "plex://movie/abc123"
 
     # Actors (Plex uses 'actors' attribute for cast)

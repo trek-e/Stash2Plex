@@ -66,6 +66,7 @@ def integration_worker(mock_queue, mock_dlq, integration_config, mock_plex_item,
     mock_section = MagicMock()
     mock_section.search.return_value = [mock_plex_item]
     mock_section.all.return_value = [mock_plex_item]
+    mock_section.fetchItem.return_value = mock_plex_item
     mock_section.title = "Test Library"
     mock_section.type = "movie"
 

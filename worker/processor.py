@@ -779,6 +779,9 @@ class SyncWorker:
 
             # Search library sections, collect ALL candidates
             all_candidates = []
+            # Track which library section each candidate belongs to, so we can
+            # write the confirmed match to match_cache after metadata update succeeds.
+            _section_by_candidate_key: dict = {}
             for section in sections:
                 try:
                     confidence, item, candidates = find_plex_items_with_confidence(
@@ -789,6 +792,8 @@ class SyncWorker:
                         debug_logging=_dbg,
                     )
                     all_candidates.extend(candidates)
+                    for c in candidates:
+                        _section_by_candidate_key[c.key] = section.title
                     if _dbg:
                         log_info(f"[DEBUG] Section '{section.title}': {len(candidates)} candidate(s)")
                 except PlexNotFound:
@@ -818,6 +823,20 @@ class SyncWorker:
                 if _dbg:
                     log_info(f"[DEBUG] HIGH confidence match: {plex_item.title}")
                 self._update_metadata(plex_item, data)
+                # Write to match_cache AFTER metadata update succeeds.
+                # This ensures the cache only records items that have been
+                # fully synced. Writing before the update (as was previously
+                # done inside find_plex_items_with_confidence) could cache
+                # matches whose metadata was never pushed (e.g. process killed
+                # mid-sync), causing subsequent cache-hits to find a Plex item
+                # with auto-scanned metadata that "matches" an empty Stash
+                # scene and silently skip the real metadata push.
+                if match_cache is not None:
+                    section_title = _section_by_candidate_key.get(plex_item.key)
+                    if section_title:
+                        item_key = getattr(plex_item, 'key', None) or str(getattr(plex_item, 'ratingKey', None))
+                        if item_key:
+                            match_cache.set_match(section_title, file_path, item_key)
             else:
                 # LOW confidence - multiple matches
                 confidence = 'low'
@@ -960,7 +979,14 @@ class SyncWorker:
             log_info(f"Updated metadata ({mode} mode): {plex_item.title}")
             result.add_success('metadata')
         else:
-            log_trace(f"No metadata fields to update for: {plex_item.title}")
+            if _dbg:
+                # Log what was compared so we can diagnose "no-op" syncs
+                fields_in_data = [k for k in ('title', 'studio', 'details', 'summary', 'tagline', 'date') if k in data]
+                log_info(f"[DEBUG] No core edits for '{plex_item.title}' — "
+                         f"data keys present: {fields_in_data}, "
+                         f"plex title='{plex_item.title}', stash title='{data.get('title', '<missing>')}'")
+            else:
+                log_trace(f"No metadata fields to update for: {plex_item.title}")
 
         # Phase 2: Non-critical field syncs (failures logged as warnings)
         if getattr(self.config, 'sync_performers', True) and 'performers' in data:

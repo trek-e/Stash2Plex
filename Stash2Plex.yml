@@ -1,7 +1,7 @@
 # requires: PythonDepManager
 name: Stash2Plex
 description: Sync metadata from Stash to Plex with queue-based reliability
-version: 1.5.24
+version: 1.5.25
 url: https://github.com/trek-e/Stash2Plex
 
 exec:
@@ -43,6 +43,10 @@ tasks:
     defaultArgs:
       mode: purge_dlq
       days: 30
+  - name: Clear Match Cache
+    description: "Force fresh Plex lookups by clearing cached path-to-item mappings (use before Process Queue to re-push metadata)"
+    defaultArgs:
+      mode: clear_match_cache
   - name: Process Queue
     description: Process all pending queue items until empty (resumes stuck queues)
     defaultArgs:

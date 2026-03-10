@@ -714,6 +714,26 @@ def handle_queue_status():
         traceback.print_exc()
 
 
+def handle_clear_match_cache():
+    """Clear the match cache to force fresh Plex lookups on next sync."""
+    try:
+        data_dir = get_plugin_data_dir()
+        from plex.cache import MatchCache
+        cache = MatchCache(data_dir)
+        stats = cache.get_stats()
+        count = stats['count']
+        if count == 0:
+            log_info("Match cache is already empty")
+        else:
+            cache.clear()
+            log_info(f"Cleared {count} entries from match cache — next sync will re-match all items from Plex")
+        cache.close()
+    except Exception as e:
+        log_error(f"Failed to clear match cache: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def handle_clear_queue():
     """Clear all pending queue items."""
     try:
@@ -1424,6 +1444,7 @@ def handle_health_check():
 _MANAGEMENT_HANDLERS = {
     'queue_status': lambda args: handle_queue_status(),
     'clear_queue': lambda args: handle_clear_queue(),
+    'clear_match_cache': lambda args: handle_clear_match_cache(),
     'clear_dlq': lambda args: handle_clear_dlq(),
     'purge_dlq': lambda args: handle_purge_dlq(args.get('days', 30)),
     'process_queue': lambda args: handle_process_queue(),

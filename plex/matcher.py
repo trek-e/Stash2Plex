@@ -352,12 +352,13 @@ def find_plex_items_with_confidence(
             log_info(f"[DEBUG] HIGH confidence match: {candidates[0].title}")
         else:
             logger.debug(f"HIGH confidence match for {obfuscate_path(filename)}")
-        # Store in match_cache for next time
-        if match_cache is not None:
-            item = candidates[0]
-            item_key = getattr(item, 'key', None) or getattr(item, 'ratingKey', None)
-            if item_key:
-                match_cache.set_match(library_name, stash_path, str(item_key))
+        # NOTE: match_cache.set_match() is intentionally NOT called here.
+        # The caller (_process_job) writes to match_cache AFTER _update_metadata
+        # succeeds, so the cache only records fully-confirmed synced items.
+        # Writing here (before metadata update) would cache matches whose
+        # metadata was never pushed (e.g. process killed mid-sync), causing
+        # subsequent cache-hits to silently skip re-pushing metadata because
+        # Plex appears to already have "matching" auto-scanned values.
         return (MatchConfidence.HIGH, candidates[0], candidates)
     else:
         # Multiple matches - log warning with candidate paths

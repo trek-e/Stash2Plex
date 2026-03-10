@@ -236,8 +236,13 @@ class TestMatchCacheHit:
 class TestMatchCacheMiss:
     """Tests for match_cache miss scenarios."""
 
-    def test_cache_miss_searches_and_stores_result(self, tmp_path):
-        """When match_cache misses, search is performed and result is cached."""
+    def test_cache_miss_searches_and_returns_result(self, tmp_path):
+        """When match_cache misses, search is performed and result is returned.
+
+        NOTE: match_cache is NOT written inside find_plex_items_with_confidence.
+        The caller (_process_job) writes to match_cache AFTER metadata update
+        succeeds, ensuring the cache only records fully-synced items.
+        """
         from plex.matcher import find_plex_items_with_confidence, MatchConfidence
         from plex.cache import MatchCache
 
@@ -256,9 +261,10 @@ class TestMatchCacheMiss:
         assert confidence == MatchConfidence.HIGH
         assert matched_item.key == "/library/metadata/456"
 
-        # Verify result was cached
+        # Verify result was NOT cached (caller is responsible for writing cache
+        # after metadata update succeeds, not find_plex_items_with_confidence)
         cached_key = match_cache.get_match("Movies", "/media/new movie.mp4")
-        assert cached_key == "/library/metadata/456"
+        assert cached_key is None
         match_cache.close()
 
     def test_cache_miss_multiple_matches_not_cached(self, tmp_path):
@@ -298,7 +304,12 @@ class TestStaleCacheHandling:
     """Tests for stale cache entry invalidation."""
 
     def test_stale_cache_invalidated_on_fetch_failure(self, tmp_path):
-        """When cached key no longer exists, cache is invalidated and search continues."""
+        """When cached key no longer exists, cache is invalidated and search continues.
+
+        The stale entry is removed. A new entry is NOT written by
+        find_plex_items_with_confidence — the caller (_process_job) writes to
+        match_cache after metadata update succeeds.
+        """
         from plex.matcher import find_plex_items_with_confidence, MatchConfidence
         from plex.cache import MatchCache
 
@@ -320,9 +331,11 @@ class TestStaleCacheHandling:
         assert confidence == MatchConfidence.HIGH
         assert matched_item.key == "/library/metadata/999"
 
-        # Old cache entry should be invalidated, new one stored
+        # Old cache entry should be invalidated.
+        # New entry is NOT written by find_plex_items_with_confidence —
+        # the caller writes to match_cache after metadata update succeeds.
         cached_key = match_cache.get_match("Movies", "/media/moved.mp4")
-        assert cached_key == "/library/metadata/999"
+        assert cached_key is None
         match_cache.close()
 
 
