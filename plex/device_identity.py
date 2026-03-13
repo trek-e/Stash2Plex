@@ -17,11 +17,11 @@ values when building connection headers.
 """
 
 import json
-import logging
 import os
 import uuid
 
-logger = logging.getLogger('Stash2Plex.device')
+from shared.log import create_logger
+_, log_debug, log_info, log_warn, _ = create_logger("Device")
 
 
 def load_or_create_device_id(data_dir: str) -> str:
@@ -49,14 +49,14 @@ def load_or_create_device_id(data_dir: str) -> str:
                 data = json.load(f)
                 device_id = data.get('device_id')
                 if device_id:
-                    logger.debug(f"Loaded existing device ID: {device_id[:8]}...")
+                    log_debug(f"Loaded existing device ID: {device_id[:8]}...")
                     return device_id
         except (json.JSONDecodeError, KeyError, IOError) as e:
-            logger.warning(f"Corrupt device_id.json, regenerating: {e}")
+            log_warn(f"Corrupt device_id.json, regenerating: {e}")
 
     # Generate new UUID v4 (random, good for device IDs)
     device_id = str(uuid.uuid4())
-    logger.info(f"Generated new device ID: {device_id[:8]}...")
+    log_info(f"Generated new device ID: {device_id[:8]}...")
 
     # Persist for future use
     with open(id_file, 'w') as f:
@@ -98,6 +98,6 @@ def configure_plex_device_identity(data_dir: str) -> str:
     # Rebuild BASE_HEADERS to pick up new values
     plexapi.BASE_HEADERS = plexapi.config.reset_base_headers()
 
-    logger.debug(f"Configured Plex device identity: {device_id[:8]}...")
+    log_debug(f"Configured Plex device identity: {device_id[:8]}...")
 
     return device_id

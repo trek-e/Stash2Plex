@@ -22,13 +22,13 @@ Example:
     >>> match_cache.set_match("Movies", "/media/movie.mp4", "/library/metadata/123")
 """
 
-import logging
 import os
 from typing import Any, Dict, List, Optional
 
 from diskcache import Cache
 
-logger = logging.getLogger('Stash2Plex.plex.cache')
+from shared.log import create_logger
+_, log_debug, log_info, log_warn, _ = create_logger("Cache")
 
 
 def _extract_item_data(item: Any) -> Optional[Dict[str, Any]]:
@@ -55,7 +55,7 @@ def _extract_item_data(item: Any) -> Optional[Dict[str, Any]]:
         title = getattr(item, 'title', None)
 
         if key is None:
-            logger.debug("Item missing key, skipping")
+            log_debug("Item missing key, skipping")
             return None
 
         # Extract file paths from media[].parts[].file
@@ -74,7 +74,7 @@ def _extract_item_data(item: Any) -> Optional[Dict[str, Any]]:
             'file_paths': file_paths,
         }
     except Exception as e:
-        logger.warning(f"Failed to extract item data: {e}")
+        log_warn(f"Failed to extract item data: {e}")
         return None
 
 
@@ -139,7 +139,7 @@ class PlexCache:
         self._hits = 0
         self._misses = 0
 
-        logger.debug(f"PlexCache initialized at {cache_dir} (TTL: {library_ttl}s, limit: {size_limit} bytes)")
+        log_debug(f"PlexCache initialized at {cache_dir} (TTL: {library_ttl}s, limit: {size_limit} bytes)")
 
     def _make_library_key(self, library_name: str) -> str:
         """Generate cache key for library items."""
@@ -175,10 +175,10 @@ class PlexCache:
 
         if result is not None:
             self._hits += 1
-            logger.debug(f"Cache hit for library '{library_name}' ({len(result)} items)")
+            log_debug(f"Cache hit for library '{library_name}' ({len(result)} items)")
         else:
             self._misses += 1
-            logger.debug(f"Cache miss for library '{library_name}'")
+            log_debug(f"Cache miss for library '{library_name}'")
 
         return result
 
@@ -207,7 +207,7 @@ class PlexCache:
                 extracted_items.append(data)
 
         self._cache.set(cache_key, extracted_items, expire=self._library_ttl)
-        logger.debug(f"Cached {len(extracted_items)} items for library '{library_name}' (TTL: {self._library_ttl}s)")
+        log_debug(f"Cached {len(extracted_items)} items for library '{library_name}' (TTL: {self._library_ttl}s)")
 
     def get_search_results(self, library_name: str, title: str) -> Optional[List[Dict[str, Any]]]:
         """
@@ -230,10 +230,10 @@ class PlexCache:
 
         if result is not None:
             self._hits += 1
-            logger.debug(f"Cache hit for search '{library_name}:{title}' ({len(result)} results)")
+            log_debug(f"Cache hit for search '{library_name}:{title}' ({len(result)} results)")
         else:
             self._misses += 1
-            logger.debug(f"Cache miss for search '{library_name}:{title}'")
+            log_debug(f"Cache miss for search '{library_name}:{title}'")
 
         return result
 
@@ -260,7 +260,7 @@ class PlexCache:
                 extracted_results.append(data)
 
         self._cache.set(cache_key, extracted_results, expire=self._library_ttl)
-        logger.debug(f"Cached {len(extracted_results)} search results for '{library_name}:{title}'")
+        log_debug(f"Cached {len(extracted_results)} search results for '{library_name}:{title}'")
 
     def clear(self) -> None:
         """
@@ -278,7 +278,7 @@ class PlexCache:
         self._cache.clear()
         self._hits = 0
         self._misses = 0
-        logger.info("Cache cleared")
+        log_info("Cache cleared")
 
     def get_stats(self) -> Dict[str, Any]:
         """
@@ -335,7 +335,7 @@ class PlexCache:
             ...     cache.close()
         """
         self._cache.close()
-        logger.debug("Cache closed")
+        log_debug("Cache closed")
 
     def __repr__(self) -> str:
         """Return string representation of cache."""
@@ -406,7 +406,7 @@ class MatchCache:
         self._hits = 0
         self._misses = 0
 
-        logger.debug(f"MatchCache initialized at {cache_dir} (limit: {size_limit} bytes)")
+        log_debug(f"MatchCache initialized at {cache_dir} (limit: {size_limit} bytes)")
 
     def _make_key(self, library_name: str, file_path: str) -> str:
         """Generate cache key for match result."""
@@ -435,10 +435,10 @@ class MatchCache:
 
         if result is not None:
             self._hits += 1
-            logger.debug(f"Match cache hit for '{file_path}' -> {result}")
+            log_debug(f"Match cache hit for '{file_path}' -> {result}")
         else:
             self._misses += 1
-            logger.debug(f"Match cache miss for '{file_path}'")
+            log_debug(f"Match cache miss for '{file_path}'")
 
         return result
 
@@ -460,7 +460,7 @@ class MatchCache:
         cache_key = self._make_key(library_name, file_path)
         # No expire = permanent until invalidated or evicted
         self._cache.set(cache_key, plex_key)
-        logger.debug(f"Cached match '{file_path}' -> {plex_key}")
+        log_debug(f"Cached match '{file_path}' -> {plex_key}")
 
     def invalidate(self, library_name: str, file_path: str) -> None:
         """
@@ -480,7 +480,7 @@ class MatchCache:
         cache_key = self._make_key(library_name, file_path)
         try:
             del self._cache[cache_key]
-            logger.debug(f"Invalidated match for '{file_path}'")
+            log_debug(f"Invalidated match for '{file_path}'")
         except KeyError:
             # Key wasn't cached, nothing to invalidate
             pass
@@ -509,7 +509,7 @@ class MatchCache:
                     invalidated += 1
                 except KeyError:
                     pass
-        logger.info(f"Invalidated {invalidated} matches for library '{library_name}'")
+        log_info(f"Invalidated {invalidated} matches for library '{library_name}'")
 
     def clear(self) -> None:
         """
@@ -526,7 +526,7 @@ class MatchCache:
         self._cache.clear()
         self._hits = 0
         self._misses = 0
-        logger.info("Match cache cleared")
+        log_info("Match cache cleared")
 
     def get_stats(self) -> Dict[str, Any]:
         """
@@ -583,7 +583,7 @@ class MatchCache:
             ...     cache.close()
         """
         self._cache.close()
-        logger.debug("Match cache closed")
+        log_debug("Match cache closed")
 
     def __repr__(self) -> str:
         """Return string representation of cache."""

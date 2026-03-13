@@ -94,8 +94,12 @@ def process_queue(data_dir, config):
     queue_manager = QueueManager(data_dir)
     queue = queue_manager.get_queue()
 
+    from sync_queue.dlq import DeadLetterQueue
+    dlq = DeadLetterQueue(data_dir)
+
     worker = SyncWorker(
         queue=queue,
+        dlq=dlq,
         config=validated_config,
         data_dir=data_dir,
     )

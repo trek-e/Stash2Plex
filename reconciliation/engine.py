@@ -6,7 +6,6 @@ to orchestrate end-to-end gap detection: fetch scenes, match against Plex, run d
 and enqueue discovered gaps.
 """
 
-import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -18,8 +17,6 @@ if TYPE_CHECKING:
     from stashapi.stashapp import StashInterface
     from config.config import Stash2PlexConfig
     from persistqueue import SQLiteAckQueue
-
-logger = logging.getLogger('Stash2Plex.reconciliation.engine')
 
 from shared.log import create_logger
 _, log_debug, log_info, log_warn, log_error = create_logger("Gap Engine")

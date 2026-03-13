@@ -18,7 +18,6 @@ Cache stores simplified dicts, but matching returns actual plexapi Video objects
 """
 
 from enum import Enum
-import logging
 import re
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
@@ -27,8 +26,6 @@ if TYPE_CHECKING:
     from plexapi.library import LibrarySection
     from plexapi.video import Video
     from plex.cache import PlexCache, MatchCache
-
-logger = logging.getLogger('Stash2Plex.plex.matcher')
 
 from shared.log import create_logger
 _, log_debug, log_info, log_warn, _ = create_logger("Matcher")
@@ -99,7 +96,7 @@ def _item_has_file(item, path_or_filename: str, exact: bool = True, case_insensi
                     if Path(file_path).name == (Path(path_or_filename).name if not case_insensitive else Path(path_or_filename).name.lower()):
                         return True
     except Exception as e:
-        logger.debug(f"Error checking item files: {e}")
+        log_debug(f"Error checking item files: {e}")
 
     return False
 
@@ -154,7 +151,7 @@ def find_plex_item_by_path(
                 if _item_has_file(item, filename_lower, exact=False, case_insensitive=True):
                     matches.append(item)
     except Exception as e:
-        logger.warning(f"Title search failed: {e}")
+        log_warn(f"Title search failed: {e}")
 
     # Slow fallback if needed
     if not matches:
@@ -164,7 +161,7 @@ def find_plex_item_by_path(
                 if _item_has_file(item, filename_lower, exact=False, case_insensitive=True):
                     matches.append(item)
         except Exception as e:
-            logger.warning(f"Scan failed: {e}")
+            log_warn(f"Scan failed: {e}")
 
     if len(matches) == 1:
         return matches[0]
@@ -351,7 +348,7 @@ def find_plex_items_with_confidence(
         if debug_logging:
             log_info(f"[DEBUG] HIGH confidence match: {candidates[0].title}")
         else:
-            logger.debug(f"HIGH confidence match for {obfuscate_path(filename)}")
+            log_debug(f"HIGH confidence match for {obfuscate_path(filename)}")
         # NOTE: match_cache.set_match() is intentionally NOT called here.
         # The caller (_process_job) writes to match_cache AFTER _update_metadata
         # succeeds, so the cache only records fully-confirmed synced items.
@@ -372,7 +369,7 @@ def find_plex_items_with_confidence(
                 candidate_paths.append("<path unavailable>")
 
         obfuscated_paths = [obfuscate_path(p) for p in candidate_paths]
-        logger.warning(
+        log_warn(
             f"LOW confidence match for '{obfuscate_path(filename)}': "
             f"{len(candidates)} candidates found - {obfuscated_paths}"
         )

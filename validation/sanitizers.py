@@ -8,7 +8,6 @@ API errors or display issues.
 
 import unicodedata
 from typing import Optional
-import logging
 
 from validation.limits import MAX_TITLE_LENGTH
 
@@ -63,7 +62,6 @@ def strip_emojis(text: str) -> str:
 def sanitize_for_plex(
     text: str,
     max_length: int = MAX_TITLE_LENGTH,
-    logger: Optional[logging.Logger] = None,
     strip_emoji: bool = False
 ) -> str:
     """
@@ -81,7 +79,6 @@ def sanitize_for_plex(
     Args:
         text: The text to sanitize
         max_length: Maximum length (0 = no limit). Default 255.
-        logger: Optional logger for debug output
         strip_emoji: If True, remove emoji characters. Default False.
             NOTE: Currently not used in production (emojis preserved by default).
             Available for future use if emoji-related Plex issues arise.
@@ -92,8 +89,6 @@ def sanitize_for_plex(
     # Handle None or empty
     if not text:
         return ''
-
-    original = text
 
     # Normalize Unicode to NFC (composed form)
     text = unicodedata.normalize('NFC', text)
@@ -126,8 +121,5 @@ def sanitize_for_plex(
             text = truncated[:last_space]
         else:
             text = truncated
-
-    if logger and text != original:
-        logger.debug(f"Sanitized text: {len(original)} -> {len(text)} chars")
 
     return text

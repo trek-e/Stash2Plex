@@ -7,9 +7,9 @@ with fail-fast behavior and sensible defaults.
 
 from pydantic import BaseModel, Field, field_validator, ValidationError
 from typing import Optional
-import logging
 
-log = logging.getLogger('Stash2Plex.config')
+from shared.log import create_logger
+_, log_debug, log_info, log_warn, _ = create_logger("Config")
 
 
 class Stash2PlexConfig(BaseModel):
@@ -247,7 +247,7 @@ class Stash2PlexConfig(BaseModel):
             masked = '****'
         libs = self.plex_libraries
         lib_info = f"libraries={libs}" if libs else "libraries=ALL (none configured)"
-        log.info(
+        log_info(
             f"Stash2Plex config: url={self.plex_url}, token={masked}, "
             f"{lib_info}, "
             f"max_retries={self.max_retries}, enabled={self.enabled}, "
@@ -260,13 +260,13 @@ class Stash2PlexConfig(BaseModel):
         )
         # Debug/privacy settings
         if self.debug_logging:
-            log.warning(
+            log_warn(
                 "DEBUG LOGGING ENABLED — this is very intensive and will produce "
                 "large volumes of output. Use only when providing a log to "
                 "troubleshoot a problem. Run for a few sequences only, then disable."
             )
         if self.obfuscate_paths:
-            log.info("Path obfuscation enabled — file paths will be replaced with word substitutions in logs")
+            log_info("Path obfuscation enabled — file paths will be replaced with word substitutions in logs")
 
         # Log field sync toggle summary
         toggles_off = [k.replace('sync_', '') for k in [
@@ -274,11 +274,11 @@ class Stash2PlexConfig(BaseModel):
             'sync_performers', 'sync_tags', 'sync_poster', 'sync_background', 'sync_collection'
         ] if not getattr(self, k, True)]
         if not self.sync_master:
-            log.info("Field sync: MASTER OFF (all fields disabled)")
+            log_info("Field sync: MASTER OFF (all fields disabled)")
         elif toggles_off:
-            log.info(f"Field sync: enabled except {toggles_off}")
+            log_info(f"Field sync: enabled except {toggles_off}")
         else:
-            log.info("Field sync: all fields enabled")
+            log_info("Field sync: all fields enabled")
 
 
 def validate_config(config_dict: dict) -> tuple[Optional[Stash2PlexConfig], Optional[str]]:

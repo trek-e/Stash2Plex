@@ -20,11 +20,15 @@ from tenacity import (
 )
 
 from plex.exceptions import translate_plex_exception
+from shared.log import create_logger
 
 if TYPE_CHECKING:
     from plexapi.server import PlexServer
 
-logger = logging.getLogger('Stash2Plex.plex.client')
+# Standard logger kept only for tenacity's before_sleep_log (requires logging.Logger)
+_tenacity_logger = logging.getLogger('Stash2Plex.plex.client')
+
+_, log_debug, _, _, _ = create_logger("PlexClient")
 
 
 def _get_retriable_exceptions() -> Tuple[Type[Exception], ...]:
@@ -124,12 +128,12 @@ class PlexClient:
             retry=retry_if_exception_type(retriable),
             wait=wait_exponential_jitter(initial=0.1, max=0.4, jitter=0.1),
             stop=stop_after_attempt(3),
-            before_sleep=before_sleep_log(logger, logging.DEBUG),
+            before_sleep=before_sleep_log(_tenacity_logger, logging.DEBUG),
             reraise=True,
         )
         def connect():
             try:
-                logger.debug(f"Connecting to Plex server at {self._url}")
+                log_debug(f"Connecting to Plex server at {self._url}")
                 # Reuse a requests.Session for connection pooling and keep-alive
                 if self._session is None:
                     import requests
@@ -140,7 +144,7 @@ class PlexClient:
                     session=self._session,
                     timeout=self._read_timeout,
                 )
-                logger.debug(f"Connected to Plex server: {server.friendlyName}")
+                log_debug(f"Connected to Plex server: {server.friendlyName}")
                 return server
             except retriable:
                 # Let tenacity handle retry
@@ -202,10 +206,10 @@ class PlexClient:
             section = self.server.library.section(section_name)
             if path:
                 from validation.obfuscation import obfuscate_path
-                logger.debug(f"Triggering partial scan of '{section_name}' for path: {obfuscate_path(path)}")
+                log_debug(f"Triggering partial scan of '{section_name}' for path: {obfuscate_path(path)}")
                 section.update(path=path)
             else:
-                logger.debug(f"Triggering full scan of '{section_name}'")
+                log_debug(f"Triggering full scan of '{section_name}'")
                 section.update()
         except Exception as exc:
             raise translate_plex_exception(exc) from exc
@@ -228,7 +232,7 @@ class PlexClient:
             try:
                 self._session.close()
             except Exception as e:
-                logger.debug(f"Error closing session: {e}")
+                log_debug(f"Error closing session: {e}")
             finally:
                 self._session = None
 

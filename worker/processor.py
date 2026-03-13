@@ -12,7 +12,6 @@ import os
 import sys
 import time
 import threading
-import logging
 from typing import Optional, TYPE_CHECKING
 
 from worker.stats import SyncStats
@@ -20,15 +19,12 @@ from worker.stats import SyncStats
 # Lazy imports to avoid circular import with validation module
 # These are imported inside _update_metadata() where they're used
 
-
 from shared.log import create_logger
 log_trace, log_debug, log_info, log_warn, log_error = create_logger("Worker")
 
 # Lazy imports to avoid module-level pollution in tests
 # These functions are imported inside methods that use them
 # to ensure imports are fresh and not polluted by test mocking
-
-logger = logging.getLogger('Stash2Plex.worker')
 
 if TYPE_CHECKING:
     from validation.config import Stash2PlexConfig
@@ -843,18 +839,18 @@ class SyncWorker:
                 paths = [c.media[0].parts[0].file if c.media and c.media[0].parts else c.key for c in unique_candidates]
                 obfuscated_paths = [obfuscate_path(p) for p in paths]
                 if self.config.strict_matching:
-                    logger.warning(
-                        f"[Stash2Plex] LOW CONFIDENCE SKIPPED: scene {scene_id}\n"
-                        f"  Stash path: {obfuscate_path(file_path)}\n"
-                        f"  Plex candidates ({len(unique_candidates)}): {obfuscated_paths}"
+                    log_warn(
+                        f"LOW CONFIDENCE SKIPPED: scene {scene_id} "
+                        f"Stash path: {obfuscate_path(file_path)} "
+                        f"Plex candidates ({len(unique_candidates)}): {obfuscated_paths}"
                     )
                     raise PermanentError(f"Low confidence match skipped (strict_matching=true)")
                 else:
                     plex_item = unique_candidates[0]
-                    logger.warning(
-                        f"[Stash2Plex] LOW CONFIDENCE SYNCED: scene {scene_id}\n"
-                        f"  Chosen: {obfuscated_paths[0]}\n"
-                        f"  Other candidates: {obfuscated_paths[1:]}"
+                    log_warn(
+                        f"LOW CONFIDENCE SYNCED: scene {scene_id} "
+                        f"Chosen: {obfuscated_paths[0]} "
+                        f"Other candidates: {obfuscated_paths[1:]}"
                     )
                     self._update_metadata(plex_item, data)
 

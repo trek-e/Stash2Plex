@@ -9,11 +9,10 @@ with full error context preserved.
 import sqlite3
 import pickle
 import traceback
-import logging
 from typing import Optional
 
-# Use standard logging for DLQ operations
-log = logging.getLogger(__name__)
+from shared.log import create_logger
+_, _, log_info, log_warn, _ = create_logger("DLQ")
 
 
 class DeadLetterQueue:
@@ -86,7 +85,7 @@ class DeadLetterQueue:
             )
             conn.commit()
 
-        log.warning(f"Job {job.get('job_id')} moved to DLQ after {retry_count} retries: {type(error).__name__}")
+        log_warn(f"Job {job.get('job_id')} moved to DLQ after {retry_count} retries: {type(error).__name__}")
 
     def get_recent(self, limit: int = 10) -> list[dict]:
         """
@@ -162,7 +161,7 @@ class DeadLetterQueue:
             count = cursor.rowcount
             conn.commit()
 
-        log.info(f"Removed {count} DLQ entries older than {days} days")
+        log_info(f"Removed {count} DLQ entries older than {days} days")
 
     def get_error_summary(self) -> dict[str, int]:
         """

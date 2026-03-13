@@ -411,23 +411,23 @@ class TestValidateConfig:
 class TestStash2PlexConfigLogConfig:
     """Tests for log_config method."""
 
-    def test_log_config_masks_token(self, mocker, valid_config_dict):
+    def test_log_config_masks_token(self, mocker, valid_config_dict, capsys):
         """log_config masks token in log output."""
-        mock_log = mocker.patch("validation.config.log")
         config = Stash2PlexConfig(**valid_config_dict)
         config.log_config()
 
-        # Check that log.info was called (at least for config, plus toggle summary)
-        assert mock_log.info.call_count >= 1
+        # create_logger writes to stderr via the Stash plugin protocol
+        captured = capsys.readouterr()
+        log_output = captured.err
 
-        # Get the first log message (main config line)
-        log_message = mock_log.info.call_args_list[0][0][0]
+        # Should have logged at least one info line
+        assert "[Stash2Plex Config]" in log_output
 
         # Full token should not be in the message
-        assert valid_config_dict["plex_token"] not in log_message
+        assert valid_config_dict["plex_token"] not in log_output
 
         # Should contain masked token (first 4 + **** + last 4)
-        assert "****" in log_message
+        assert "****" in log_output
 
 
 class TestSyncToggles:

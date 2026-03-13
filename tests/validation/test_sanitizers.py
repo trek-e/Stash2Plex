@@ -258,22 +258,6 @@ class TestSanitizeForPlexUnicodeNormalization:
         assert result == "\u00e9" or len(result) == 1  # Either composed or simplified
 
 
-class TestSanitizeForPlexWithLogger:
-    """Tests for logger parameter."""
-
-    def test_logs_when_text_changed(self, mocker):
-        """Logger is called when text is sanitized."""
-        mock_logger = mocker.MagicMock()
-        sanitize_for_plex("Hello\x00World", logger=mock_logger)
-        mock_logger.debug.assert_called_once()
-
-    def test_no_log_when_text_unchanged(self, mocker):
-        """Logger is not called when text is unchanged."""
-        mock_logger = mocker.MagicMock()
-        sanitize_for_plex("Hello World", logger=mock_logger)
-        mock_logger.debug.assert_not_called()
-
-
 class TestSanitizeForPlexEdgeCases:
     """Edge case tests."""
 

@@ -7,12 +7,10 @@ to ensure clean data before enqueueing for Plex sync.
 
 from pydantic import BaseModel, Field, field_validator, ValidationError
 from typing import Optional, Any
-import logging
 
 from validation.sanitizers import sanitize_for_plex
-
-
-log = logging.getLogger('Stash2Plex.validation')
+from shared.log import create_logger
+_, log_debug, _, _, _ = create_logger("Validation")
 
 
 class SyncMetadata(BaseModel):
@@ -69,7 +67,7 @@ class SyncMetadata(BaseModel):
         original = v
         sanitized = sanitize_for_plex(v, max_length=255)
         if sanitized != original:
-            log.debug(f"Sanitized title: '{original[:50]}...' -> '{sanitized[:50]}...'")
+            log_debug(f"Sanitized title: '{original[:50]}...' -> '{sanitized[:50]}...'")
         if not sanitized:
             raise ValueError("title cannot be empty after sanitization")
         return sanitized
@@ -85,7 +83,7 @@ class SyncMetadata(BaseModel):
         original = v
         sanitized = sanitize_for_plex(v, max_length=10000)
         if sanitized != original:
-            log.debug(f"Sanitized details: '{original[:50]}...' -> '{sanitized[:50]}...'")
+            log_debug(f"Sanitized details: '{original[:50]}...' -> '{sanitized[:50]}...'")
         return sanitized if sanitized else None
 
     @field_validator('studio', mode='before')
@@ -99,7 +97,7 @@ class SyncMetadata(BaseModel):
         original = v
         sanitized = sanitize_for_plex(v, max_length=255)
         if sanitized != original:
-            log.debug(f"Sanitized studio: '{original[:50]}...' -> '{sanitized[:50]}...'")
+            log_debug(f"Sanitized studio: '{original[:50]}...' -> '{sanitized[:50]}...'")
         return sanitized if sanitized else None
 
     @field_validator('performers', 'tags', mode='before')
