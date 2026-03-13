@@ -144,7 +144,7 @@ class TestStatsTracking:
                 'path': '/media/videos/test.mp4',
                 'title': 'Test Title',
             },
-            'pqid': 1,
+            'job_id': 1,
         }
 
         # Mock find_plex_items_with_confidence at the module level where it's imported
@@ -169,7 +169,7 @@ class TestStatsTracking:
                 # Create a job that will fail
                 job = {
                     'scene_id': 123,
-                    'pqid': 1,
+                    'job_id': 1,
                     'retry_count': 0,
                 }
 
@@ -197,7 +197,7 @@ class TestStatsTracking:
                 # Create a job that will fail
                 job = {
                     'scene_id': 123,
-                    'pqid': 1,
+                    'job_id': 1,
                 }
 
                 # Simulate the error handling from _worker_loop
@@ -251,7 +251,7 @@ class TestStatsTracking:
                     'path': '/media/videos/test.mp4',
                     'title': 'Test Title',
                 },
-                'pqid': 1,
+                'job_id': 1,
             }
 
             result = processor_worker._process_job(job)
@@ -397,7 +397,7 @@ class TestProcessJobReturnValue:
             'scene_id': 123,
             'update_type': 'metadata',
             'data': {'path': '/test.mp4'},
-            'pqid': 1,
+            'job_id': 1,
         }
 
         with patch('plex.matcher.find_plex_items_with_confidence') as mock_find:
@@ -436,7 +436,7 @@ class TestProcessJobReturnValue:
                 'scene_id': 123,
                 'update_type': 'metadata',
                 'data': {'path': '/test.mp4'},
-                'pqid': 1,
+                'job_id': 1,
             }
 
             result = processor_worker._process_job(job)
@@ -1710,7 +1710,7 @@ class TestUnknownExceptionRetryProgression:
         """Unknown exception uses _prepare_for_retry to track attempts."""
         job = {
             'scene_id': 42,
-            'pqid': 1,
+            'job_id': 1,
             'data': {'path': '/test.mp4'},
         }
 
@@ -1745,7 +1745,7 @@ class TestUnknownExceptionRetryProgression:
         """Unknown exception moves job to DLQ once max_retries exhausted."""
         job = {
             'scene_id': 42,
-            'pqid': 1,
+            'job_id': 1,
             'data': {'path': '/test.mp4'},
             'retry_count': processor_worker.max_retries - 1,  # One away from limit
         }
@@ -1867,10 +1867,10 @@ class TestRequeueWithMetadata:
         assert new_job['last_error_type'] == 'TransientError'
         assert new_job['data'] == {'path': '/test.mp4'}
 
-    def test_new_job_gets_fresh_pqid(self, processor_worker):
-        """Re-enqueued job gets a new pqid (not the old one)."""
+    def test_new_job_gets_fresh_job_id(self, processor_worker):
+        """Re-enqueued job gets a new job_id (not the old one)."""
         job = {
-            'pqid': 999,
+            'job_id': 999,
             'scene_id': 42,
             'update_type': 'metadata',
             'data': {},
@@ -1879,7 +1879,7 @@ class TestRequeueWithMetadata:
         processor_worker._requeue_with_metadata(job)
 
         new_job = processor_worker.queue.put.call_args[0][0]
-        assert new_job['pqid'] != 999  # Fresh counter value
+        assert new_job['job_id'] != 999  # Fresh counter value
 
 
 class TestStartStop:
@@ -1935,7 +1935,7 @@ class TestWorkerLoop:
     def _make_job(self, scene_id=1, **overrides):
         """Helper to create a test job dict."""
         job = {
-            'pqid': scene_id,
+            'job_id': scene_id,
             'scene_id': scene_id,
             'update_type': 'metadata',
             'data': {'path': f'/test/{scene_id}.mp4'},

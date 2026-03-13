@@ -20,10 +20,10 @@ log_trace, log_debug, log_info, log_warn, log_error = create_logger("Queue")
 _job_counter = itertools.count(1)
 
 try:
-    import persistqueue
+    from persistqueue.sqlackqueue import SQLiteAckQueue as _SQLiteAckQueue
     from persistqueue.exceptions import Empty
 except ImportError:
-    persistqueue = None
+    _SQLiteAckQueue = None
     from queue import Empty  # fallback for tests
 
 
@@ -49,7 +49,7 @@ def enqueue(queue: 'persistqueue.SQLiteAckQueue', scene_id: int, update_type: st
         123
     """
     job = {
-        'pqid': next(_job_counter),
+        'job_id': next(_job_counter),
         'scene_id': scene_id,
         'update_type': update_type,
         'data': data,
@@ -72,7 +72,7 @@ def get_pending(queue: 'persistqueue.SQLiteAckQueue', timeout: float = 0) -> Opt
         timeout: Seconds to wait for job (0 = non-blocking)
 
     Returns:
-        Job dict with 'pqid' field added by persist-queue, or None if timeout/empty
+        Job dict or None if timeout/empty
     """
     try:
         job = queue.get(timeout=timeout)
@@ -87,11 +87,11 @@ def ack_job(queue: 'persistqueue.SQLiteAckQueue', job: dict):
 
     Args:
         queue: SQLiteAckQueue instance
-        job: Job dict (must have 'pqid' field from get_pending)
+        job: Job dict from get_pending
     """
     queue.ack(job)
-    pqid = job.get('pqid', '?')
-    log_trace(f"Job {pqid} completed")
+    jid = job.get('job_id', '?')
+    log_trace(f"Job {jid} completed")
 
 
 def nack_job(queue: 'persistqueue.SQLiteAckQueue', job: dict):
@@ -100,11 +100,11 @@ def nack_job(queue: 'persistqueue.SQLiteAckQueue', job: dict):
 
     Args:
         queue: SQLiteAckQueue instance
-        job: Job dict (must have 'pqid' field from get_pending)
+        job: Job dict from get_pending
     """
     queue.nack(job)
-    pqid = job.get('pqid', '?')
-    log_trace(f"Job {pqid} returned to queue for retry")
+    jid = job.get('job_id', '?')
+    log_trace(f"Job {jid} returned to queue for retry")
 
 
 def fail_job(queue: 'persistqueue.SQLiteAckQueue', job: dict):
@@ -113,11 +113,11 @@ def fail_job(queue: 'persistqueue.SQLiteAckQueue', job: dict):
 
     Args:
         queue: SQLiteAckQueue instance
-        job: Job dict (must have 'pqid' field from get_pending)
+        job: Job dict from get_pending
     """
     queue.ack_failed(job)
-    pqid = job.get('pqid', '?')
-    log_debug(f"Job {pqid} marked as failed")
+    jid = job.get('job_id', '?')
+    log_debug(f"Job {jid} marked as failed")
 
 
 def get_stats(queue_path: str) -> dict:

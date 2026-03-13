@@ -197,7 +197,7 @@ class TestJobWithMissingFields:
                 'details': 'Description only',
                 # No title field
             },
-            'pqid': 1,
+            'job_id': 1,
         }
 
         # Should not raise
@@ -215,7 +215,7 @@ class TestJobWithMissingFields:
                 'path': '/media/videos/test_scene.mp4',
                 # No metadata fields
             },
-            'pqid': 1,
+            'job_id': 1,
         }
 
         # Should not raise - item found, just no edits

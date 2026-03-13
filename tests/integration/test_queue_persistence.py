@@ -31,7 +31,7 @@ class TestRetryMetadataPersistence:
             data_dir=str(tmp_path),
         )
 
-        job = {'scene_id': 123, 'data': {'path': '/test.mp4'}, 'pqid': 1}
+        job = {'scene_id': 123, 'data': {'path': '/test.mp4'}, 'job_id': 1}
         error = TransientError("test failure")
 
         updated_job = worker._prepare_for_retry(job, error)
@@ -104,7 +104,7 @@ class TestQueuePersistenceAcrossRestart:
     def test_retry_metadata_survives_in_real_queue(self, real_queue, mock_dlq, mock_config, tmp_path):
         """Retry metadata persists in SQLiteAckQueue across instances."""
         from worker.processor import SyncWorker, TransientError
-        import persistqueue
+        from persistqueue.sqlackqueue import SQLiteAckQueue
 
         # Worker 1 prepares job for retry
         worker1 = SyncWorker(
@@ -132,7 +132,7 @@ class TestQueuePersistenceAcrossRestart:
         # Simulate worker restart - create new queue instance with same path
         # Get the queue path from the real_queue (it's stored in tmp_path/test_queue)
         queue_path = str(tmp_path / "test_queue")
-        queue2 = persistqueue.SQLiteAckQueue(queue_path, auto_resume=True)
+        queue2 = SQLiteAckQueue(queue_path, auto_resume=True)
 
         # Get job from "new" queue
         retrieved_job = queue2.get(timeout=1)
@@ -162,7 +162,7 @@ class TestQueuePersistenceAcrossRestart:
             'data': {'path': '/test.mp4', 'title': 'Test Title'},
             'enqueued_at': 1000.0,
             'job_key': 'scene_456',
-            'pqid': 1,
+            'job_id': 1,
             # Retry metadata
             'retry_count': 2,
             'next_retry_at': 2000.0,
@@ -301,7 +301,6 @@ class TestRealQueueIntegration:
     def test_multiple_retry_metadata_updates_persist(self, real_queue, mock_dlq, mock_config, tmp_path):
         """Multiple retry updates persist correctly in queue."""
         from worker.processor import SyncWorker, TransientError
-        import persistqueue
 
         worker = SyncWorker(
             queue=real_queue,

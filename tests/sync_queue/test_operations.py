@@ -67,7 +67,7 @@ class TestGetPending:
         """get_pending returns job from queue.get()."""
         from sync_queue.operations import get_pending
 
-        expected_job = {"scene_id": 100, "pqid": 1}
+        expected_job = {"scene_id": 100, "job_id": 1}
         mock_queue.get.return_value = expected_job
 
         result = get_pending(mock_queue)
@@ -118,7 +118,7 @@ class TestAckJob:
         """ack_job calls queue.ack() with the job."""
         from sync_queue.operations import ack_job
 
-        job = {"pqid": 42, "scene_id": 123}
+        job = {"job_id": 42, "scene_id": 123}
         ack_job(mock_queue, job)
 
         mock_queue.ack.assert_called_once_with(job)
@@ -127,7 +127,7 @@ class TestAckJob:
         """ack_job logs job completion."""
         from sync_queue.operations import ack_job
 
-        job = {"pqid": 99, "scene_id": 123}
+        job = {"job_id": 99, "scene_id": 123}
         ack_job(mock_queue, job)
 
         captured = capsys.readouterr()
@@ -148,7 +148,7 @@ class TestNackJob:
         """nack_job calls queue.nack() with the job."""
         from sync_queue.operations import nack_job
 
-        job = {"pqid": 55, "scene_id": 456}
+        job = {"job_id": 55, "scene_id": 456}
         nack_job(mock_queue, job)
 
         mock_queue.nack.assert_called_once_with(job)
@@ -157,7 +157,7 @@ class TestNackJob:
         """nack_job logs that job was returned for retry."""
         from sync_queue.operations import nack_job
 
-        job = {"pqid": 77, "scene_id": 456}
+        job = {"job_id": 77, "scene_id": 456}
         nack_job(mock_queue, job)
 
         captured = capsys.readouterr()
@@ -178,7 +178,7 @@ class TestFailJob:
         """fail_job calls queue.ack_failed() with the job."""
         from sync_queue.operations import fail_job
 
-        job = {"pqid": 88, "scene_id": 789}
+        job = {"job_id": 88, "scene_id": 789}
         fail_job(mock_queue, job)
 
         mock_queue.ack_failed.assert_called_once_with(job)
@@ -187,7 +187,7 @@ class TestFailJob:
         """fail_job logs that job was marked as failed."""
         from sync_queue.operations import fail_job
 
-        job = {"pqid": 66, "scene_id": 789}
+        job = {"job_id": 66, "scene_id": 789}
         fail_job(mock_queue, job)
 
         captured = capsys.readouterr()

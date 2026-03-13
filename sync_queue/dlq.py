@@ -65,7 +65,7 @@ class DeadLetterQueue:
         Add failed job to DLQ
 
         Args:
-            job: Full job dict (includes pqid, scene_id, data)
+            job: Full job dict (includes job_id, scene_id, data)
             error: Exception that caused failure
             retry_count: Number of retry attempts before failure
         """
@@ -75,7 +75,7 @@ class DeadLetterQueue:
                    (job_id, scene_id, job_data, error_type, error_message, stack_trace, retry_count)
                    VALUES (?, ?, ?, ?, ?, ?, ?)''',
                 (
-                    job.get('pqid'),
+                    job.get('job_id'),
                     job.get('scene_id'),
                     pickle.dumps(job),
                     type(error).__name__,
@@ -86,7 +86,7 @@ class DeadLetterQueue:
             )
             conn.commit()
 
-        log.warning(f"Job {job.get('pqid')} moved to DLQ after {retry_count} retries: {type(error).__name__}")
+        log.warning(f"Job {job.get('job_id')} moved to DLQ after {retry_count} retries: {type(error).__name__}")
 
     def get_recent(self, limit: int = 10) -> list[dict]:
         """
@@ -186,7 +186,7 @@ if __name__ == "__main__":
         dlq = DeadLetterQueue(tmpdir)
 
         # Add a failed job
-        test_job = {"pqid": 1, "scene_id": 123, "data": {"title": "Test"}}
+        test_job = {"job_id": 1, "scene_id": 123, "data": {"title": "Test"}}
         test_error = ValueError("Plex API error: 404 Not Found")
         dlq.add(test_job, test_error, retry_count=5)
 

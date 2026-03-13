@@ -34,7 +34,7 @@ class TestPlexDownScenarios:
             'scene_id': 123,
             'update_type': 'metadata',
             'data': {'path': '/media/test.mp4'},
-            'pqid': 1,
+            'job_id': 1,
         }
 
         with pytest.raises((TransientError, PlexTemporaryError)):
@@ -69,7 +69,7 @@ class TestPlexDownScenarios:
             'scene_id': 123,
             'update_type': 'metadata',
             'data': {'path': '/media/test.mp4'},
-            'pqid': 1,
+            'job_id': 1,
         }
 
         with pytest.raises((TransientError, PlexTemporaryError)):
@@ -110,7 +110,7 @@ class TestPlexDownScenarios:
             'scene_id': 123,
             'update_type': 'metadata',
             'data': {'path': '/media/test.mp4'},
-            'pqid': 1,
+            'job_id': 1,
         }
 
         with pytest.raises((TransientError, PlexTemporaryError)):
@@ -131,7 +131,7 @@ class TestPlexNotFoundScenarios:
             'scene_id': 123,
             'update_type': 'metadata',
             'data': {'path': '/nonexistent/file.mp4'},
-            'pqid': 1,
+            'job_id': 1,
         }
 
         with pytest.raises(PlexNotFound):
@@ -165,7 +165,7 @@ class TestPlexNotFoundScenarios:
                 'scene_id': 1000 + i,
                 'update_type': 'metadata',
                 'data': {'path': f'/media/new_scene_{i}.mp4'},
-                'pqid': i + 1,
+                'job_id': i + 1,
             }
             with pytest.raises(PlexNotFound):
                 worker._process_job(job)
@@ -201,7 +201,7 @@ class TestPermanentErrorScenarios:
             'scene_id': 123,
             'update_type': 'metadata',
             'data': {},  # No path!
-            'pqid': 1,
+            'job_id': 1,
         }
 
         with pytest.raises(PermanentError, match="missing file path"):
@@ -241,7 +241,7 @@ class TestPermanentErrorScenarios:
             'scene_id': 123,
             'update_type': 'metadata',
             'data': {'path': '/test.mp4'},
-            'pqid': 1,
+            'job_id': 1,
         }
 
         # Exception is caught and translated - defaults to transient for unknown errors
@@ -291,7 +291,7 @@ class TestPermanentErrorScenarios:
             'scene_id': 123,
             'update_type': 'metadata',
             'data': {'path': '/test.mp4'},
-            'pqid': 1,
+            'job_id': 1,
         }
 
         # The Unauthorized is wrapped as PermanentError by inner handler,
@@ -357,7 +357,7 @@ class TestStrictMatchingScenarios:
             'scene_id': 123,
             'update_type': 'metadata',
             'data': {'path': '/media/test.mp4'},
-            'pqid': 1,
+            'job_id': 1,
         }
 
         # PermanentError is raised but caught and translated by translate_plex_exception
@@ -421,7 +421,7 @@ class TestStrictMatchingScenarios:
             'scene_id': 123,
             'update_type': 'metadata',
             'data': {'path': '/media/test.mp4', 'title': 'New Title'},
-            'pqid': 1,
+            'job_id': 1,
         }
 
         # Should not raise - uses first match
@@ -444,7 +444,7 @@ class TestSceneUnmarkedOnError:
             'scene_id': 999,
             'update_type': 'metadata',
             'data': {'path': '/test.mp4'},
-            'pqid': 1,
+            'job_id': 1,
         }
 
         with patch('hooks.handlers.unmark_scene_pending') as mock_unmark:
@@ -465,7 +465,7 @@ class TestSceneUnmarkedOnError:
             'scene_id': 888,
             'update_type': 'metadata',
             'data': {'path': '/missing.mp4'},
-            'pqid': 1,
+            'job_id': 1,
         }
 
         with patch('hooks.handlers.unmark_scene_pending') as mock_unmark:
@@ -528,7 +528,7 @@ class TestSceneUnmarkedOnError:
             'scene_id': 777,
             'update_type': 'metadata',
             'data': {'path': '/media/test.mp4'},
-            'pqid': 1,
+            'job_id': 1,
         }
 
         with patch('hooks.handlers.unmark_scene_pending') as mock_unmark:
@@ -553,7 +553,7 @@ class TestSceneUnmarkedOnError:
             'scene_id': 666,
             'update_type': 'metadata',
             'data': {},  # No path triggers PermanentError before try block
-            'pqid': 1,
+            'job_id': 1,
         }
 
         with patch('hooks.handlers.unmark_scene_pending') as mock_unmark:

@@ -298,7 +298,7 @@ class SyncWorker:
 
         # Create new job with all metadata preserved
         new_job = {
-            'pqid': next(_job_counter),
+            'job_id': next(_job_counter),
             'scene_id': scene_id,
             'update_type': update_type,
             'data': data,
@@ -414,7 +414,7 @@ class SyncWorker:
 
                     if _dbg:
                         remaining = next_retry - time.time()
-                        _dbg_id = item.get('pqid') or item.get('scene_id')
+                        _dbg_id = item.get('job_id') or item.get('scene_id')
                         log_info(f"[DEBUG] Job {_dbg_id} backoff not elapsed ({remaining:.1f}s remaining), streak={_consecutive_not_ready}")
 
                     nack_job(self.queue, item)
@@ -452,17 +452,17 @@ class SyncWorker:
                 _earliest_retry_at = float('inf')
 
                 scene_id = item.get('scene_id')
-                pqid = item.get('pqid') or scene_id
+                jid = item.get('job_id') or scene_id
                 retry_count = item.get('retry_count', 0)
 
                 # Skip duplicate scene IDs (queue may have multiple entries from
                 # overlapping reconciliation runs, repeated hooks, or retry copies)
                 if scene_id is not None and scene_id in _recently_synced:
                     ack_job(self.queue, item)
-                    log_debug(f"Job {pqid} skipped — scene {scene_id} already synced this session")
+                    log_debug(f"Job {jid} skipped — scene {scene_id} already synced this session")
                     continue
 
-                log_debug(f"Processing job {pqid} for scene {scene_id} (attempt {retry_count + 1})")
+                log_debug(f"Processing job {jid} for scene {scene_id} (attempt {retry_count + 1})")
 
                 _job_start = time.perf_counter()
                 try:
@@ -494,7 +494,7 @@ class SyncWorker:
                             scheduler.save_state(state)
                         log_info("Recovery period started: graduated rate limiting enabled")
 
-                    log_info(f"Job {pqid} completed")
+                    log_info(f"Job {jid} completed")
 
                     # Track for dedup (skip future duplicates of this scene)
                     if scene_id is not None:
@@ -540,13 +540,13 @@ class SyncWorker:
                     job_retry_count = job.get('retry_count', 0)
 
                     if job_retry_count >= max_retries:
-                        log_warn(f"Job {pqid} exceeded max retries ({max_retries}), moving to DLQ")
+                        log_warn(f"Job {jid} exceeded max retries ({max_retries}), moving to DLQ")
                         fail_job(self.queue, item)
                         self.dlq.add(job, e, job_retry_count)
                         self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
                     else:
                         delay = job.get('next_retry_at', 0) - time.time()
-                        log_debug(f"Job {pqid} not in Plex yet (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s")
+                        log_debug(f"Job {jid} not in Plex yet (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s")
                         self._requeue_with_metadata(job)
                         self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=False)
 
@@ -567,20 +567,20 @@ class SyncWorker:
                     job_retry_count = job.get('retry_count', 0)
 
                     if job_retry_count >= max_retries:
-                        log_warn(f"Job {pqid} exceeded max retries ({max_retries}), moving to DLQ")
+                        log_warn(f"Job {jid} exceeded max retries ({max_retries}), moving to DLQ")
                         fail_job(self.queue, item)
                         self.dlq.add(job, e, job_retry_count)
                         self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
                     else:
                         delay = job.get('next_retry_at', 0) - time.time()
-                        log_debug(f"Job {pqid} failed (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s: {e}")
+                        log_debug(f"Job {jid} failed (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s: {e}")
                         self._requeue_with_metadata(job)
                         self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=False)
 
                 except PermanentError as e:
                     _job_elapsed = time.perf_counter() - _job_start
                     # Permanent error: move to DLQ immediately (doesn't count against circuit)
-                    log_error(f"Job {pqid} permanent failure, moving to DLQ: {e}")
+                    log_error(f"Job {jid} permanent failure, moving to DLQ: {e}")
                     fail_job(self.queue, item)
                     self.dlq.add(item, e, item.get('retry_count', 0))
                     self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
@@ -597,13 +597,13 @@ class SyncWorker:
                     job_retry_count = job.get('retry_count', 0)
 
                     if job_retry_count >= max_retries:
-                        log_warn(f"Job {pqid} unexpected error exceeded max retries ({max_retries}), moving to DLQ: {e}")
+                        log_warn(f"Job {jid} unexpected error exceeded max retries ({max_retries}), moving to DLQ: {e}")
                         fail_job(self.queue, item)
                         self.dlq.add(job, e, job_retry_count)
                         self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
                     else:
                         delay = job.get('next_retry_at', 0) - time.time()
-                        log_warn(f"Job {pqid} unexpected error (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s: {e}")
+                        log_warn(f"Job {jid} unexpected error (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s: {e}")
                         self._requeue_with_metadata(job)
                         self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=False)
 

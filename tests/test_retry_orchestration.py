@@ -231,7 +231,7 @@ class TestDLQAfterMaxRetries:
             'scene_id': '123',
             'data': {},
             'retry_count': 4,  # Will become 5 after _prepare_for_retry
-            'pqid': 1,
+            'job_id': 1,
         }
 
         error = PlexTemporaryError("test error")
@@ -368,7 +368,7 @@ class TestRetrySurvivesRestart:
             'data': {'path': '/test.mp4'},
             'enqueued_at': 1000.0,
             'job_key': 'scene_123',
-            'pqid': 1,
+            'job_id': 1,
             # Retry metadata
             'retry_count': 2,
             'next_retry_at': 2000.0,

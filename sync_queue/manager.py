@@ -7,9 +7,9 @@ Handles queue initialization, lifecycle management, and shutdown.
 import os
 from typing import Optional
 try:
-    import persistqueue
+    from persistqueue.sqlackqueue import SQLiteAckQueue as _SQLiteAckQueue
 except ImportError:
-    persistqueue = None  # Will fail at runtime with clear error
+    _SQLiteAckQueue = None  # Will fail at runtime with clear error
 
 
 class QueueManager:
@@ -28,7 +28,7 @@ class QueueManager:
             data_dir: Directory for queue storage. Defaults to
                      $STASH_PLUGIN_DATA or ~/.stash/plugins/Stash2Plex/data
         """
-        if persistqueue is None:
+        if _SQLiteAckQueue is None:
             raise ImportError(
                 "persist-queue not installed. "
                 "Run: pip install persist-queue>=1.1.0"
@@ -56,14 +56,14 @@ class QueueManager:
 
         print(f"Queue initialized at {self.queue_path}")
 
-    def _init_queue(self) -> 'persistqueue.SQLiteAckQueue':
+    def _init_queue(self):
         """
         Create SQLiteAckQueue with production settings.
 
         Returns:
             Configured SQLiteAckQueue instance
         """
-        return persistqueue.SQLiteAckQueue(
+        return _SQLiteAckQueue(
             path=self.queue_path,
             auto_commit=True,      # Required for AckQueue - immediate persistence
             multithreading=True,   # Thread-safe operations

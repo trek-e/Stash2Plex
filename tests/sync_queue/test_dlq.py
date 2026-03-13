@@ -23,7 +23,7 @@ def dlq(tmp_path):
 def sample_failed_job():
     """Sample job dict for DLQ testing."""
     return {
-        "pqid": 42,
+        "job_id": 42,
         "scene_id": 123,
         "update_type": "metadata",
         "data": {"title": "Test Title", "studio": "Test Studio"},
@@ -113,7 +113,7 @@ class TestDeadLetterQueue:
         full_job = dlq.get_by_id(recent[0]["id"])
 
         assert full_job["scene_id"] == 123
-        assert full_job["pqid"] == 42
+        assert full_job["job_id"] == 42
         assert full_job["data"]["title"] == "Test Title"
 
     def test_add_captures_error_type(self, dlq, sample_failed_job):
@@ -167,8 +167,8 @@ class TestDeadLetterQueue:
 
         assert row[0] == 7
 
-    def test_add_stores_job_id_from_pqid(self, dlq, sample_failed_job):
-        """add() stores job_id from job's pqid field."""
+    def test_add_stores_job_id_from_job_id(self, dlq, sample_failed_job):
+        """add() stores job_id from job's job_id field."""
         error = Exception("Test")
 
         dlq.add(sample_failed_job, error, retry_count=1)
@@ -201,7 +201,7 @@ class TestDeadLetterQueue:
 
         # Add 5 jobs
         for i in range(5):
-            job = {"pqid": i, "scene_id": 100 + i, "data": {}}
+            job = {"job_id": i, "scene_id": 100 + i, "data": {}}
             dlq.add(job, error, retry_count=1)
 
         result = dlq.get_recent(limit=2)
@@ -214,7 +214,7 @@ class TestDeadLetterQueue:
 
         # Add jobs with slight delays to ensure different timestamps
         for i in range(3):
-            job = {"pqid": i, "scene_id": 200 + i, "data": {}}
+            job = {"job_id": i, "scene_id": 200 + i, "data": {}}
             dlq.add(job, error, retry_count=1)
 
         result = dlq.get_recent(limit=3)
@@ -261,7 +261,7 @@ class TestDeadLetterQueue:
         full_job = dlq.get_by_id(recent[0]["id"])
 
         # Should have original job structure
-        assert full_job["pqid"] == 42
+        assert full_job["job_id"] == 42
         assert full_job["scene_id"] == 123
         assert full_job["update_type"] == "metadata"
         assert full_job["data"]["title"] == "Test Title"
@@ -273,7 +273,7 @@ class TestDeadLetterQueue:
 
         # Add multiple jobs
         for i in range(3):
-            job = {"pqid": i, "scene_id": 300 + i, "data": {"index": i}}
+            job = {"job_id": i, "scene_id": 300 + i, "data": {"index": i}}
             dlq.add(job, error, retry_count=1)
 
         recent = dlq.get_recent(limit=3)
@@ -297,7 +297,7 @@ class TestDeadLetterQueue:
         error = Exception("Test")
 
         for i in range(3):
-            job = {"pqid": i, "scene_id": i, "data": {}}
+            job = {"job_id": i, "scene_id": i, "data": {}}
             dlq.add(job, error, retry_count=1)
 
         assert dlq.get_count() == 3
@@ -346,7 +346,7 @@ class TestDeadLetterQueue:
         error = Exception("Test")
 
         # Add current job
-        job = {"pqid": 1, "scene_id": 100, "data": {}}
+        job = {"job_id": 1, "scene_id": 100, "data": {}}
         dlq.add(job, error, retry_count=1)
 
         assert dlq.get_count() == 1
@@ -361,8 +361,8 @@ class TestDeadLetterQueue:
         error = Exception("Test")
 
         # Add two jobs
-        job1 = {"pqid": 1, "scene_id": 100, "data": {}}
-        job2 = {"pqid": 2, "scene_id": 200, "data": {}}
+        job1 = {"job_id": 1, "scene_id": 100, "data": {}}
+        job2 = {"job_id": 2, "scene_id": 200, "data": {}}
         dlq.add(job1, error, retry_count=1)
         dlq.add(job2, error, retry_count=1)
 
@@ -411,9 +411,9 @@ class TestDeadLetterQueue:
 class TestDeadLetterQueueEdgeCases:
     """Edge case tests for DeadLetterQueue."""
 
-    def test_add_job_without_pqid(self, dlq):
-        """add() handles job without pqid field."""
-        job = {"scene_id": 999, "data": {"title": "No pqid"}}
+    def test_add_job_without_job_id(self, dlq):
+        """add() handles job without job_id field."""
+        job = {"scene_id": 999, "data": {"title": "No job_id"}}
         error = Exception("Test")
 
         dlq.add(job, error, retry_count=1)
@@ -425,7 +425,7 @@ class TestDeadLetterQueueEdgeCases:
 
     def test_add_job_without_scene_id(self, dlq):
         """add() handles job without scene_id field."""
-        job = {"pqid": 100, "data": {"title": "No scene_id"}}
+        job = {"job_id": 100, "data": {"title": "No scene_id"}}
         error = Exception("Test")
 
         dlq.add(job, error, retry_count=1)
@@ -449,10 +449,10 @@ class TestDeadLetterQueueEdgeCases:
         error1 = ValueError("First error")
         error2 = RuntimeError("Second error")
 
-        job = {"pqid": 1, "scene_id": 500, "data": {}}
+        job = {"job_id": 1, "scene_id": 500, "data": {}}
         dlq.add(job, error1, retry_count=1)
 
-        job["pqid"] = 2
+        job["job_id"] = 2
         dlq.add(job, error2, retry_count=2)
 
         assert dlq.get_count() == 2
@@ -474,8 +474,8 @@ class TestDeadLetterQueueErrorSummary:
 
     def test_get_error_summary_returns_correct_counts_by_error_type(self, dlq):
         """get_error_summary() returns correct counts grouped by error type."""
-        job1 = {"pqid": 1, "scene_id": 100, "data": {}}
-        job2 = {"pqid": 2, "scene_id": 200, "data": {}}
+        job1 = {"job_id": 1, "scene_id": 100, "data": {}}
+        job2 = {"job_id": 2, "scene_id": 200, "data": {}}
 
         dlq.add(job1, ValueError("Error 1"), retry_count=1)
         dlq.add(job2, RuntimeError("Error 2"), retry_count=1)
@@ -487,7 +487,7 @@ class TestDeadLetterQueueErrorSummary:
     def test_get_error_summary_with_multiple_entries_same_type(self, dlq):
         """get_error_summary() correctly counts multiple entries of same error type."""
         for i in range(3):
-            job = {"pqid": i, "scene_id": 100 + i, "data": {}}
+            job = {"job_id": i, "scene_id": 100 + i, "data": {}}
             dlq.add(job, ValueError(f"Error {i}"), retry_count=1)
 
         result = dlq.get_error_summary()
@@ -498,7 +498,7 @@ class TestDeadLetterQueueErrorSummary:
         """get_error_summary() correctly aggregates multiple different error types."""
         # Add 3 PlexNotFound errors
         for i in range(3):
-            job = {"pqid": i, "scene_id": 100 + i, "data": {}}
+            job = {"job_id": i, "scene_id": 100 + i, "data": {}}
 
             class PlexNotFound(Exception):
                 pass
@@ -507,7 +507,7 @@ class TestDeadLetterQueueErrorSummary:
 
         # Add 2 PermanentError errors
         for i in range(2):
-            job = {"pqid": 10 + i, "scene_id": 200 + i, "data": {}}
+            job = {"job_id": 10 + i, "scene_id": 200 + i, "data": {}}
 
             class PermanentError(Exception):
                 pass
@@ -515,7 +515,7 @@ class TestDeadLetterQueueErrorSummary:
             dlq.add(job, PermanentError(f"Permanent {i}"), retry_count=1)
 
         # Add 1 TransientError
-        job = {"pqid": 20, "scene_id": 300, "data": {}}
+        job = {"job_id": 20, "scene_id": 300, "data": {}}
 
         class TransientError(Exception):
             pass

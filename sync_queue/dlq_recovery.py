@@ -21,7 +21,7 @@ from sync_queue.operations import get_queued_scene_ids, enqueue
 
 if TYPE_CHECKING:
     from sync_queue.dlq import DeadLetterQueue
-    from persistqueue import SQLiteAckQueue
+    from persistqueue.sqlackqueue import SQLiteAckQueue
     from plex.client import PlexClient
 
 __all__ = [

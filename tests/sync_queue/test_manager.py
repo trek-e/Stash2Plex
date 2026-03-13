@@ -101,11 +101,11 @@ class TestQueueManager:
         import sync_queue.manager as manager_module
 
         # Save original
-        original_pq = manager_module.persistqueue
+        original_cls = manager_module._SQLiteAckQueue
 
         try:
             # Simulate missing persistqueue
-            manager_module.persistqueue = None
+            manager_module._SQLiteAckQueue = None
 
             with pytest.raises(ImportError) as exc_info:
                 manager_module.QueueManager(data_dir=str(tmp_path))
@@ -113,7 +113,7 @@ class TestQueueManager:
             assert "persist-queue not installed" in str(exc_info.value)
         finally:
             # Restore
-            manager_module.persistqueue = original_pq
+            manager_module._SQLiteAckQueue = original_cls
 
     def test_uses_default_fallback_when_no_env_var(self, monkeypatch):
         """QueueManager falls back to home dir when no env var and no data_dir."""

@@ -121,7 +121,7 @@ class TestGetOutageDLQEntries:
         window_end = now
 
         # Manually insert entry with timestamp outside window
-        job = {"pqid": 1, "scene_id": 100, "data": {}}
+        job = {"job_id": 1, "scene_id": 100, "data": {}}
         with dlq._get_connection() as conn:
             conn.execute(
                 "INSERT INTO dead_letters (scene_id, job_data, error_type, failed_at) "
@@ -142,7 +142,7 @@ class TestGetOutageDLQEntries:
         end_time = now
 
         # Add entry with different error type
-        job = {"pqid": 1, "scene_id": 100, "data": {}}
+        job = {"job_id": 1, "scene_id": 100, "data": {}}
         with dlq._get_connection() as conn:
             conn.execute(
                 "INSERT INTO dead_letters (scene_id, job_data, error_type, failed_at) "
@@ -164,7 +164,7 @@ class TestGetOutageDLQEntries:
         end_time = now
 
         # Add matching entry
-        job = {"pqid": 1, "scene_id": 100, "data": {"title": "Test"}}
+        job = {"job_id": 1, "scene_id": 100, "data": {"title": "Test"}}
         with dlq._get_connection() as conn:
             conn.execute(
                 "INSERT INTO dead_letters (scene_id, job_data, error_type, error_message, failed_at) "
@@ -192,7 +192,7 @@ class TestGetOutageDLQEntries:
         # Add entries in reverse order
         times = [now - 3000, now - 2000, now - 1000]
         for i, t in enumerate(times):
-            job = {"pqid": i, "scene_id": 100 + i, "data": {}}
+            job = {"job_id": i, "scene_id": 100 + i, "data": {}}
             with dlq._get_connection() as conn:
                 conn.execute(
                     "INSERT INTO dead_letters (scene_id, job_data, error_type, failed_at) "
@@ -220,7 +220,7 @@ class TestGetOutageDLQEntries:
         # Add entries with different error types
         error_types_to_add = ["PlexServerDown", "PlexTemporaryError", "PlexPermanentError"]
         for i, error_type in enumerate(error_types_to_add):
-            job = {"pqid": i, "scene_id": 100 + i, "data": {}}
+            job = {"job_id": i, "scene_id": 100 + i, "data": {}}
             with dlq._get_connection() as conn:
                 conn.execute(
                     "INSERT INTO dead_letters (scene_id, job_data, error_type, failed_at) "
@@ -247,7 +247,7 @@ class TestGetOutageDLQEntries:
         end_time = now
 
         # Entry at exact start_time
-        job = {"pqid": 1, "scene_id": 100, "data": {}}
+        job = {"job_id": 1, "scene_id": 100, "data": {}}
         with dlq._get_connection() as conn:
             conn.execute(
                 "INSERT INTO dead_letters (scene_id, job_data, error_type, failed_at) "
@@ -268,7 +268,7 @@ class TestGetOutageDLQEntries:
         end_time = now
 
         # Entry at exact end_time
-        job = {"pqid": 1, "scene_id": 100, "data": {}}
+        job = {"job_id": 1, "scene_id": 100, "data": {}}
         with dlq._get_connection() as conn:
             conn.execute(
                 "INSERT INTO dead_letters (scene_id, job_data, error_type, failed_at) "
@@ -319,8 +319,8 @@ class TestRecoverOutageJobs:
 
         # Create DLQ entries
         dlq_entries = [
-            {"id": 1, "scene_id": 100, "job_data": pickle.dumps({"pqid": 1, "scene_id": 100, "data": {}})},
-            {"id": 2, "scene_id": 101, "job_data": pickle.dumps({"pqid": 2, "scene_id": 101, "data": {}})},
+            {"id": 1, "scene_id": 100, "job_data": pickle.dumps({"job_id": 1, "scene_id": 100, "data": {}})},
+            {"id": 2, "scene_id": 101, "job_data": pickle.dumps({"job_id": 2, "scene_id": 101, "data": {}})},
         ]
 
         result = recover_outage_jobs(
@@ -350,8 +350,8 @@ class TestRecoverOutageJobs:
         mock_get_queued.return_value = {100, 101}
 
         dlq_entries = [
-            {"id": 1, "scene_id": 100, "job_data": pickle.dumps({"pqid": 1, "scene_id": 100, "data": {}})},
-            {"id": 2, "scene_id": 101, "job_data": pickle.dumps({"pqid": 2, "scene_id": 101, "data": {}})},
+            {"id": 1, "scene_id": 100, "job_data": pickle.dumps({"job_id": 1, "scene_id": 100, "data": {}})},
+            {"id": 2, "scene_id": 101, "job_data": pickle.dumps({"job_id": 2, "scene_id": 101, "data": {}})},
         ]
 
         result = recover_outage_jobs(
@@ -380,7 +380,7 @@ class TestRecoverOutageJobs:
         mock_stash.find_scene.return_value = None
 
         dlq_entries = [
-            {"id": 1, "scene_id": 100, "job_data": pickle.dumps({"pqid": 1, "scene_id": 100, "data": {}})},
+            {"id": 1, "scene_id": 100, "job_data": pickle.dumps({"job_id": 1, "scene_id": 100, "data": {}})},
         ]
 
         result = recover_outage_jobs(
@@ -410,7 +410,7 @@ class TestRecoverOutageJobs:
                 "id": 1,
                 "scene_id": 100,
                 "job_data": pickle.dumps({
-                    "pqid": 1,
+                    "job_id": 1,
                     "scene_id": 100,
                     "update_type": "metadata",
                     "data": {"title": "Test"}
@@ -451,7 +451,7 @@ class TestRecoverOutageJobs:
                 "id": 1,
                 "scene_id": 100,
                 "job_data": pickle.dumps({
-                    "pqid": 1,
+                    "job_id": 1,
                     "scene_id": 100,
                     "update_type": "metadata",
                     "data": {"title": "Test 1"}
@@ -461,7 +461,7 @@ class TestRecoverOutageJobs:
                 "id": 2,
                 "scene_id": 100,
                 "job_data": pickle.dumps({
-                    "pqid": 2,
+                    "job_id": 2,
                     "scene_id": 100,
                     "update_type": "metadata",
                     "data": {"title": "Test 2"}
@@ -503,10 +503,10 @@ class TestRecoverOutageJobs:
         )
 
         dlq_entries = [
-            {"id": 1, "scene_id": 100, "job_data": pickle.dumps({"pqid": 1, "scene_id": 100, "update_type": "metadata", "data": {}})},
-            {"id": 2, "scene_id": 101, "job_data": pickle.dumps({"pqid": 2, "scene_id": 101, "update_type": "metadata", "data": {}})},
-            {"id": 3, "scene_id": 102, "job_data": pickle.dumps({"pqid": 3, "scene_id": 102, "update_type": "metadata", "data": {}})},
-            {"id": 4, "scene_id": 103, "job_data": pickle.dumps({"pqid": 4, "scene_id": 103, "update_type": "metadata", "data": {}})},
+            {"id": 1, "scene_id": 100, "job_data": pickle.dumps({"job_id": 1, "scene_id": 100, "update_type": "metadata", "data": {}})},
+            {"id": 2, "scene_id": 101, "job_data": pickle.dumps({"job_id": 2, "scene_id": 101, "update_type": "metadata", "data": {}})},
+            {"id": 3, "scene_id": 102, "job_data": pickle.dumps({"job_id": 3, "scene_id": 102, "update_type": "metadata", "data": {}})},
+            {"id": 4, "scene_id": 103, "job_data": pickle.dumps({"job_id": 4, "scene_id": 103, "update_type": "metadata", "data": {}})},
         ]
 
         result = recover_outage_jobs(
@@ -537,7 +537,7 @@ class TestRecoverOutageJobs:
         mock_enqueue.side_effect = Exception("Queue full")
 
         dlq_entries = [
-            {"id": 1, "scene_id": 100, "job_data": pickle.dumps({"pqid": 1, "scene_id": 100, "update_type": "metadata", "data": {}})},
+            {"id": 1, "scene_id": 100, "job_data": pickle.dumps({"job_id": 1, "scene_id": 100, "update_type": "metadata", "data": {}})},
         ]
 
         result = recover_outage_jobs(
@@ -561,7 +561,7 @@ class TestRecoverOutageJobs:
         mock_stash.find_scene.return_value = {"id": 100}
 
         dlq_entries = [
-            {"id": 1, "scene_id": 100, "job_data": pickle.dumps({"pqid": 1, "scene_id": 100, "update_type": "metadata", "data": {}})},
+            {"id": 1, "scene_id": 100, "job_data": pickle.dumps({"job_id": 1, "scene_id": 100, "update_type": "metadata", "data": {}})},
         ]
 
         # First run: queue is empty

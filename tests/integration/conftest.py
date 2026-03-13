@@ -151,9 +151,9 @@ def real_queue(tmp_path):
             real_queue.put({'scene_id': 123})
             # Simulate restart by creating new queue with same path
     """
-    import persistqueue
+    from persistqueue.sqlackqueue import SQLiteAckQueue
     queue_path = str(tmp_path / "test_queue")
-    return persistqueue.SQLiteAckQueue(queue_path, auto_resume=True)
+    return SQLiteAckQueue(queue_path, auto_resume=True)
 
 
 @pytest.fixture
@@ -176,7 +176,7 @@ def sample_sync_job():
         },
         'enqueued_at': time.time(),
         'job_key': 'scene_123',
-        'pqid': 1,
+        'job_id': 1,
     }
 
 
