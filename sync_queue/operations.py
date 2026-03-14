@@ -207,6 +207,47 @@ def get_stats(queue_path: str) -> dict:
         conn.close()
 
 
+def resume_orphaned_items(queue_path: str) -> int:
+    """
+    Reset orphaned in-progress items (status=2) back to pending (status=1).
+
+    Called once by the process that wins the worker lock. Since auto_resume is
+    disabled (to avoid cross-process race conditions), this handles the case
+    where a previous process was killed mid-processing, leaving items stuck
+    in unack state.
+
+    Args:
+        queue_path: Path to queue directory (contains data.db)
+
+    Returns:
+        Number of items resumed
+    """
+    db_path = os.path.join(queue_path, 'data.db')
+    if not os.path.exists(db_path):
+        return 0
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ack_queue%'"
+        )
+        table = cursor.fetchone()
+        if not table:
+            return 0
+
+        table_name = table[0]
+        cursor = conn.execute(
+            f"UPDATE {table_name} SET status = 1 WHERE status = 2"
+        )
+        resumed = cursor.rowcount
+        conn.commit()
+        if resumed > 0:
+            log_info(f"Resumed {resumed} orphaned in-progress item(s) from prior session")
+        return resumed
+    finally:
+        conn.close()
+
+
 def clear_pending_items(queue_path: str) -> int:
     """
     Clear all pending and stale in-progress items from queue.

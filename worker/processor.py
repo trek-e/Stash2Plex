@@ -321,6 +321,15 @@ class SyncWorker:
         # Track recently-processed scene IDs to skip duplicates within this session.
         _recently_synced: set = set()
 
+        # Load sync timestamps for cross-session dedup.
+        # If a scene was already synced (timestamp exists and no newer update),
+        # skip it — prevents the same scene from being reprocessed every plugin
+        # invocation due to auto_resume or stale queue entries.
+        _sync_timestamps: dict = {}
+        if self.data_dir is not None:
+            from sync_queue.operations import load_sync_timestamps as _load_ts
+            _sync_timestamps = _load_ts(self.data_dir)
+
         # Track consecutive not-ready nacks to detect when ALL items are waiting
         # for backoff. Without this, the worker spins dequeuing and nacking
         # thousands of not-ready items per second (the "queue balloon" bug).
@@ -457,6 +466,19 @@ class SyncWorker:
                     ack_job(self.queue, item)
                     log_debug(f"Job {jid} skipped — scene {scene_id} already synced this session")
                     continue
+
+                # Cross-session dedup: if this scene was already synced and the
+                # enqueued_at timestamp is OLDER than the last sync, it's a stale
+                # queue entry (auto_resume resurrection or leftover from prior session).
+                # Skip it to prevent the same scene from being re-processed every
+                # plugin invocation.
+                if scene_id is not None and _sync_timestamps:
+                    enqueued_at = item.get('enqueued_at', 0)
+                    last_synced = _sync_timestamps.get(int(scene_id))
+                    if last_synced and enqueued_at <= last_synced and retry_count == 0:
+                        ack_job(self.queue, item)
+                        log_debug(f"Job {jid} skipped — scene {scene_id} already synced (enqueued {enqueued_at:.0f} <= synced {last_synced:.0f})")
+                        continue
 
                 log_debug(f"Processing job {jid} for scene {scene_id} (attempt {retry_count + 1})")
 
@@ -1034,12 +1056,16 @@ class SyncWorker:
         edits = {}
 
         # Title (always synced — no toggle)
+        # NEVER clear a Plex title to empty — an empty title in Stash usually means
+        # the scene was just scanned and not yet identified. Clearing Plex's
+        # auto-generated title would leave the item nameless.
         if 'title' in data:
             title_value = data.get('title')
             if title_value is None or title_value == '':
-                if plex_item.title:
-                    edits['title.value'] = ''
-                    log_debug("Clearing title (Stash value is empty)")
+                # Stash has no title — preserve whatever Plex already has.
+                # This prevents race conditions where Scene.Update.Post fires
+                # before identification completes.
+                log_debug("Stash title is empty — preserving existing Plex title")
             else:
                 sanitized = sanitize_for_plex(title_value, max_length=MAX_TITLE_LENGTH)
                 if not self.config.preserve_plex_edits or not plex_item.title:

@@ -17,7 +17,9 @@ class QueueManager:
     Manages SQLite-backed persistent queue lifecycle.
 
     Stores queue in Stash plugin data directory. Queue survives
-    process restarts and crashes with auto_resume=True.
+    process restarts. Stale in-progress items from crashed processes
+    are handled by the worker's cross-session dedup logic rather than
+    auto_resume (which caused race conditions across concurrent processes).
     """
 
     def __init__(self, data_dir: Optional[str] = None):
@@ -60,6 +62,14 @@ class QueueManager:
         """
         Create SQLiteAckQueue with production settings.
 
+        auto_resume is set to False to prevent race conditions where a new
+        plugin process resets another process's in-progress items back to
+        pending.  Crash recovery (re-processing items left in status=2 from
+        a killed process) is handled by the worker's cross-session dedup:
+        if a scene was never synced (no sync_timestamp), it stays in queue
+        and will be picked up naturally; if it WAS synced, the stale entry
+        is acked and skipped.
+
         Returns:
             Configured SQLiteAckQueue instance
         """
@@ -67,7 +77,7 @@ class QueueManager:
             path=self.queue_path,
             auto_commit=True,      # Required for AckQueue - immediate persistence
             multithreading=True,   # Thread-safe operations
-            auto_resume=True       # Recover unack jobs on crash
+            auto_resume=False      # Prevent cross-process race conditions
         )
 
     def get_queue(self) -> 'persistqueue.SQLiteAckQueue':

@@ -402,7 +402,12 @@ class TestFullReliabilityWorkflow:
         assert first_edit['summary.value'] == 'New summary content'
 
     def test_all_fields_cleared(self, workflow_worker, capsys):
-        """All fields can be cleared in single update."""
+        """All clearable fields can be cleared in single update.
+
+        Title is intentionally NOT cleared when Stash sends empty — this
+        prevents race conditions where a scan-triggered update fires before
+        identification completes, which would wipe Plex's auto-generated title.
+        """
         mock_plex_item = MagicMock()
         mock_plex_item.studio = "Studio"
         mock_plex_item.title = "Title"
@@ -429,8 +434,9 @@ class TestFullReliabilityWorkflow:
 
         mock_plex_item.edit.assert_called()
         first_edit = mock_plex_item.edit.call_args_list[0][1]
-        # All scalar fields should be cleared
-        assert first_edit['title.value'] == ''
+        # Title is NOT cleared (preserved when Stash sends empty)
+        assert 'title.value' not in first_edit
+        # Other scalar fields should be cleared
         assert first_edit['studio.value'] == ''
         assert first_edit['summary.value'] == ''
         assert first_edit['tagline.value'] == ''
@@ -440,6 +446,8 @@ class TestFullReliabilityWorkflow:
         captured = capsys.readouterr()
         assert "Clearing performers" in captured.err
         assert "Clearing tags" in captured.err
+        # Title preservation logged
+        assert "preserving existing Plex title" in captured.err
 
     def test_sanitization_applied_with_limits(self, workflow_worker):
         """Sanitization and truncation applied together."""

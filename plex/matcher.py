@@ -250,15 +250,28 @@ def find_plex_items_with_confidence(
     # Remove date suffix like "- 2026-01-30" or "2026-01-30"
     title_base = re.sub(r'\s*[-_]?\s*\d{4}-\d{2}-\d{2}\s*$', '', title_search)
 
+    # Also try the parent directory name as a title source.
+    # Plex often uses the folder name ("Shared Tension - 2026-03-11") when the
+    # file's embedded title is absent, and users often organize into
+    # Studio/Title - Date/filename.mp4 layouts.
+    parent_name = path.parent.name
+    title_from_parent = re.sub(r'\s*[-_]?\s*\d{4}-\d{2}-\d{2}\s*$', '', parent_name) if parent_name else None
+
     log_debug(f"Searching '{library_name}' for: {obfuscate_path(filename)}")
     if debug_logging:
-        log_info(f"[DEBUG] Title variants: '{title_search}' / '{title_base}'")
+        log_info(f"[DEBUG] Title variants: '{title_search}' / '{title_base}' / parent: '{title_from_parent}'")
 
     candidates = []
 
+    # Build title search list — deduplicate while preserving order
+    title_variants = []
+    for t in [title_search, title_base, title_from_parent]:
+        if t and t not in title_variants:
+            title_variants.append(t)
+
     # Fast path: title search (with optional library_cache)
     try:
-        for title in [title_search, title_base]:
+        for title in title_variants:
             if candidates:
                 break
             if debug_logging:

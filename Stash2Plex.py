@@ -363,6 +363,12 @@ def initialize(config_dict: dict = None):
         _worker_lock_fd = open(lock_path, 'w')
         fcntl.flock(_worker_lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
+            # Resume any orphaned in-progress items from a prior crashed process.
+            # This replaces auto_resume=True which caused race conditions when
+            # multiple plugin processes started concurrently.
+            from sync_queue.operations import resume_orphaned_items
+            resume_orphaned_items(queue_manager.queue_path)
+
             worker.start()
             log_info("Initialization complete (worker started)")
         except Exception as e:
