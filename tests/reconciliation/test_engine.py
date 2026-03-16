@@ -355,7 +355,7 @@ def test_run_detection_only_without_queue(mock_stash, mock_config, tmp_data_dir,
 
 
 def test_lighter_pre_check_uses_sync_timestamps_first(mock_stash, mock_config, tmp_data_dir, sample_scenes, mock_plex_client):
-    """Test that lighter pre-check skips matcher for scenes with sync timestamps."""
+    """Test that lighter pre-check marks synced scenes as matched AND still checks Plex metadata."""
     mock_stash.find_scenes.return_value = [sample_scenes[0]]
 
     # Scene has sync timestamp
@@ -371,8 +371,10 @@ def test_lighter_pre_check_uses_sync_timestamps_first(mock_stash, mock_config, t
         engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=None)
         result = engine.run(scope="all")
 
-        # Matcher should NOT be called (scene has sync timestamp, pre-check short-circuits)
-        mock_matcher.assert_not_called()
+        # Matcher IS called even for synced scenes (to get Plex metadata for
+        # empty-metadata detection — a scene may have been synced before
+        # metadata was available, e.g. before Auto Tag ran)
+        mock_matcher.assert_called()
 
 
 def test_job_data_builder_extracts_all_fields(mock_stash, mock_config, tmp_data_dir, sample_scenes):

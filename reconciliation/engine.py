@@ -363,13 +363,13 @@ class GapDetectionEngine:
             if not file_path:
                 continue
 
-            # Lighter pre-check: if scene has sync timestamp, it's already matched
+            # If scene has sync timestamp, it's already matched to a Plex item.
+            # Still need to fetch Plex metadata for empty-metadata detection —
+            # a scene may have been synced before metadata was available (e.g.,
+            # synced during scan before Auto Tag added performers/studios/tags).
             if int(scene_id) in sync_timestamps:
                 matched_paths.add(file_path)
-                # Note: We don't have Plex metadata for this item without fetching it,
-                # but that's OK - empty detection only needs metadata for NEW matches
-                # (items already synced once won't have empty metadata)
-                continue
+                # Fall through to matcher below to also get Plex metadata
 
             # Scene not in sync_timestamps - try matcher
             plex_item = None
