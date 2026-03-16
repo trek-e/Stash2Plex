@@ -101,7 +101,10 @@ def is_scan_running(stash) -> bool:
         jobs = result.get('jobQueue', []) if result else []
 
         # Check description for scan-related keywords
-        scan_keywords = ['scan', 'auto tag', 'generate', 'identify']
+        # NOTE: 'auto tag' is intentionally excluded — Auto Tag adds meaningful
+        # metadata (performers, studios, tags) that should sync to Plex.
+        # 'identify' is excluded too — handled by stash_ids bypass in main().
+        scan_keywords = ['scan', 'generate']
         for job in jobs:
             status = (job.get('status') or '').upper()
             description = (job.get('description') or '').lower()
@@ -183,9 +186,9 @@ def on_scene_update(
     """
     start = time.time()
 
-    # Skip if scan/generate job is running (but allow identification events through —
-    # they fire while the identify job is still in the queue, and the entry point
-    # already verified this is a legitimate identification event)
+    # Skip if scan/generate job is running (Auto Tag and Identify are NOT
+    # blocked — they add meaningful metadata. Only file scans and generate
+    # jobs are suppressed to avoid noise from filesystem-only updates.)
     if not scan_already_checked and not is_identification and is_scan_running(stash):
         log_trace(f"Scene {scene_id} skipped - scan job active")
         return False

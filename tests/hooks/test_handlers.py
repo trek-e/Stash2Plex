@@ -152,8 +152,8 @@ class TestIsScanRunning:
 
         assert is_scan_running(mock_stash) is True
 
-    def test_auto_tag_running_returns_true(self):
-        """RUNNING job with 'auto tag' in description should return True."""
+    def test_auto_tag_running_returns_false(self):
+        """Auto Tag adds real metadata — should NOT be treated as a scan."""
         mock_stash = MagicMock()
         mock_stash.call_GQL.return_value = {
             "jobQueue": [
@@ -161,10 +161,10 @@ class TestIsScanRunning:
             ]
         }
 
-        assert is_scan_running(mock_stash) is True
+        assert is_scan_running(mock_stash) is False
 
-    def test_identify_running_returns_true(self):
-        """RUNNING job with 'identify' in description should return True."""
+    def test_identify_running_returns_false(self):
+        """Identify adds stash_ids — should NOT be treated as a scan."""
         mock_stash = MagicMock()
         mock_stash.call_GQL.return_value = {
             "jobQueue": [
@@ -172,7 +172,7 @@ class TestIsScanRunning:
             ]
         }
 
-        assert is_scan_running(mock_stash) is True
+        assert is_scan_running(mock_stash) is False
 
     def test_ready_status_returns_true(self):
         """READY job with scan keyword should return True."""
