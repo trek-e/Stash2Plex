@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v1.5.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build plugin zip
+        run: |
+          zip -r Stash2Plex.zip \
+            Stash2Plex.py Stash2Plex.yml requirements.txt \
+            worker/ sync_queue/ plex/ validation/ shared/ hooks/ reconciliation/ \
+            -x "*/test*" "*/__pycache__/*" "*.pyc" "*/.pytest*"
+
+      - name: Compute SHA256
+        id: sha
+        run: echo "sha256=$(sha256sum Stash2Plex.zip | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Update Stash2Plex.yml version
+        run: sed -i "s/^version: .*/version: ${{ steps.version.outputs.version }}/" Stash2Plex.yml
+
+      - name: Rebuild zip with updated yml
+        run: |
+          rm -f Stash2Plex.zip
+          zip -r Stash2Plex.zip \
+            Stash2Plex.py Stash2Plex.yml requirements.txt \
+            worker/ sync_queue/ plex/ validation/ shared/ hooks/ reconciliation/ \
+            -x "*/test*" "*/__pycache__/*" "*.pyc" "*/.pytest*"
+          echo "sha256=$(sha256sum Stash2Plex.zip | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Update index.yml
+        run: |
+          SHA=$(sha256sum Stash2Plex.zip | awk '{print $1}')
+          DATE=$(date -u +"%Y-%m-%d %H:%M:%S")
+          sed -i "s/^  version: .*/  version: ${{ steps.version.outputs.version }}/" index.yml
+          sed -i "s/^  date: .*/  date: \"${DATE}\"/" index.yml
+          sed -i "s/^  sha256: .*/  sha256: ${SHA}/" index.yml
+
+      - name: Commit updated files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Stash2Plex.yml index.yml Stash2Plex.zip
+          git commit -m "chore: update plugin index and zip for v${{ steps.version.outputs.version }}"
+          git push origin main
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          # Get commits since previous tag
+          PREV_TAG=$(git tag --sort=-v:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
+          if [ -n "$PREV_TAG" ]; then
+            NOTES=$(git log --pretty=format:"- %s" "${PREV_TAG}..${GITHUB_REF_NAME}" -- \
+              '*.py' '*.yml' ':!tests/' ':!.github/' | grep -v "^- chore:")
+          fi
+          if [ -z "$NOTES" ]; then
+            NOTES="- Bug fixes and improvements"
+          fi
+          # Write multiline output
+          {
+            echo "body<<EOF"
+            echo "### Changes"
+            echo ""
+            echo "$NOTES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: v${{ steps.version.outputs.version }}
+          body: ${{ steps.notes.outputs.body }}
+          files: Stash2Plex.zip
