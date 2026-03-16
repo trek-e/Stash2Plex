@@ -1018,8 +1018,10 @@ def handle_reconcile(scope: str):
             return
 
         # Get queue for enqueue mode
+        # Note: SQLiteAckQueue.__bool__ returns False when empty,
+        # so we must check `is None` not truthiness
         queue = queue_manager.get_queue() if queue_manager else None
-        if not queue:
+        if queue is None:
             log_warn("No queue available - running in detection-only mode")
 
         scope_labels = {
@@ -1051,7 +1053,7 @@ def handle_reconcile(scope: str):
         log_info(f"  Empty metadata: {result.empty_metadata_count}")
         log_info(f"  Stale sync: {result.stale_sync_count}")
         log_info(f"  Missing from Plex: {result.missing_count}")
-        if queue:
+        if queue is not None:
             log_info(f"Enqueued: {result.enqueued_count}")
             if result.skipped_already_queued:
                 log_info(f"Skipped (already queued): {result.skipped_already_queued}")
@@ -1118,7 +1120,7 @@ def maybe_check_recovery():
         # Log queue drain info if recovery completed
         if is_healthy and worker.circuit_breaker.state == CircuitState.CLOSED:
             queue = queue_manager.get_queue() if queue_manager else None
-            pending = queue.size if queue else 0
+            pending = queue.size if queue is not None else 0
             if pending > 0:
                 log_info(f"Queue will drain automatically ({pending} jobs pending)")
 
@@ -1326,7 +1328,7 @@ def handle_recover_outage_jobs():
             return
 
         queue = queue_manager.get_queue()
-        if not queue:
+        if queue is None:
             log_error("Queue not available")
             return
 
