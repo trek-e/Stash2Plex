@@ -16,34 +16,22 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
+          fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract version from tag
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+      - name: Update Stash2Plex.yml version
+        run: sed -i "s/^version: .*/version: ${{ steps.version.outputs.version }}/" Stash2Plex.yml
+
       - name: Build plugin zip
         run: |
           zip -r Stash2Plex.zip \
             Stash2Plex.py Stash2Plex.yml requirements.txt \
             worker/ sync_queue/ plex/ validation/ shared/ hooks/ reconciliation/ \
-            -x "*/test*" "*/__pycache__/*" "*.pyc" "*/.pytest*"
-
-      - name: Compute SHA256
-        id: sha
-        run: echo "sha256=$(sha256sum Stash2Plex.zip | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-
-      - name: Update Stash2Plex.yml version
-        run: sed -i "s/^version: .*/version: ${{ steps.version.outputs.version }}/" Stash2Plex.yml
-
-      - name: Rebuild zip with updated yml
-        run: |
-          rm -f Stash2Plex.zip
-          zip -r Stash2Plex.zip \
-            Stash2Plex.py Stash2Plex.yml requirements.txt \
-            worker/ sync_queue/ plex/ validation/ shared/ hooks/ reconciliation/ \
-            -x "*/test*" "*/__pycache__/*" "*.pyc" "*/.pytest*"
-          echo "sha256=$(sha256sum Stash2Plex.zip | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+            -x '*/test*' '*/__pycache__/*' '*.pyc' '*/.pytest*'
 
       - name: Update index.yml
         run: |
@@ -64,16 +52,13 @@ jobs:
       - name: Generate release notes
         id: notes
         run: |
-          # Get commits since previous tag
           PREV_TAG=$(git tag --sort=-v:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
           if [ -n "$PREV_TAG" ]; then
-            NOTES=$(git log --pretty=format:"- %s" "${PREV_TAG}..${GITHUB_REF_NAME}" -- \
-              '*.py' '*.yml' ':!tests/' ':!.github/' | grep -v "^- chore:")
+            NOTES=$(git log --pretty=format:"- %s" "${PREV_TAG}..${GITHUB_REF_NAME}" -- '*.py' '*.yml' ':!tests/' ':!.github/' | grep -v "^- chore:")
           fi
           if [ -z "$NOTES" ]; then
             NOTES="- Bug fixes and improvements"
           fi
-          # Write multiline output
           {
             echo "body<<EOF"
             echo "### Changes"
@@ -85,6 +70,6 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          name: v${{ steps.version.outputs.version }}
+          name: "v${{ steps.version.outputs.version }}"
           body: ${{ steps.notes.outputs.body }}
           files: Stash2Plex.zip
