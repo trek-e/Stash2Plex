@@ -275,13 +275,20 @@ def extract_config_from_input(input_data: dict) -> dict:
     return config_dict
 
 
-def initialize(config_dict: dict = None):
+def initialize(config_dict: dict = None, resume_orphaned: bool = True):
     """
     Initialize queue, DLQ, and worker with validated configuration.
 
     Args:
         config_dict: Optional configuration dictionary. If not provided,
                      will attempt to read from environment variables.
+        resume_orphaned: If True (default), resume orphaned in-progress items
+                         from prior crashed processes. Pass False for hook
+                         invocations to prevent a stale orphaned item (e.g.,
+                         a scene not yet scanned by Plex) from monopolizing the
+                         10-second hook window and blocking all newer jobs.
+                         Orphaned items accumulate safely (status=2 is skipped
+                         by the queue) and are recovered on the next task run.
 
     Returns:
         False if configuration validation fails, True otherwise
@@ -366,8 +373,17 @@ def initialize(config_dict: dict = None):
             # Resume any orphaned in-progress items from a prior crashed process.
             # This replaces auto_resume=True which caused race conditions when
             # multiple plugin processes started concurrently.
-            from sync_queue.operations import resume_orphaned_items
-            resume_orphaned_items(queue_manager.queue_path)
+            # Skipped for hook invocations: an orphaned item stuck in
+            # library.all() (scene not yet scanned by Plex) would monopolize
+            # the 10-second hook window, blocking all newer jobs. Tasks have
+            # longer timeouts and can safely resume orphaned items.
+            if resume_orphaned:
+                from sync_queue.operations import resume_orphaned_items
+                resumed = resume_orphaned_items(queue_manager.queue_path)
+                if resumed == 0:
+                    log_trace("No orphaned items to resume")
+            else:
+                log_trace("Skipping orphaned item resume (hook invocation)")
 
             worker.start()
             log_info("Initialization complete (worker started)")
@@ -1656,7 +1672,7 @@ def main():
     global queue_manager, config
     if queue_manager is None:
         config_dict = extract_config_from_input(input_data)
-        init_success = initialize(config_dict)
+        init_success = initialize(config_dict, resume_orphaned=not is_hook)
         if not init_success:
             # Initialization failed (config validation error)
             # Lock was never acquired or was released, safe to exit
