@@ -614,3 +614,92 @@ class TestWorkerLock:
 
             # Should not raise
             Stash2Plex.shutdown()
+
+
+class TestExtractConfigFromInput:
+    """Tests for extract_config_from_input() StashInterface reuse behavior."""
+
+    def test_reuses_existing_stash_when_provided(self):
+        """Does not create a new StashInterface when existing_stash is provided."""
+        from Stash2Plex import extract_config_from_input
+
+        mock_stash = Mock()
+        mock_stash_settings = {'plex_url': 'http://plex:32400', 'plex_token': 'tok'}
+
+        input_data = {
+            'server_connection': {
+                'Scheme': 'http',
+                'Host': '127.0.0.1',
+                'Port': 9999,
+            }
+        }
+
+        with patch('Stash2Plex.get_stash_interface') as mock_get_stash, \
+             patch('Stash2Plex.fetch_plugin_settings', return_value=mock_stash_settings):
+
+            result = extract_config_from_input(input_data, existing_stash=mock_stash)
+
+            # Should NOT create a new StashInterface — avoid the 2 extra GQL calls
+            mock_get_stash.assert_not_called()
+
+            # Should use the settings fetched via the reused stash
+            assert result.get('plex_url') == 'http://plex:32400'
+            assert result.get('plex_token') == 'tok'
+
+    def test_creates_new_stash_when_none_provided(self):
+        """Creates a new StashInterface when existing_stash is None (task invocations)."""
+        from Stash2Plex import extract_config_from_input
+
+        mock_stash = Mock()
+        input_data = {
+            'server_connection': {
+                'Scheme': 'http',
+                'Host': '127.0.0.1',
+                'Port': 9999,
+            }
+        }
+
+        with patch('Stash2Plex.get_stash_interface', return_value=mock_stash) as mock_get_stash, \
+             patch('Stash2Plex.fetch_plugin_settings', return_value={}):
+
+            extract_config_from_input(input_data, existing_stash=None)
+
+            # Should create a new StashInterface (no existing connection)
+            mock_get_stash.assert_called_once_with(input_data)
+
+    def test_creates_new_stash_when_not_passed(self):
+        """Creates a new StashInterface when existing_stash is not passed (default)."""
+        from Stash2Plex import extract_config_from_input
+
+        mock_stash = Mock()
+        input_data = {
+            'server_connection': {
+                'Scheme': 'http',
+                'Host': '127.0.0.1',
+                'Port': 9999,
+            }
+        }
+
+        with patch('Stash2Plex.get_stash_interface', return_value=mock_stash) as mock_get_stash, \
+             patch('Stash2Plex.fetch_plugin_settings', return_value={}):
+
+            extract_config_from_input(input_data)
+
+            # Should create a new StashInterface (backward-compatible default)
+            mock_get_stash.assert_called_once_with(input_data)
+
+    def test_stores_existing_stash_as_global_interface(self):
+        """The reused stash is stored as the global stash_interface."""
+        import Stash2Plex
+        from Stash2Plex import extract_config_from_input
+
+        mock_stash = Mock()
+        input_data = {'server_connection': {}}
+
+        with patch('Stash2Plex.get_stash_interface', return_value=Mock()), \
+             patch('Stash2Plex.fetch_plugin_settings', return_value={}):
+
+            extract_config_from_input(input_data, existing_stash=mock_stash)
+
+            # The reused stash should be stored globally (hook handlers use it)
+            assert Stash2Plex.stash_interface is mock_stash

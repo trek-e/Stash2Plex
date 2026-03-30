@@ -218,7 +218,7 @@ def fetch_plugin_settings(stash) -> dict:
         return {}
 
 
-def extract_config_from_input(input_data: dict) -> dict:
+def extract_config_from_input(input_data: dict, existing_stash=None) -> dict:
     """
     Extract Plex configuration from Stash input data.
 
@@ -227,6 +227,10 @@ def extract_config_from_input(input_data: dict) -> dict:
 
     Args:
         input_data: Input data from Stash plugin protocol
+        existing_stash: Optional pre-existing StashInterface to reuse.
+            When provided, avoids creating a duplicate connection to Stash
+            (which would make an extra 2 GQL calls for version + apiKey checks).
+            Pass the temp_stash created for scan detection in hook invocations.
 
     Returns:
         Dictionary with config values (may be empty if nothing found)
@@ -252,8 +256,14 @@ def extract_config_from_input(input_data: dict) -> dict:
             else:
                 config_dict['stash_session_cookie'] = str(session_cookie)
 
-    # Fetch settings from Stash using stashapi
-    stash = get_stash_interface(input_data)
+    # Reuse existing connection if provided, otherwise create a new one.
+    # This avoids a duplicate StashInterface instantiation (which makes 2 extra
+    # GQL calls to Stash for version + apiKey checks) when called from hook
+    # invocations that already created a temp_stash for scan detection.
+    if existing_stash is not None:
+        stash = existing_stash
+    else:
+        stash = get_stash_interface(input_data)
     stash_interface = stash  # Store globally for hook handlers
     if stash:
         stash_settings = fetch_plugin_settings(stash)
@@ -1649,6 +1659,13 @@ def main():
     args = input_data.get("args", {})
     is_hook = "hookContext" in args
 
+    # temp_stash holds the pre-created StashInterface for hook invocations so it
+    # can be reused by extract_config_from_input() rather than opening a second
+    # connection to Stash. This avoids duplicate GQL calls (version + apiKey) that
+    # add CPU/goroutine load on Stash while it may be handling concurrent outbound
+    # HTTPS connections (e.g. stashdb.org scraping), which can cause TLS timeout.
+    temp_stash = None
+
     # For hooks: create minimal stash connection to check for scans
     # Exception: Scene.Create.Post may need to trigger Plex scan even during Stash scan
     if is_hook:
@@ -1671,7 +1688,9 @@ def main():
     # Initialize on first call
     global queue_manager, config
     if queue_manager is None:
-        config_dict = extract_config_from_input(input_data)
+        # Pass temp_stash (if created above) to reuse the existing connection and
+        # avoid creating a second StashInterface with its own 2 GQL calls to Stash.
+        config_dict = extract_config_from_input(input_data, existing_stash=temp_stash)
         init_success = initialize(config_dict, resume_orphaned=not is_hook)
         if not init_success:
             # Initialization failed (config validation error)
