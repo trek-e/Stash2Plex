@@ -13,7 +13,7 @@ Functions:
     translate_plex_exception: Convert plexapi/requests exceptions to hierarchy
 """
 
-from worker.processor import TransientError, PermanentError
+from worker.errors import TransientError, PermanentError
 
 
 class PlexTemporaryError(TransientError):

@@ -9,7 +9,8 @@ Exports:
     get_retry_params: Get retry parameters for error type
 """
 
-from worker.processor import SyncWorker, TransientError, PermanentError
+from worker.errors import TransientError, PermanentError
+from worker.processor import SyncWorker
 from worker.circuit_breaker import CircuitBreaker, CircuitState
 from worker.backoff import calculate_delay, get_retry_params
 

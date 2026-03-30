@@ -22,24 +22,18 @@ from worker.stats import SyncStats
 from shared.log import create_logger
 log_trace, log_debug, log_info, log_warn, log_error = create_logger("Worker")
 
-# Lazy imports to avoid module-level pollution in tests
-# These functions are imported inside methods that use them
-# to ensure imports are fresh and not polluted by test mocking
+from worker.errors import TransientError, PermanentError
+from worker.backoff import calculate_delay, get_retry_params
+from worker.circuit_breaker import CircuitBreaker, CircuitState
+# plex.exceptions imports are lazy (inside methods) due to circular import:
+# plex.exceptions → worker.errors → worker.__init__ → worker.processor → plex.exceptions
+
+# Remaining lazy imports are inside methods — see # lazy: comments for reasons
 
 if TYPE_CHECKING:
     from validation.config import Stash2PlexConfig
     from plex.client import PlexClient
     from plex.cache import PlexCache, MatchCache
-
-
-class TransientError(Exception):
-    """Retry-able errors (network, timeout, 5xx)"""
-    pass
-
-
-class PermanentError(Exception):
-    """Non-retry-able errors (4xx except 429, validation)"""
-    pass
 
 
 class SyncWorker:
@@ -97,14 +91,12 @@ class SyncWorker:
 
         # Outage history tracking
         if data_dir is not None:
-            from worker.outage_history import OutageHistory
+            from worker.outage_history import OutageHistory  # lazy: only needed when data_dir is set
             self._outage_history = OutageHistory(data_dir)
         else:
             self._outage_history = None
 
         # Circuit breaker for resilience during Plex outages
-        from worker.circuit_breaker import CircuitBreaker
-
         # Enable state persistence when data_dir is available
         cb_state_file = None
         if data_dir is not None:
@@ -124,13 +116,13 @@ class SyncWorker:
         self._consecutive_health_failures: int = 0
 
         # Recovery rate limiter for graduated queue drain
-        from worker.rate_limiter import RecoveryRateLimiter
+        from worker.rate_limiter import RecoveryRateLimiter  # lazy: only needed at init time
         self._rate_limiter = RecoveryRateLimiter()
         self._was_in_recovery = False
 
         # Check if recovery period is active from prior session (cross-restart continuity)
         if data_dir is not None:
-            from worker.recovery import RecoveryScheduler
+            from worker.recovery import RecoveryScheduler  # lazy: only needed when data_dir is set
             recovery_scheduler = RecoveryScheduler(data_dir, outage_history=self._outage_history)
             recovery_state = recovery_scheduler.load_state()
             if recovery_state.recovery_started_at > 0:
@@ -233,8 +225,6 @@ class SyncWorker:
         Returns:
             Updated job dict with retry metadata
         """
-        from worker.backoff import calculate_delay, get_retry_params
-
         base, cap, max_retries = get_retry_params(error)
         retry_count = job.get('retry_count', 0) + 1
         delay = calculate_delay(retry_count - 1, base, cap)  # -1 because we just incremented
@@ -270,7 +260,6 @@ class SyncWorker:
         Returns:
             Maximum number of retries for this error type
         """
-        from worker.backoff import get_retry_params
         _, _, max_retries = get_retry_params(error)
         return max_retries
 
@@ -285,8 +274,7 @@ class SyncWorker:
         Args:
             job: Job dict with retry metadata already added
         """
-        # Lazy import to avoid module-level import pollution in tests
-        from sync_queue.operations import ack_job as _ack_job, _job_counter
+        from sync_queue.operations import ack_job as _ack_job, _job_counter  # lazy: test isolation
 
         # Extract original job fields for re-enqueue
         scene_id = job.get('scene_id')
@@ -314,10 +302,8 @@ class SyncWorker:
 
     def _worker_loop(self):
         """Main worker loop - runs in background thread"""
-        from worker.circuit_breaker import CircuitState
-        from plex.exceptions import PlexServerDown, PlexNotFound
-        # Lazy imports to avoid module-level pollution in tests
-        from sync_queue.operations import get_pending, ack_job, nack_job, fail_job
+        from plex.exceptions import PlexServerDown, PlexNotFound  # lazy: circular import (plex.exceptions→worker→plex.exceptions)
+        from sync_queue.operations import get_pending, ack_job, nack_job, fail_job  # lazy: test isolation
 
         # Track recently-processed scene IDs to skip duplicates within this session.
         _recently_synced: set = set()
@@ -328,7 +314,7 @@ class SyncWorker:
         # invocation due to auto_resume or stale queue entries.
         _sync_timestamps: dict = {}
         if self.data_dir is not None:
-            from sync_queue.operations import load_sync_timestamps as _load_ts
+            from sync_queue.operations import load_sync_timestamps as _load_ts  # lazy: test isolation
             _sync_timestamps = _load_ts(self.data_dir)
 
         # Track consecutive not-ready nacks to detect when ALL items are waiting
@@ -349,7 +335,7 @@ class SyncWorker:
                     # Active health check during OPEN state to detect recovery
                     now = time.time()
                     if now - self._last_health_check >= self._health_check_interval:
-                        from plex.health import check_plex_health
+                        from plex.health import check_plex_health  # lazy: imports plexapi
 
                         client = self._get_plex_client()
                         is_healthy, latency_ms = check_plex_health(client, timeout=5.0)
@@ -367,7 +353,6 @@ class SyncWorker:
                         else:
                             # Plex still down, apply backoff
                             self._consecutive_health_failures += 1
-                            from worker.backoff import calculate_delay
                             self._health_check_interval = calculate_delay(
                                 retry_count=self._consecutive_health_failures,
                                 base=5.0,
@@ -400,7 +385,7 @@ class SyncWorker:
                 if not self._rate_limiter.is_in_recovery_period() and self._was_in_recovery:
                     self._was_in_recovery = False
                     if self.data_dir is not None:
-                        from worker.recovery import RecoveryScheduler
+                        from worker.recovery import RecoveryScheduler  # lazy: only needed when data_dir is set
                         scheduler = RecoveryScheduler(self.data_dir, outage_history=self._outage_history)
                         scheduler.clear_recovery_period()
                     log_info("Recovery period complete: normal processing speed resumed")
@@ -506,7 +491,7 @@ class SyncWorker:
                         self._was_in_recovery = True
                         # Persist recovery_started_at for cross-restart continuity
                         if self.data_dir is not None:
-                            from worker.recovery import RecoveryScheduler
+                            from worker.recovery import RecoveryScheduler  # lazy: only needed when data_dir is set
                             scheduler = RecoveryScheduler(self.data_dir, outage_history=self._outage_history)
                             state = scheduler.load_state()
                             state.recovery_started_at = time.time()
@@ -642,7 +627,7 @@ class SyncWorker:
             PlexClient instance configured with URL, token, and timeouts
         """
         if self._plex_client is None:
-            from plex.client import PlexClient
+            from plex.client import PlexClient  # lazy: heavy init (network connection)
             self._plex_client = PlexClient(
                 url=self.config.plex_url,
                 token=self.config.plex_token,
@@ -662,7 +647,7 @@ class SyncWorker:
             Tuple of (PlexCache or None, MatchCache or None)
         """
         if self._library_cache is None and self.data_dir is not None:
-            from plex.cache import PlexCache, MatchCache
+            from plex.cache import PlexCache, MatchCache  # lazy: heavy init
             cache_dir = os.path.join(self.data_dir, 'cache')
             self._library_cache = PlexCache(cache_dir)
             self._match_cache = MatchCache(cache_dir)
@@ -715,12 +700,11 @@ class SyncWorker:
         import time as _time
         _start_time = _time.perf_counter()
 
-        from plex.exceptions import PlexTemporaryError, PlexPermanentError, PlexNotFound, translate_plex_exception
-        from plex.matcher import find_plex_items_with_confidence, MatchConfidence
-        from validation.obfuscation import obfuscate_path
-        # Lazy imports to avoid module-level pollution in tests
-        from sync_queue.operations import save_sync_timestamp
-        from hooks.handlers import unmark_scene_pending
+        from plex.exceptions import PlexTemporaryError, PlexPermanentError, PlexNotFound, translate_plex_exception  # lazy: circular import
+        from plex.matcher import find_plex_items_with_confidence, MatchConfidence  # lazy: imports plexapi
+        from validation.obfuscation import obfuscate_path  # lazy: test isolation
+        from sync_queue.operations import save_sync_timestamp  # lazy: test isolation
+        from hooks.handlers import unmark_scene_pending  # lazy: test isolation
 
         _dbg = getattr(self.config, 'debug_logging', False)
 
