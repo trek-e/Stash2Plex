@@ -9,8 +9,27 @@ from pydantic import BaseModel, Field, field_validator, ValidationError
 from typing import Optional, Any
 
 from validation.sanitizers import sanitize_for_plex
-from shared.log import create_logger
-_, log_debug, _, _, _ = create_logger("Validation")
+
+
+def _string_sanitizer(max_length: int, required: bool = False):
+    """Create a Pydantic field_validator that sanitizes string fields.
+
+    Args:
+        max_length: Maximum allowed length after sanitization
+        required: If True, None/empty raises ValueError
+    """
+    def validator(cls, v):
+        if v is None:
+            if required:
+                raise ValueError("title is required")
+            return None
+        if not isinstance(v, str):
+            v = str(v)
+        sanitized = sanitize_for_plex(v, max_length=max_length)
+        if required and not sanitized:
+            raise ValueError("title cannot be empty after sanitization")
+        return sanitized if sanitized else None
+    return classmethod(validator)
 
 
 class SyncMetadata(BaseModel):
@@ -56,49 +75,13 @@ class SyncMetadata(BaseModel):
     performers: Optional[list[str]] = Field(default=None, description="Performer names")
     tags: Optional[list[str]] = Field(default=None, description="Tag names")
 
-    @field_validator('title', mode='before')
-    @classmethod
-    def sanitize_title(cls, v: Any) -> str:
-        """Sanitize title field, ensuring non-empty string."""
-        if v is None:
-            raise ValueError("title is required")
-        if not isinstance(v, str):
-            v = str(v)
-        original = v
-        sanitized = sanitize_for_plex(v, max_length=255)
-        if sanitized != original:
-            log_debug(f"Sanitized title: '{original[:50]}...' -> '{sanitized[:50]}...'")
-        if not sanitized:
-            raise ValueError("title cannot be empty after sanitization")
-        return sanitized
-
-    @field_validator('details', mode='before')
-    @classmethod
-    def sanitize_details(cls, v: Any) -> Optional[str]:
-        """Sanitize details field."""
-        if v is None:
-            return None
-        if not isinstance(v, str):
-            v = str(v)
-        original = v
-        sanitized = sanitize_for_plex(v, max_length=10000)
-        if sanitized != original:
-            log_debug(f"Sanitized details: '{original[:50]}...' -> '{sanitized[:50]}...'")
-        return sanitized if sanitized else None
-
-    @field_validator('studio', mode='before')
-    @classmethod
-    def sanitize_studio(cls, v: Any) -> Optional[str]:
-        """Sanitize studio field."""
-        if v is None:
-            return None
-        if not isinstance(v, str):
-            v = str(v)
-        original = v
-        sanitized = sanitize_for_plex(v, max_length=255)
-        if sanitized != original:
-            log_debug(f"Sanitized studio: '{original[:50]}...' -> '{sanitized[:50]}...'")
-        return sanitized if sanitized else None
+    # Sanitize string fields via factory (DRY — all follow same pattern)
+    sanitize_title = field_validator('title', mode='before')(
+        _string_sanitizer(255, required=True))
+    sanitize_details = field_validator('details', mode='before')(
+        _string_sanitizer(10000))
+    sanitize_studio = field_validator('studio', mode='before')(
+        _string_sanitizer(255))
 
     @field_validator('performers', 'tags', mode='before')
     @classmethod
