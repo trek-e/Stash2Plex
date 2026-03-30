@@ -83,6 +83,7 @@ class SyncWorker:
         # Initialize caches (lazy, created on first use)
         self._library_cache: Optional['PlexCache'] = None
         self._match_cache: Optional['MatchCache'] = None
+        self._metadata_updater = None
 
         # Initialize stats tracking
         self._stats = SyncStats()
@@ -630,45 +631,6 @@ class SyncWorker:
                 log_error(f"Worker loop error: {e}")
                 time.sleep(1)  # Avoid tight loop on persistent errors
 
-    def _fetch_stash_image(self, url: str) -> Optional[bytes]:
-        """
-        Fetch image from Stash URL.
-
-        Downloads the image bytes so we can upload directly to Plex,
-        avoiding issues with Plex not being able to reach Stash's internal URL.
-
-        Args:
-            url: Stash image URL (screenshot, preview, etc.)
-
-        Returns:
-            Image bytes or None if fetch failed
-        """
-        import urllib.request
-        import urllib.error
-
-        try:
-            # Build request with authentication from Stash connection
-            req = urllib.request.Request(url)
-
-            # Add API key header if available
-            api_key = getattr(self.config, 'stash_api_key', None)
-            if api_key:
-                req.add_header('ApiKey', api_key)
-
-            # Add session cookie if available
-            session_cookie = getattr(self.config, 'stash_session_cookie', None)
-            if session_cookie:
-                req.add_header('Cookie', session_cookie)
-
-            with urllib.request.urlopen(req, timeout=30) as response:
-                return response.read()
-        except urllib.error.URLError as e:
-            log_warn(f" Failed to fetch image from Stash: {e}")
-            return None
-        except Exception as e:
-            log_warn(f" Image fetch error: {e}")
-            return None
-
     def _get_plex_client(self) -> 'PlexClient':
         """
         Get PlexClient with lazy initialization.
@@ -706,6 +668,13 @@ class SyncWorker:
             self._match_cache = MatchCache(cache_dir)
             log_debug(f"Initialized caches at {cache_dir}")
         return self._library_cache, self._match_cache
+
+    def _get_metadata_updater(self):
+        """Get MetadataUpdater with lazy initialization."""
+        if self._metadata_updater is None:
+            from worker.metadata_updater import MetadataUpdater  # lazy: test isolation
+            self._metadata_updater = MetadataUpdater(self.config)
+        return self._metadata_updater
 
     def _log_cache_stats(self):
         """Log cache hit/miss statistics."""
@@ -840,7 +809,7 @@ class SyncWorker:
                 plex_item = unique_candidates[0]
                 if _dbg:
                     log_info(f"[DEBUG] HIGH confidence match: {plex_item.title}")
-                self._update_metadata(plex_item, data)
+                self._get_metadata_updater().update(plex_item, data)
                 # Write to match_cache AFTER metadata update succeeds.
                 # This ensures the cache only records items that have been
                 # fully synced. Writing before the update (as was previously
@@ -874,7 +843,7 @@ class SyncWorker:
                         f"Chosen: {obfuscated_paths[0]} "
                         f"Other candidates: {obfuscated_paths[1:]}"
                     )
-                    self._update_metadata(plex_item, data)
+                    self._get_metadata_updater().update(plex_item, data)
 
             # Update sync timestamp after successful sync
             if self.data_dir is not None:
@@ -899,395 +868,3 @@ class SyncWorker:
             unmark_scene_pending(scene_id)
             raise translate_plex_exception(e)
 
-    def _validate_edit_result(self, plex_item, expected_edits: dict) -> list:
-        """
-        Validate that edit actually applied expected values.
-
-        Returns list of fields that may not have updated correctly.
-        This catches silent failures where Plex accepts the request
-        but doesn't apply the value (e.g., field limit exceeded).
-
-        Args:
-            plex_item: Plex item after reload
-            expected_edits: Dict of edits that were sent (field.value -> value)
-
-        Returns:
-            List of issue descriptions for fields that may not have updated
-        """
-        issues = []
-        for field_key, expected_value in expected_edits.items():
-            # Skip locked fields and non-value fields
-            if '.locked' in field_key or not expected_value:
-                continue
-
-            # Parse field name from "field.value" format
-            field_name = field_key.replace('.value', '')
-
-            # Map edit field names to actual plex_item attributes
-            field_mapping = {
-                'title': 'title',
-                'studio': 'studio',
-                'summary': 'summary',
-                'tagline': 'tagline',
-                'originallyAvailableAt': 'originallyAvailableAt',
-            }
-
-            attr_name = field_mapping.get(field_name)
-            if not attr_name:
-                continue
-
-            actual_value = getattr(plex_item, attr_name, None)
-
-            # Convert to string for comparison (handle None)
-            expected_str = str(expected_value) if expected_value else ''
-            actual_str = str(actual_value) if actual_value else ''
-
-            # Check if value matches (with tolerance for truncation/sanitization)
-            # Compare first 50 chars to handle any server-side trimming
-            if expected_str and actual_str:
-                if expected_str[:50] != actual_str[:50]:
-                    issues.append(
-                        f"{field_name}: sent '{expected_str[:20]}...', "
-                        f"got '{actual_str[:20]}...'"
-                    )
-            elif expected_str and not actual_str:
-                issues.append(f"{field_name}: sent value but field is empty")
-
-        return issues
-
-    def _update_metadata(self, plex_item, data: dict):
-        """
-        Update Plex item metadata from sync job data with granular error handling.
-
-        Implements LOCKED user decision: When Stash provides None/empty for an
-        optional field, the existing Plex value is CLEARED (not preserved).
-        When a field key is NOT in the data dict, the existing value is preserved.
-
-        Non-critical field failures (performers, tags, poster, background, collection)
-        are logged as warnings but don't fail the overall sync. Critical field failures
-        (core metadata edit) propagate and fail the job.
-
-        Args:
-            plex_item: Plex Video item to update
-            data: Dict containing metadata fields (title, studio, details, etc.)
-
-        Returns:
-            PartialSyncResult tracking which fields succeeded and which had warnings
-        """
-        from validation.errors import PartialSyncResult
-
-        _dbg = getattr(self.config, 'debug_logging', False)
-        result = PartialSyncResult()
-
-        if not getattr(self.config, 'sync_master', True):
-            log_debug("Master sync toggle is OFF - skipping all field syncs")
-            return result
-
-        # Phase 1: Build and apply core text field edits (CRITICAL - failure propagates)
-        edits = self._build_core_edits(plex_item, data)
-        _needs_reload = False
-        if edits:
-            if _dbg:
-                log_info(f"[DEBUG] Metadata edits: {edits}")
-            else:
-                log_debug(f"Updating fields: {list(edits.keys())}")
-            plex_item.edit(**edits)
-            _needs_reload = True
-            mode = "preserved" if self.config.preserve_plex_edits else "overwrite"
-            log_info(f"Updated metadata ({mode} mode): {plex_item.title}")
-            result.add_success('metadata')
-        else:
-            if _dbg:
-                # Log what was compared so we can diagnose "no-op" syncs
-                fields_in_data = [k for k in ('title', 'studio', 'details', 'summary', 'tagline', 'date') if k in data]
-                log_info(f"[DEBUG] No core edits for '{plex_item.title}' — "
-                         f"data keys present: {fields_in_data}, "
-                         f"plex title='{plex_item.title}', stash title='{data.get('title', '<missing>')}'")
-            else:
-                log_trace(f"No metadata fields to update for: {plex_item.title}")
-
-        # Phase 2: Non-critical field syncs (failures logged as warnings)
-        if getattr(self.config, 'sync_performers', True) and 'performers' in data:
-            _needs_reload |= self._sync_performers(plex_item, data, result, _dbg)
-
-        if getattr(self.config, 'sync_poster', True) and data.get('poster_url'):
-            self._upload_image(
-                plex_item, data['poster_url'], plex_item.uploadPoster, 'poster', result, _dbg)
-
-        if getattr(self.config, 'sync_background', True) and data.get('background_url'):
-            self._upload_image(
-                plex_item, data['background_url'], plex_item.uploadArt, 'background', result, _dbg)
-
-        if getattr(self.config, 'sync_tags', True) and 'tags' in data:
-            _needs_reload |= self._sync_tags(plex_item, data, result, _dbg)
-
-        if getattr(self.config, 'sync_collection', True) and data.get('studio'):
-            _needs_reload |= self._sync_collection(plex_item, data, result)
-
-        # Single deferred reload after all edits (reduces HTTP roundtrips from up to 6 to 1)
-        if _needs_reload:
-            try:
-                plex_item.reload()
-                if edits:
-                    validation_issues = self._validate_edit_result(plex_item, edits)
-                    if validation_issues:
-                        log_debug(f"Edit validation issues (may be expected): {validation_issues}")
-            except Exception as e:
-                log_debug(f"Post-edit reload failed (edits already applied): {e}")
-
-        if result.has_warnings:
-            log_warn(f"Partial sync for {plex_item.title}: {result.warning_summary}")
-
-        return result
-
-    def _build_core_edits(self, plex_item, data: dict) -> dict:
-        """Build dict of core text field edits (title, studio, summary, tagline, date).
-
-        LOCKED DECISION: Missing optional fields clear existing Plex values.
-        - If key exists AND value is None/empty -> CLEAR (set to '')
-        - If key exists AND value is present -> sanitize and set
-        - If key does NOT exist in data dict -> do nothing (preserve)
-        """
-        from validation.limits import (
-            MAX_TITLE_LENGTH, MAX_STUDIO_LENGTH, MAX_SUMMARY_LENGTH, MAX_TAGLINE_LENGTH,
-        )
-        from validation.sanitizers import sanitize_for_plex
-
-        edits = {}
-
-        # Title (always synced — no toggle)
-        # NEVER clear a Plex title to empty — an empty title in Stash usually means
-        # the scene was just scanned and not yet identified. Clearing Plex's
-        # auto-generated title would leave the item nameless.
-        if 'title' in data:
-            title_value = data.get('title')
-            if title_value is None or title_value == '':
-                # Stash has no title — preserve whatever Plex already has.
-                # This prevents race conditions where Scene.Update.Post fires
-                # before identification completes.
-                log_debug("Stash title is empty — preserving existing Plex title")
-            else:
-                sanitized = sanitize_for_plex(title_value, max_length=MAX_TITLE_LENGTH)
-                if not self.config.preserve_plex_edits or not plex_item.title:
-                    if (plex_item.title or '') != sanitized:
-                        edits['title.value'] = sanitized
-
-        # Studio
-        if getattr(self.config, 'sync_studio', True) and 'studio' in data:
-            studio_value = data.get('studio')
-            if studio_value is None or studio_value == '':
-                if plex_item.studio:
-                    edits['studio.value'] = ''
-                    log_debug("Clearing studio (Stash value is empty)")
-            else:
-                sanitized = sanitize_for_plex(studio_value, max_length=MAX_STUDIO_LENGTH)
-                if not self.config.preserve_plex_edits or not plex_item.studio:
-                    if (plex_item.studio or '') != sanitized:
-                        edits['studio.value'] = sanitized
-
-        # Summary (Stash 'details' -> Plex 'summary')
-        if getattr(self.config, 'sync_summary', True):
-            has_summary_key = 'details' in data or 'summary' in data
-            if has_summary_key:
-                summary_value = data.get('details') or data.get('summary')
-                if summary_value is None or summary_value == '':
-                    if plex_item.summary:
-                        edits['summary.value'] = ''
-                        log_debug("Clearing summary (Stash value is empty)")
-                else:
-                    sanitized = sanitize_for_plex(summary_value, max_length=MAX_SUMMARY_LENGTH)
-                    if not self.config.preserve_plex_edits or not plex_item.summary:
-                        if (plex_item.summary or '') != sanitized:
-                            edits['summary.value'] = sanitized
-
-        # Tagline
-        if getattr(self.config, 'sync_tagline', True) and 'tagline' in data:
-            tagline_value = data.get('tagline')
-            if tagline_value is None or tagline_value == '':
-                if getattr(plex_item, 'tagline', None):
-                    edits['tagline.value'] = ''
-                    log_debug("Clearing tagline (Stash value is empty)")
-            else:
-                sanitized = sanitize_for_plex(tagline_value, max_length=MAX_TAGLINE_LENGTH)
-                if not self.config.preserve_plex_edits or not getattr(plex_item, 'tagline', None):
-                    if (getattr(plex_item, 'tagline', '') or '') != sanitized:
-                        edits['tagline.value'] = sanitized
-
-        # Date
-        if getattr(self.config, 'sync_date', True) and 'date' in data:
-            date_value = data.get('date')
-            if date_value is None or date_value == '':
-                if getattr(plex_item, 'originallyAvailableAt', None):
-                    edits['originallyAvailableAt.value'] = ''
-                    log_debug("Clearing date (Stash value is empty)")
-            else:
-                if not self.config.preserve_plex_edits or not getattr(plex_item, 'originallyAvailableAt', None):
-                    current_date = getattr(plex_item, 'originallyAvailableAt', None)
-                    current_date_str = current_date.strftime('%Y-%m-%d') if current_date else ''
-                    if current_date_str != (date_value or ''):
-                        edits['originallyAvailableAt.value'] = date_value
-
-        return edits
-
-    def _sync_performers(self, plex_item, data: dict, result, _dbg: bool) -> bool:
-        """Sync performers as Plex actors. Returns True if reload needed.
-
-        LOCKED: If 'performers' key exists with empty/None, clear all actors.
-        """
-        from validation.limits import MAX_PERFORMER_NAME_LENGTH, MAX_PERFORMERS
-        from validation.sanitizers import sanitize_for_plex
-
-        performers = data.get('performers')
-        if performers is None or performers == []:
-            try:
-                plex_item.edit(**{'actor.locked': 1})
-                log_debug("Clearing performers (Stash value is empty)")
-                result.add_success('performers')
-                return True
-            except Exception as e:
-                log_warn(f" Failed to clear performers: {e}")
-                result.add_warning('performers', e)
-                return False
-
-        if not performers:
-            return False
-
-        try:
-            sanitized = [sanitize_for_plex(p, max_length=MAX_PERFORMER_NAME_LENGTH) for p in performers]
-            if len(sanitized) > MAX_PERFORMERS:
-                log_warn(f"Truncating performers list from {len(sanitized)} to {MAX_PERFORMERS}")
-                sanitized = sanitized[:MAX_PERFORMERS]
-
-            current_actors = [actor.tag for actor in getattr(plex_item, 'actors', [])]
-            new_performers = [p for p in sanitized if p not in current_actors]
-
-            if _dbg:
-                log_info(f"[DEBUG] Performers: current={current_actors}, new={new_performers}")
-
-            if new_performers:
-                all_actors = current_actors + new_performers
-                if len(all_actors) > MAX_PERFORMERS:
-                    log_warn(f"Truncating combined actors list from {len(all_actors)} to {MAX_PERFORMERS}")
-                    all_actors = all_actors[:MAX_PERFORMERS]
-                actor_edits = {f'actor[{i}].tag.tag': name for i, name in enumerate(all_actors)}
-                plex_item.edit(**actor_edits)
-                log_info(f"Added {len(new_performers)} performers: {new_performers}")
-                result.add_success('performers')
-                return True
-            else:
-                log_trace(f"Performers already in Plex: {sanitized}")
-                result.add_success('performers')
-                return False
-        except Exception as e:
-            log_warn(f" Failed to sync performers: {e}")
-            result.add_warning('performers', e)
-            return False
-
-    def _upload_image(self, plex_item, url: str, upload_fn, field_name: str, result, _dbg: bool):
-        """Download image from Stash and upload to Plex.
-
-        Args:
-            plex_item: Plex Video item
-            url: Stash image URL
-            upload_fn: Plex upload method (uploadPoster or uploadArt)
-            field_name: Field name for result tracking ('poster' or 'background')
-            result: PartialSyncResult to record outcome
-            _dbg: Debug logging flag
-        """
-        try:
-            if _dbg:
-                log_info(f"[DEBUG] Fetching {field_name} image from Stash")
-            image_data = self._fetch_stash_image(url)
-            if image_data:
-                import tempfile
-                import os
-                with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as f:
-                    f.write(image_data)
-                    temp_path = f.name
-                try:
-                    upload_fn(filepath=temp_path)
-                    log_debug(f"Uploaded {field_name} ({len(image_data)} bytes)")
-                    result.add_success(field_name)
-                finally:
-                    os.unlink(temp_path)
-            else:
-                result.add_warning(field_name, ValueError(f"No image data returned from Stash"))
-        except Exception as e:
-            log_warn(f" Failed to upload {field_name}: {e}")
-            result.add_warning(field_name, e)
-
-    def _sync_tags(self, plex_item, data: dict, result, _dbg: bool) -> bool:
-        """Sync tags as Plex genres. Returns True if reload needed.
-
-        LOCKED: If 'tags' key exists with empty/None, clear all genres.
-        """
-        from validation.limits import MAX_TAG_NAME_LENGTH, MAX_TAGS
-        from validation.sanitizers import sanitize_for_plex
-
-        max_tags = getattr(self.config, 'max_tags', MAX_TAGS)
-        tags = data.get('tags')
-
-        if tags is None or tags == []:
-            try:
-                plex_item.edit(**{'genre.locked': 1})
-                log_debug("Clearing tags (Stash value is empty)")
-                result.add_success('tags')
-                return True
-            except Exception as e:
-                log_warn(f" Failed to clear tags: {e}")
-                result.add_warning('tags', e)
-                return False
-
-        if not tags:
-            return False
-
-        try:
-            sanitized = [sanitize_for_plex(t, max_length=MAX_TAG_NAME_LENGTH) for t in tags]
-            if len(sanitized) > max_tags:
-                log_warn(f"Truncating tags list from {len(sanitized)} to {max_tags}")
-                sanitized = sanitized[:max_tags]
-
-            current_genres = [g.tag for g in getattr(plex_item, 'genres', [])]
-            if _dbg:
-                log_info(f"[DEBUG] Tags: current={current_genres}, new_from_stash={sanitized}")
-            new_tags = [t for t in sanitized if t not in current_genres]
-
-            if new_tags:
-                all_genres = current_genres + new_tags
-                if len(all_genres) > max_tags:
-                    log_warn(f"Truncating combined tags list from {len(all_genres)} to {max_tags}")
-                    all_genres = all_genres[:max_tags]
-                genre_edits = {f'genre[{i}].tag.tag': name for i, name in enumerate(all_genres)}
-                plex_item.edit(**genre_edits)
-                log_info(f"Added {len(new_tags)} tags as genres: {new_tags}")
-                result.add_success('tags')
-                return True
-            else:
-                log_trace(f"Tags already in Plex: {sanitized}")
-                result.add_success('tags')
-                return False
-        except Exception as e:
-            log_warn(f" Failed to sync tags: {e}")
-            result.add_warning('tags', e)
-            return False
-
-    def _sync_collection(self, plex_item, data: dict, result) -> bool:
-        """Add item to studio-based Plex collection. Returns True if reload needed."""
-        studio = data.get('studio')
-        try:
-            current_collections = [c.tag for c in getattr(plex_item, 'collections', [])]
-            if studio not in current_collections:
-                all_collections = current_collections + [studio]
-                coll_edits = {f'collection[{i}].tag.tag': name for i, name in enumerate(all_collections)}
-                plex_item.edit(**coll_edits)
-                log_debug(f"Added to collection: {studio}")
-                result.add_success('collection')
-                return True
-            else:
-                log_trace(f"Already in collection: {studio}")
-                result.add_success('collection')
-                return False
-        except Exception as e:
-            log_warn(f" Failed to add to collection: {e}")
-            result.add_warning('collection', e)
-            return False
