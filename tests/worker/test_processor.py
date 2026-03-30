@@ -443,286 +443,6 @@ class TestProcessJobReturnValue:
             assert result == 'low'
 
 
-class TestFieldClearing:
-    """Tests for LOCKED decision: missing optional fields clear Plex values."""
-
-    @pytest.fixture
-    def clearing_worker(self, mock_queue, mock_dlq, mock_config, tmp_path):
-        """Create SyncWorker configured for clearing tests."""
-        from worker.processor import SyncWorker
-
-        mock_config.plex_connect_timeout = 10.0
-        mock_config.plex_read_timeout = 30.0
-        mock_config.preserve_plex_edits = False
-        mock_config.strict_matching = False
-        mock_config.dlq_retention_days = 30
-
-        worker = SyncWorker(
-            queue=mock_queue,
-            dlq=mock_dlq,
-            config=mock_config,
-            data_dir=str(tmp_path),
-        )
-        return worker
-
-    def test_none_studio_clears_plex_studio(self, clearing_worker):
-        """When Stash sends studio=None, existing Plex studio is cleared."""
-        mock_plex_item = MagicMock()
-        mock_plex_item.studio = "Existing Studio"
-        mock_plex_item.title = "Test Title"
-        mock_plex_item.summary = ""
-        mock_plex_item.actors = []
-        mock_plex_item.genres = []
-        mock_plex_item.collections = []
-
-        # Data dict has 'studio' key with None value (LOCKED: should clear)
-        data = {'path': '/test.mp4', 'title': 'Test', 'studio': None}
-
-        clearing_worker._update_metadata(mock_plex_item, data)
-
-        # Verify edit was called with empty studio
-        mock_plex_item.edit.assert_called()
-        edit_kwargs = mock_plex_item.edit.call_args[1]
-        assert 'studio.value' in edit_kwargs
-        assert edit_kwargs['studio.value'] == ''
-
-    def test_empty_string_studio_clears_plex_studio(self, clearing_worker):
-        """When Stash sends studio='', existing Plex studio is cleared."""
-        mock_plex_item = MagicMock()
-        mock_plex_item.studio = "Existing Studio"
-        mock_plex_item.title = "Test Title"
-        mock_plex_item.summary = ""
-        mock_plex_item.actors = []
-        mock_plex_item.genres = []
-        mock_plex_item.collections = []
-
-        # Data dict has 'studio' key with empty string (LOCKED: should clear)
-        data = {'path': '/test.mp4', 'title': 'Test', 'studio': ''}
-
-        clearing_worker._update_metadata(mock_plex_item, data)
-
-        # Verify edit was called with empty studio
-        mock_plex_item.edit.assert_called()
-        edit_kwargs = mock_plex_item.edit.call_args[1]
-        assert 'studio.value' in edit_kwargs
-        assert edit_kwargs['studio.value'] == ''
-
-    def test_field_not_in_data_preserves_plex_value(self, clearing_worker):
-        """When field key not in data dict, existing Plex value is preserved."""
-        mock_plex_item = MagicMock()
-        mock_plex_item.studio = "Existing Studio"
-        mock_plex_item.title = "Test Title"
-        mock_plex_item.summary = "Existing Summary"
-        mock_plex_item.actors = []
-        mock_plex_item.genres = []
-        mock_plex_item.collections = []
-
-        # Data dict does NOT have 'studio' key - should NOT clear
-        data = {'path': '/test.mp4', 'title': 'New Title'}
-
-        clearing_worker._update_metadata(mock_plex_item, data)
-
-        # Verify studio was NOT included in edit call
-        if mock_plex_item.edit.called:
-            edit_kwargs = mock_plex_item.edit.call_args[1]
-            assert 'studio.value' not in edit_kwargs
-
-    def test_none_summary_clears_plex_summary(self, clearing_worker):
-        """When Stash sends details=None, existing Plex summary is cleared."""
-        mock_plex_item = MagicMock()
-        mock_plex_item.studio = ""
-        mock_plex_item.title = "Test Title"
-        mock_plex_item.summary = "Existing Summary"
-        mock_plex_item.actors = []
-        mock_plex_item.genres = []
-        mock_plex_item.collections = []
-
-        # Data dict has 'details' key with None value (LOCKED: should clear)
-        data = {'path': '/test.mp4', 'title': 'Test', 'details': None}
-
-        clearing_worker._update_metadata(mock_plex_item, data)
-
-        # Verify edit was called with empty summary
-        mock_plex_item.edit.assert_called()
-        edit_kwargs = mock_plex_item.edit.call_args[1]
-        assert 'summary.value' in edit_kwargs
-        assert edit_kwargs['summary.value'] == ''
-
-    def test_none_tagline_clears_plex_tagline(self, clearing_worker):
-        """When Stash sends tagline=None, existing Plex tagline is cleared."""
-        mock_plex_item = MagicMock()
-        mock_plex_item.studio = ""
-        mock_plex_item.title = "Test Title"
-        mock_plex_item.summary = ""
-        mock_plex_item.tagline = "Existing Tagline"
-        mock_plex_item.actors = []
-        mock_plex_item.genres = []
-        mock_plex_item.collections = []
-
-        data = {'path': '/test.mp4', 'title': 'Test', 'tagline': None}
-
-        clearing_worker._update_metadata(mock_plex_item, data)
-
-        mock_plex_item.edit.assert_called()
-        edit_kwargs = mock_plex_item.edit.call_args[1]
-        assert 'tagline.value' in edit_kwargs
-        assert edit_kwargs['tagline.value'] == ''
-
-    def test_valid_value_sets_field(self, clearing_worker):
-        """When Stash sends valid value, Plex field is set."""
-        mock_plex_item = MagicMock()
-        mock_plex_item.studio = ""
-        mock_plex_item.title = ""
-        mock_plex_item.summary = ""
-        mock_plex_item.actors = []
-        mock_plex_item.genres = []
-        mock_plex_item.collections = []
-
-        data = {'path': '/test.mp4', 'studio': 'New Studio', 'title': 'New Title'}
-
-        clearing_worker._update_metadata(mock_plex_item, data)
-
-        mock_plex_item.edit.assert_called()
-        # Get the first edit call (metadata fields), not the last (collection add)
-        # edit() is called multiple times: once for title/studio, once for collection
-        first_edit_kwargs = mock_plex_item.edit.call_args_list[0][1]
-        assert first_edit_kwargs.get('studio.value') == 'New Studio'
-        assert first_edit_kwargs.get('title.value') == 'New Title'
-
-
-class TestListFieldLimits:
-    """Tests for list field limits (performers, tags)."""
-
-    @pytest.fixture
-    def limits_worker(self, mock_queue, mock_dlq, mock_config, tmp_path):
-        """Create SyncWorker configured for limits tests."""
-        from worker.processor import SyncWorker
-
-        mock_config.plex_connect_timeout = 10.0
-        mock_config.plex_read_timeout = 30.0
-        mock_config.preserve_plex_edits = False
-        mock_config.strict_matching = False
-        mock_config.dlq_retention_days = 30
-
-        worker = SyncWorker(
-            queue=mock_queue,
-            dlq=mock_dlq,
-            config=mock_config,
-            data_dir=str(tmp_path),
-        )
-        return worker
-
-    def test_performers_truncated_at_max(self, limits_worker, capsys):
-        """More than MAX_PERFORMERS performers are truncated with warning."""
-        from validation.limits import MAX_PERFORMERS
-
-        mock_plex_item = MagicMock()
-        mock_plex_item.studio = ""
-        mock_plex_item.title = "Test"
-        mock_plex_item.summary = ""
-        mock_plex_item.actors = []
-        mock_plex_item.genres = []
-        mock_plex_item.collections = []
-
-        # Create more performers than MAX_PERFORMERS
-        performers = [f"Performer {i}" for i in range(MAX_PERFORMERS + 10)]
-        data = {'path': '/test.mp4', 'performers': performers}
-
-        limits_worker._update_metadata(mock_plex_item, data)
-
-        # Verify warning was logged
-        captured = capsys.readouterr()
-        assert "Truncating performers list" in captured.err
-        assert str(MAX_PERFORMERS + 10) in captured.err
-        assert str(MAX_PERFORMERS) in captured.err
-
-    def test_tags_truncated_at_max(self, limits_worker, capsys):
-        """More than max_tags tags are truncated with warning."""
-        from validation.limits import MAX_TAGS
-
-        # Use configurable max_tags from worker config (default: 100)
-        max_tags = getattr(limits_worker.config, 'max_tags', MAX_TAGS)
-
-        mock_plex_item = MagicMock()
-        mock_plex_item.studio = ""
-        mock_plex_item.title = "Test"
-        mock_plex_item.summary = ""
-        mock_plex_item.actors = []
-        mock_plex_item.genres = []
-        mock_plex_item.collections = []
-
-        # Create more tags than configured max_tags
-        excess_count = 10
-        tags = [f"Tag {i}" for i in range(max_tags + excess_count)]
-        data = {'path': '/test.mp4', 'tags': tags}
-
-        limits_worker._update_metadata(mock_plex_item, data)
-
-        # Verify warning was logged
-        captured = capsys.readouterr()
-        assert "Truncating tags list" in captured.err
-        assert str(max_tags + excess_count) in captured.err
-        assert str(max_tags) in captured.err
-
-    def test_performers_under_limit_not_truncated(self, limits_worker, capsys):
-        """Performers under MAX_PERFORMERS are not truncated."""
-        mock_plex_item = MagicMock()
-        mock_plex_item.studio = ""
-        mock_plex_item.title = "Test"
-        mock_plex_item.summary = ""
-        mock_plex_item.actors = []
-        mock_plex_item.genres = []
-        mock_plex_item.collections = []
-
-        # Create fewer performers than MAX_PERFORMERS
-        performers = ["Performer 1", "Performer 2", "Performer 3"]
-        data = {'path': '/test.mp4', 'performers': performers}
-
-        limits_worker._update_metadata(mock_plex_item, data)
-
-        # Verify no truncation warning
-        captured = capsys.readouterr()
-        assert "Truncating performers list" not in captured.err
-
-    def test_empty_performers_clears_actors(self, limits_worker, capsys):
-        """Empty performers list clears all actors (LOCKED decision)."""
-        mock_plex_item = MagicMock()
-        mock_plex_item.studio = ""
-        mock_plex_item.title = "Test"
-        mock_plex_item.summary = ""
-        mock_plex_item.actors = [MagicMock(tag="Existing Actor")]
-        mock_plex_item.genres = []
-        mock_plex_item.collections = []
-
-        # Empty performers list with key present (LOCKED: should clear)
-        data = {'path': '/test.mp4', 'performers': []}
-
-        limits_worker._update_metadata(mock_plex_item, data)
-
-        # Verify clearing was logged
-        captured = capsys.readouterr()
-        assert "Clearing performers" in captured.err
-
-    def test_empty_tags_clears_genres(self, limits_worker, capsys):
-        """Empty tags list clears all genres (LOCKED decision)."""
-        mock_plex_item = MagicMock()
-        mock_plex_item.studio = ""
-        mock_plex_item.title = "Test"
-        mock_plex_item.summary = ""
-        mock_plex_item.actors = []
-        mock_plex_item.genres = [MagicMock(tag="Existing Genre")]
-        mock_plex_item.collections = []
-
-        # Empty tags list with key present (LOCKED: should clear)
-        data = {'path': '/test.mp4', 'tags': []}
-
-        limits_worker._update_metadata(mock_plex_item, data)
-
-        # Verify clearing was logged
-        captured = capsys.readouterr()
-        assert "Clearing tags" in captured.err
-
-
 class TestPartialSyncFailure:
     """Tests for partial sync failure handling - non-critical field failures don't fail job."""
 
@@ -770,7 +490,7 @@ class TestPartialSyncFailure:
             'performers': ['Actor 1', 'Actor 2'],
         }
 
-        result = partial_worker._update_metadata(mock_plex_item, data)
+        result = partial_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # Job should succeed overall
         assert result.success is True
@@ -810,7 +530,7 @@ class TestPartialSyncFailure:
             'tags': ['Tag 1', 'Tag 2'],
         }
 
-        result = partial_worker._update_metadata(mock_plex_item, data)
+        result = partial_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # Job should succeed overall
         assert result.success is True
@@ -836,7 +556,7 @@ class TestPartialSyncFailure:
         mock_plex_item.uploadPoster.side_effect = Exception("Upload failed")
 
         # Mock _fetch_stash_image to return valid image data
-        partial_worker._fetch_stash_image = MagicMock(return_value=b'fake image data')
+        partial_worker._get_metadata_updater()._fetch_stash_image = MagicMock(return_value=b'fake image data')
 
         data = {
             'path': '/test.mp4',
@@ -844,7 +564,7 @@ class TestPartialSyncFailure:
             'poster_url': 'http://stash/poster.jpg',
         }
 
-        result = partial_worker._update_metadata(mock_plex_item, data)
+        result = partial_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # Job should succeed overall
         assert result.success is True
@@ -877,7 +597,7 @@ class TestPartialSyncFailure:
 
         # Make poster upload fail too
         mock_plex_item.uploadPoster.side_effect = Exception("Poster upload failed")
-        partial_worker._fetch_stash_image = MagicMock(return_value=b'fake image data')
+        partial_worker._get_metadata_updater()._fetch_stash_image = MagicMock(return_value=b'fake image data')
 
         data = {
             'path': '/test.mp4',
@@ -887,7 +607,7 @@ class TestPartialSyncFailure:
             'poster_url': 'http://stash/poster.jpg',
         }
 
-        result = partial_worker._update_metadata(mock_plex_item, data)
+        result = partial_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # Job should still succeed overall
         assert result.success is True
@@ -903,7 +623,7 @@ class TestPartialSyncFailure:
         assert "3 warnings" in captured.err
 
     def test_update_metadata_returns_partial_sync_result(self, partial_worker):
-        """_update_metadata returns PartialSyncResult instance."""
+        """update() returns PartialSyncResult instance."""
         from validation.errors import PartialSyncResult
 
         mock_plex_item = MagicMock()
@@ -916,7 +636,7 @@ class TestPartialSyncFailure:
 
         data = {'path': '/test.mp4', 'title': 'Test Title'}
 
-        result = partial_worker._update_metadata(mock_plex_item, data)
+        result = partial_worker._get_metadata_updater().update(mock_plex_item, data)
 
         assert isinstance(result, PartialSyncResult)
         assert result.success is True
@@ -933,7 +653,7 @@ class TestPartialSyncFailure:
         mock_plex_item.collections = []
 
         # Mock _fetch_stash_image to return valid image data
-        partial_worker._fetch_stash_image = MagicMock(return_value=b'fake image data')
+        partial_worker._get_metadata_updater()._fetch_stash_image = MagicMock(return_value=b'fake image data')
 
         data = {
             'path': '/test.mp4',
@@ -944,7 +664,7 @@ class TestPartialSyncFailure:
             'poster_url': 'http://stash/poster.jpg',
         }
 
-        result = partial_worker._update_metadata(mock_plex_item, data)
+        result = partial_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # All fields should be recorded as successful
         assert 'metadata' in result.fields_updated
@@ -977,7 +697,7 @@ class TestPartialSyncFailure:
             'studio': 'Test Studio',  # This triggers collection add
         }
 
-        result = partial_worker._update_metadata(mock_plex_item, data)
+        result = partial_worker._get_metadata_updater().update(mock_plex_item, data)
 
         assert result.success is True
         assert 'metadata' in result.fields_updated
@@ -995,7 +715,7 @@ class TestPartialSyncFailure:
 
         # Make background upload fail
         mock_plex_item.uploadArt.side_effect = Exception("Art upload failed")
-        partial_worker._fetch_stash_image = MagicMock(return_value=b'fake image data')
+        partial_worker._get_metadata_updater()._fetch_stash_image = MagicMock(return_value=b'fake image data')
 
         data = {
             'path': '/test.mp4',
@@ -1003,7 +723,7 @@ class TestPartialSyncFailure:
             'background_url': 'http://stash/background.jpg',
         }
 
-        result = partial_worker._update_metadata(mock_plex_item, data)
+        result = partial_worker._get_metadata_updater().update(mock_plex_item, data)
 
         assert result.success is True
         assert 'metadata' in result.fields_updated
@@ -1058,7 +778,7 @@ class TestSyncToggles:
 
         data = {'studio': 'Test Studio', 'details': 'Test Summary'}
 
-        result = toggle_worker._update_metadata(mock_plex_item, data)
+        result = toggle_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # edit() should not be called at all
         mock_plex_item.edit.assert_not_called()
@@ -1083,7 +803,7 @@ class TestSyncToggles:
 
         data = {'studio': 'Test Studio', 'details': 'Test Summary'}
 
-        result = toggle_worker._update_metadata(mock_plex_item, data)
+        result = toggle_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # edit() should be called but only with summary, not studio
         assert mock_plex_item.edit.called
@@ -1105,7 +825,7 @@ class TestSyncToggles:
 
         data = {'studio': 'New Studio'}  # Stash has a value
 
-        result = toggle_worker._update_metadata(mock_plex_item, data)
+        result = toggle_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # Studio should NOT appear in edits at all (not cleared, not updated)
         if mock_plex_item.edit.called:
@@ -1127,7 +847,7 @@ class TestSyncToggles:
 
         data = {'studio': None}  # Stash value is None
 
-        result = toggle_worker._update_metadata(mock_plex_item, data)
+        result = toggle_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # Studio should be cleared (LOCKED Phase 9 behavior)
         edit_kwargs = mock_plex_item.edit.call_args_list[0][1]
@@ -1148,7 +868,7 @@ class TestSyncToggles:
 
         data = {'studio': 'New Studio'}
 
-        result = toggle_worker._update_metadata(mock_plex_item, data)
+        result = toggle_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # With preserve mode, existing value should be kept
         if mock_plex_item.edit.called:
@@ -1182,7 +902,7 @@ class TestSyncToggles:
             'date': '2024-01-01',
         }
 
-        result = toggle_worker._update_metadata(mock_plex_item, data)
+        result = toggle_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # Only tagline should be in edits
         edit_kwargs = mock_plex_item.edit.call_args_list[0][1]
@@ -1205,7 +925,7 @@ class TestSyncToggles:
 
         data = {'performers': ['Actor 1', 'Actor 2']}
 
-        result = toggle_worker._update_metadata(mock_plex_item, data)
+        result = toggle_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # No performer-related edits should happen
         for call in mock_plex_item.edit.call_args_list:
@@ -1226,7 +946,7 @@ class TestSyncToggles:
 
         data = {'tags': ['Genre 1', 'Genre 2']}
 
-        result = toggle_worker._update_metadata(mock_plex_item, data)
+        result = toggle_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # No genre-related edits should happen
         for call in mock_plex_item.edit.call_args_list:
@@ -1247,11 +967,11 @@ class TestSyncToggles:
         mock_plex_item.collections = []
 
         # Mock _fetch_stash_image to verify it's not called
-        toggle_worker._fetch_stash_image = MagicMock(return_value=b'fake image data')
+        toggle_worker._get_metadata_updater()._fetch_stash_image = MagicMock(return_value=b'fake image data')
 
         data = {'poster_url': 'http://stash/image.jpg'}
 
-        result = toggle_worker._update_metadata(mock_plex_item, data)
+        result = toggle_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # uploadPoster should not be called
         mock_plex_item.uploadPoster.assert_not_called()
@@ -1273,7 +993,7 @@ class TestSyncToggles:
         # Need to also enable sync_studio to get studio synced
         toggle_worker.config.sync_studio = True
 
-        result = toggle_worker._update_metadata(mock_plex_item, data)
+        result = toggle_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # No collection-related edits should happen
         for call in mock_plex_item.edit.call_args_list:
@@ -1294,11 +1014,11 @@ class TestSyncToggles:
         mock_plex_item.collections = []
 
         # Mock _fetch_stash_image to verify it's not called
-        toggle_worker._fetch_stash_image = MagicMock(return_value=b'fake image data')
+        toggle_worker._get_metadata_updater()._fetch_stash_image = MagicMock(return_value=b'fake image data')
 
         data = {'background_url': 'http://stash/background.jpg'}
 
-        result = toggle_worker._update_metadata(mock_plex_item, data)
+        result = toggle_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # uploadArt should not be called
         mock_plex_item.uploadArt.assert_not_called()
@@ -2174,7 +1894,7 @@ class TestFetchStashImage:
         mock_response.__exit__ = Mock(return_value=False)
 
         with patch('urllib.request.urlopen', return_value=mock_response):
-            result = processor_worker._fetch_stash_image('http://stash:9999/image.jpg')
+            result = processor_worker._get_metadata_updater()._fetch_stash_image('http://stash:9999/image.jpg')
 
         assert result == b'\x89PNG...'
 
@@ -2188,7 +1908,7 @@ class TestFetchStashImage:
         mock_response.__exit__ = Mock(return_value=False)
 
         with patch('urllib.request.urlopen', return_value=mock_response) as mock_open:
-            processor_worker._fetch_stash_image('http://stash:9999/image.jpg')
+            processor_worker._get_metadata_updater()._fetch_stash_image('http://stash:9999/image.jpg')
 
         req = mock_open.call_args[0][0]
         assert req.get_header('Apikey') == 'secret123'
@@ -2197,14 +1917,14 @@ class TestFetchStashImage:
         """Returns None when image fetch fails."""
         import urllib.error
         with patch('urllib.request.urlopen', side_effect=urllib.error.URLError("down")):
-            result = processor_worker._fetch_stash_image('http://stash:9999/image.jpg')
+            result = processor_worker._get_metadata_updater()._fetch_stash_image('http://stash:9999/image.jpg')
 
         assert result is None
 
     def test_returns_none_on_generic_error(self, processor_worker):
         """Returns None on unexpected exceptions."""
         with patch('urllib.request.urlopen', side_effect=RuntimeError("unexpected")):
-            result = processor_worker._fetch_stash_image('http://stash:9999/image.jpg')
+            result = processor_worker._get_metadata_updater()._fetch_stash_image('http://stash:9999/image.jpg')
 
         assert result is None
 

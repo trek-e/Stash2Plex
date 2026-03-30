@@ -53,7 +53,7 @@ class TestFieldClearing:
         # Data dict has 'studio' key with None value (LOCKED: should clear)
         data = {'path': '/test.mp4', 'title': 'Test', 'studio': None}
 
-        clearing_worker._update_metadata(mock_plex_item, data)
+        clearing_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # Verify edit was called with empty studio
         mock_plex_item.edit.assert_called()
@@ -74,7 +74,7 @@ class TestFieldClearing:
         # Empty string should also clear (LOCKED decision)
         data = {'path': '/test.mp4', 'title': 'Test', 'studio': ''}
 
-        clearing_worker._update_metadata(mock_plex_item, data)
+        clearing_worker._get_metadata_updater().update(mock_plex_item, data)
 
         mock_plex_item.edit.assert_called()
         first_edit = mock_plex_item.edit.call_args_list[0][1]
@@ -93,7 +93,7 @@ class TestFieldClearing:
         # Empty performers list (LOCKED: should clear all actors)
         data = {'path': '/test.mp4', 'performers': []}
 
-        clearing_worker._update_metadata(mock_plex_item, data)
+        clearing_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # Verify clearing was logged
         captured = capsys.readouterr()
@@ -112,7 +112,7 @@ class TestFieldClearing:
         # Empty tags list (LOCKED: should clear all genres)
         data = {'path': '/test.mp4', 'tags': []}
 
-        clearing_worker._update_metadata(mock_plex_item, data)
+        clearing_worker._get_metadata_updater().update(mock_plex_item, data)
 
         captured = capsys.readouterr()
         assert "Clearing tags" in captured.err
@@ -130,7 +130,7 @@ class TestFieldClearing:
         # Data dict does NOT have 'studio' key - should NOT clear
         data = {'path': '/test.mp4', 'title': 'New Title'}
 
-        clearing_worker._update_metadata(mock_plex_item, data)
+        clearing_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # Verify studio was NOT included in any edit call
         for call in mock_plex_item.edit.call_args_list:
@@ -151,7 +151,7 @@ class TestFieldClearing:
         # Date is None (LOCKED: should clear)
         data = {'path': '/test.mp4', 'date': None}
 
-        clearing_worker._update_metadata(mock_plex_item, data)
+        clearing_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # Find the edit call with date
         found_date_clear = False
@@ -199,7 +199,7 @@ class TestFieldLimits:
         performers = [f"Performer {i}" for i in range(MAX_PERFORMERS + excess_count)]
         data = {'path': '/test.mp4', 'performers': performers}
 
-        limits_worker._update_metadata(mock_plex_item, data)
+        limits_worker._get_metadata_updater().update(mock_plex_item, data)
 
         captured = capsys.readouterr()
         assert "Truncating performers list" in captured.err
@@ -222,7 +222,7 @@ class TestFieldLimits:
         tags = [f"Tag {i}" for i in range(max_tags + excess_count)]
         data = {'path': '/test.mp4', 'tags': tags}
 
-        limits_worker._update_metadata(mock_plex_item, data)
+        limits_worker._get_metadata_updater().update(mock_plex_item, data)
 
         captured = capsys.readouterr()
         assert "Truncating tags list" in captured.err
@@ -241,7 +241,7 @@ class TestFieldLimits:
         long_title = "x" * (MAX_TITLE_LENGTH + 50)
         data = {'path': '/test.mp4', 'title': long_title}
 
-        limits_worker._update_metadata(mock_plex_item, data)
+        limits_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # Verify title was truncated
         mock_plex_item.edit.assert_called()
@@ -262,7 +262,7 @@ class TestFieldLimits:
         long_summary = "x" * (MAX_SUMMARY_LENGTH + 500)
         data = {'path': '/test.mp4', 'details': long_summary}
 
-        limits_worker._update_metadata(mock_plex_item, data)
+        limits_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # Verify summary was truncated
         mock_plex_item.edit.assert_called()
@@ -287,7 +287,7 @@ class TestFieldLimits:
         performers = [f"New Performer {i}" for i in range(20)]
         data = {'path': '/test.mp4', 'performers': performers}
 
-        limits_worker._update_metadata(mock_plex_item, data)
+        limits_worker._get_metadata_updater().update(mock_plex_item, data)
 
         captured = capsys.readouterr()
         # Should warn about truncating combined list
@@ -390,7 +390,7 @@ class TestFullReliabilityWorkflow:
             'details': 'New summary content',
         }
 
-        workflow_worker._update_metadata(mock_plex_item, data)
+        workflow_worker._get_metadata_updater().update(mock_plex_item, data)
 
         mock_plex_item.edit.assert_called()
         first_edit = mock_plex_item.edit.call_args_list[0][1]
@@ -430,7 +430,7 @@ class TestFullReliabilityWorkflow:
             'tags': [],
         }
 
-        workflow_worker._update_metadata(mock_plex_item, data)
+        workflow_worker._get_metadata_updater().update(mock_plex_item, data)
 
         mock_plex_item.edit.assert_called()
         first_edit = mock_plex_item.edit.call_args_list[0][1]
@@ -463,7 +463,7 @@ class TestFullReliabilityWorkflow:
         title_with_issues = "\x00Long title " + "x" * MAX_TITLE_LENGTH
         data = {'path': '/test.mp4', 'title': title_with_issues}
 
-        workflow_worker._update_metadata(mock_plex_item, data)
+        workflow_worker._get_metadata_updater().update(mock_plex_item, data)
 
         mock_plex_item.edit.assert_called()
         first_edit = mock_plex_item.edit.call_args_list[0][1]
@@ -518,7 +518,7 @@ class TestPartialFailure:
             'performers': ['Actor 1', 'Actor 2'],
         }
 
-        result = partial_worker._update_metadata(mock_plex_item, data)
+        result = partial_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # Job succeeds
         assert result.success is True
@@ -542,7 +542,7 @@ class TestPartialFailure:
 
         # Make poster upload fail
         mock_plex_item.uploadPoster.side_effect = Exception("Upload failed")
-        partial_worker._fetch_stash_image = MagicMock(return_value=b'image data')
+        partial_worker._get_metadata_updater()._fetch_stash_image = MagicMock(return_value=b'image data')
 
         data = {
             'path': '/test.mp4',
@@ -550,7 +550,7 @@ class TestPartialFailure:
             'poster_url': 'http://stash/poster.jpg',
         }
 
-        result = partial_worker._update_metadata(mock_plex_item, data)
+        result = partial_worker._get_metadata_updater().update(mock_plex_item, data)
 
         assert result.success is True
         assert 'metadata' in result.fields_updated
@@ -581,7 +581,7 @@ class TestPartialFailure:
             'tags': ['Tag 1'],
         }
 
-        result = partial_worker._update_metadata(mock_plex_item, data)
+        result = partial_worker._get_metadata_updater().update(mock_plex_item, data)
 
         # Job succeeds with warnings
         assert result.success is True
@@ -613,7 +613,7 @@ class TestPartialFailure:
 
         # Critical field failure should propagate
         with pytest.raises(ConnectionError):
-            partial_worker._update_metadata(mock_plex_item, data)
+            partial_worker._get_metadata_updater().update(mock_plex_item, data)
 
 
 class TestResponseValidation:
@@ -645,7 +645,7 @@ class TestResponseValidation:
 
         edits = {'title.value': 'Sent Title'}
 
-        issues = validation_worker._validate_edit_result(mock_plex_item, edits)
+        issues = validation_worker._get_metadata_updater()._validate_edit_result(mock_plex_item, edits)
 
         assert len(issues) == 1
         assert 'title' in issues[0]
@@ -663,7 +663,7 @@ class TestResponseValidation:
             'studio.value': 'Test Studio',
         }
 
-        issues = validation_worker._validate_edit_result(mock_plex_item, edits)
+        issues = validation_worker._get_metadata_updater()._validate_edit_result(mock_plex_item, edits)
 
         assert issues == []
 
@@ -678,7 +678,7 @@ class TestResponseValidation:
             'studio.value': 'Test Studio',
         }
 
-        issues = validation_worker._validate_edit_result(mock_plex_item, edits)
+        issues = validation_worker._get_metadata_updater()._validate_edit_result(mock_plex_item, edits)
 
         assert len(issues) == 2
         assert any('title' in issue for issue in issues)
@@ -699,7 +699,7 @@ class TestResponseValidation:
             'title': 'Test Title',
         }
 
-        validation_worker._update_metadata(mock_plex_item, data)
+        validation_worker._get_metadata_updater().update(mock_plex_item, data)
 
         captured = capsys.readouterr()
         # Validation issues logged at debug level
@@ -713,7 +713,7 @@ class TestResponseValidation:
 
         edits = {'title.value': 'Very Long Title That Got Truncated By Plex'}
 
-        issues = validation_worker._validate_edit_result(mock_plex_item, edits)
+        issues = validation_worker._get_metadata_updater()._validate_edit_result(mock_plex_item, edits)
 
         assert len(issues) == 1
         assert 'title' in issues[0]
@@ -730,7 +730,7 @@ class TestResponseValidation:
             'studio.value': '',
         }
 
-        issues = validation_worker._validate_edit_result(mock_plex_item, edits)
+        issues = validation_worker._get_metadata_updater()._validate_edit_result(mock_plex_item, edits)
 
         # No issues for intentional clears
         assert issues == []
@@ -745,7 +745,7 @@ class TestResponseValidation:
             'actor.locked': 1,  # Lock flag, not a value
         }
 
-        issues = validation_worker._validate_edit_result(mock_plex_item, edits)
+        issues = validation_worker._get_metadata_updater()._validate_edit_result(mock_plex_item, edits)
 
         # Locked field not validated
         assert issues == []
