@@ -75,64 +75,9 @@ def mock_plex_section():
 
 @pytest.fixture
 def mock_plex_item():
-    """
-    Mock Plex media item (movie or episode).
-
-    Provides:
-        - title: Item title
-        - studio: Studio name
-        - summary: Description/details
-        - actors: List of mock actors
-        - genres: List of mock genres
-        - collections: List of mock collections
-        - media[0].parts[0].file: File path
-        - ratingKey: Unique Plex item ID
-        - guid: Plex GUID for item
-
-    Usage:
-        def test_item(mock_plex_item):
-            assert mock_plex_item.title == "Test Scene"
-            path = mock_plex_item.media[0].parts[0].file
-    """
-    item = MagicMock()
-    item.title = "Test Scene"
-    item.studio = "Test Studio"
-    item.summary = "Test description for the scene."
-    item.ratingKey = 12345
-    item.key = "/library/metadata/12345"
-    item.guid = "plex://movie/abc123"
-
-    # Actors (Plex uses 'actors' attribute for cast)
-    actor1 = MagicMock()
-    actor1.tag = "Performer One"
-    actor2 = MagicMock()
-    actor2.tag = "Performer Two"
-    item.actors = [actor1, actor2]
-
-    # Genres
-    genre1 = MagicMock()
-    genre1.tag = "Genre One"
-    item.genres = [genre1]
-
-    # Collections
-    collection1 = MagicMock()
-    collection1.tag = "Collection One"
-    item.collections = [collection1]
-
-    # File path through media hierarchy
-    part = MagicMock()
-    part.file = "/media/videos/test_scene.mp4"
-
-    media = MagicMock()
-    media.parts = [part]
-
-    item.media = [media]
-
-    # Edit method for updating metadata
-    item.edit.return_value = None
-    item.reload.return_value = None
-
-    return item
+    """Mock Plex media item. See tests/factories.py for customization."""
+    from tests.factories import make_plex_item
+    return make_plex_item()
 
 
 # =============================================================================
@@ -141,44 +86,9 @@ def mock_plex_item():
 
 @pytest.fixture
 def mock_config():
-    """
-    Mock configuration object with all Stash2Plex settings.
-
-    Provides all config attributes needed by Stash2Plex components:
-        - plex_url: Plex server URL
-        - plex_token: Authentication token
-        - plex_library: Library section name
-        - stash_url: Stash server URL
-        - stash_api_key: Stash API key
-        - poll_interval: Queue poll interval in seconds
-        - max_retries: Maximum retry attempts
-        - initial_backoff: Initial backoff delay
-        - max_backoff: Maximum backoff delay
-        - circuit_breaker_threshold: Failures before opening circuit
-        - circuit_breaker_timeout: Time to wait in open state
-
-    Usage:
-        def test_worker(mock_config):
-            assert mock_config.max_retries == 5
-    """
-    config = Mock()
-    config.plex_url = "http://localhost:32400"
-    config.plex_token = "test-token-abc123"
-    config.plex_library = "Movies"
-    config.plex_libraries = ["Movies"]
-    config.stash_url = "http://localhost:9999"
-    config.stash_api_key = "stash-api-key-xyz"
-    config.poll_interval = 5
-    config.max_retries = 5
-    config.initial_backoff = 1.0
-    config.max_backoff = 300.0
-    config.circuit_breaker_threshold = 5
-    config.circuit_breaker_timeout = 60
-    config.debug_logging = False
-    config.obfuscate_paths = False
-    config.max_tags = 100
-
-    return config
+    """Mock configuration. See tests/factories.py for customization."""
+    from tests.factories import make_config
+    return make_config()
 
 
 @pytest.fixture
@@ -273,34 +183,9 @@ def mock_dlq():
 
 @pytest.fixture
 def sample_job():
-    """
-    Sample sync job dictionary matching SyncJob structure.
-
-    Returns job dict with:
-        - scene_id: Stash scene ID
-        - update_type: Type of update ("metadata")
-        - data: Metadata to sync (path, title, studio, details)
-        - enqueued_at: Timestamp
-        - job_key: Deduplication key
-
-    Usage:
-        def test_process_job(sample_job):
-            result = processor.process(sample_job)
-    """
-    return {
-        "scene_id": 123,
-        "update_type": "metadata",
-        "data": {
-            "path": "/media/videos/test_scene.mp4",
-            "title": "Test Scene Title",
-            "studio": "Test Studio",
-            "details": "A test scene description.",
-            "performers": ["Performer One", "Performer Two"],
-            "tags": ["Tag One", "Tag Two"],
-        },
-        "enqueued_at": 1700000000.0,
-        "job_key": "scene_123",
-    }
+    """Sample sync job. See tests/factories.py for customization."""
+    from tests.factories import make_job
+    return make_job(performers=["Performer One", "Performer Two"], tags=["Tag One", "Tag Two"])
 
 
 @pytest.fixture
@@ -361,31 +246,6 @@ def mock_stash_interface():
 
 @pytest.fixture
 def sample_stash_scene():
-    """
-    Sample Stash scene data structure as returned by StashInterface.
-
-    Matches the structure returned by stashapi for scene queries.
-
-    Usage:
-        def test_scene_processing(sample_stash_scene):
-            title = sample_stash_scene["title"]
-    """
-    return {
-        "id": "789",
-        "title": "Stash Scene Title",
-        "details": "Scene details from Stash.",
-        "date": "2024-02-20",
-        "rating100": 75,
-        "studio": {"name": "Stash Studio"},
-        "performers": [
-            {"name": "Performer A"},
-            {"name": "Performer B"},
-        ],
-        "tags": [
-            {"name": "Tag A"},
-            {"name": "Tag B"},
-        ],
-        "files": [
-            {"path": "/stash/media/scene_789.mp4"}
-        ],
-    }
+    """Sample Stash scene data. See tests/factories.py for customization."""
+    from tests.factories import make_stash_scene
+    return make_stash_scene()
