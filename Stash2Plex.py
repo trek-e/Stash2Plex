@@ -177,23 +177,119 @@ def get_plugin_data_dir():
     return data_dir
 
 
+class DirectStashInterface:
+    """
+    Stdlib-only drop-in replacement for stashapi.StashInterface.
+
+    Uses urllib to make GraphQL calls directly so the plugin works even
+    when the stashapp-tools/stashapi pip package is broken or conflicted.
+    Implements the subset of StashInterface methods used by this plugin.
+    """
+
+    def __init__(self, server_conn: dict):
+        scheme = server_conn.get('Scheme', server_conn.get('scheme', 'http'))
+        host = server_conn.get('Host', server_conn.get('host', '127.0.0.1'))
+        port = server_conn.get('Port', server_conn.get('port', 9999))
+        self._url = f"{scheme}://{host}:{port}/graphql"
+        self._headers = {'Content-Type': 'application/json'}
+        session_cookie = server_conn.get('SessionCookie', {})
+        if isinstance(session_cookie, dict) and session_cookie.get('Value'):
+            name = session_cookie.get('Name', 'session')
+            self._headers['Cookie'] = f"{name}={session_cookie['Value']}"
+        api_key = server_conn.get('ApiKey', '')
+        if api_key:
+            self._headers['ApiKey'] = api_key
+
+    def _gql(self, query: str, variables: dict = None) -> dict:
+        import urllib.request
+        payload = json.dumps({'query': query, 'variables': variables or {}}).encode()
+        req = urllib.request.Request(self._url, data=payload, headers=self._headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        if 'errors' in data:
+            raise RuntimeError(data['errors'])
+        return data.get('data', {})
+
+    def call_GQL(self, query: str, variables: dict = None) -> dict:
+        return self._gql(query, variables)
+
+    def _callGraphQL(self, query: str, variables: dict = None) -> dict:
+        return self._gql(query, variables)
+
+    def get_configuration(self) -> dict:
+        data = self._gql('{ configuration { plugins } }')
+        return data.get('configuration', {})
+
+    def find_scene(self, scene_id) -> dict:
+        query = """
+            query FindScene($id: ID!) {
+                findScene(id: $id) {
+                    id title details urls date rating100
+                    files { path }
+                    paths { screenshot stream }
+                    studio { id name image_path parent_studio { id name details } }
+                    performers { name image_path tags { id name } }
+                    tags { id name }
+                    stash_ids { stash_id endpoint }
+                    organized
+                    movies { movie { id name } }
+                    galleries { id title url }
+                }
+            }
+        """
+        data = self._gql(query, {'id': scene_id})
+        return data.get('findScene')
+
+    def find_scenes(self, f: dict = None, fragment: str = None, filter: dict = None) -> list:
+        """Paginate through all matching scenes and return them."""
+        scene_fields = fragment or "id title updated_at files { path }"
+        scene_filter_arg = ', $scene_filter: SceneFilterType' if f else ''
+        scene_filter_use = ', scene_filter: $scene_filter' if f else ''
+        query = f"""
+            query FindScenes($filter: FindFilterType{scene_filter_arg}) {{
+                findScenes(filter: $filter{scene_filter_use}) {{
+                    count
+                    scenes {{ {scene_fields} }}
+                }}
+            }}
+        """
+        per_page = 1000
+        page = 1
+        all_scenes = []
+        while True:
+            variables = {'filter': {'per_page': per_page, 'page': page}}
+            if f:
+                variables['scene_filter'] = f
+            data = self._gql(query, variables)
+            result = data.get('findScenes', {})
+            scenes = result.get('scenes', [])
+            all_scenes.extend(scenes)
+            if len(all_scenes) >= result.get('count', 0) or not scenes:
+                break
+            page += 1
+        return all_scenes
+
+
 def get_stash_interface(input_data: dict):
     """
     Create StashInterface from input data.
 
+    Tries stashapi.StashInterface first; falls back to DirectStashInterface
+    (stdlib-only) if the package is broken or missing.
+
     Returns:
-        StashInterface instance or None if connection fails
+        StashInterface or DirectStashInterface instance, never None
+        (as long as server_connection is present in input_data).
     """
+    conn = input_data.get('server_connection', {})
+    if not conn:
+        return None
     try:
         from stashapi.stashapp import StashInterface
-        conn = input_data.get('server_connection', {})
-        if conn:
-            return StashInterface(conn)
-    except ImportError:
-        log_warn(" stashapi not installed, cannot fetch settings")
+        return StashInterface(conn)
     except Exception as e:
         log_warn(f" Could not connect to Stash: {e}")
-    return None
+    return DirectStashInterface(conn)
 
 
 def fetch_plugin_settings_direct(server_conn: dict) -> dict:
