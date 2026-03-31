@@ -32,7 +32,7 @@ log_trace(f"PLUGIN_DIR: {PLUGIN_DIR}")
 # Format: requirements.txt name → (import_name, pip_install_name)
 _PKG_NAMES = {
     "persist-queue": ("persistqueue", "persist-queue"),
-    "stashapi": ("stashapi", "stashapp-tools"),
+    "stashapp-tools": ("stashapi", "stashapp-tools"),
 }
 
 
