@@ -196,6 +196,54 @@ def get_stash_interface(input_data: dict):
     return None
 
 
+def fetch_plugin_settings_direct(server_conn: dict) -> dict:
+    """
+    Fetch Stash2Plex plugin settings via a raw urllib GraphQL request.
+
+    Uses only stdlib so it works even if stashapi/stashapp-tools is broken
+    or not yet installed. Called as the primary config path; stash.get_configuration()
+    is only used when this fails.
+
+    Args:
+        server_conn: server_connection dict from Stash plugin input
+
+    Returns:
+        Dictionary with plugin settings, or {} on failure
+    """
+    import urllib.request
+    import urllib.error
+
+    scheme = server_conn.get('Scheme', server_conn.get('scheme', 'http'))
+    host = server_conn.get('Host', server_conn.get('host', '127.0.0.1'))
+    port = server_conn.get('Port', server_conn.get('port', 9999))
+    url = f"{scheme}://{host}:{port}/graphql"
+
+    query = '{"query":"{ configuration { plugins } }"}'
+    req = urllib.request.Request(
+        url,
+        data=query.encode(),
+        headers={'Content-Type': 'application/json'},
+    )
+
+    # Add auth if available
+    session_cookie = server_conn.get('SessionCookie', {})
+    if isinstance(session_cookie, dict) and session_cookie.get('Value'):
+        name = session_cookie.get('Name', 'session')
+        req.add_header('Cookie', f"{name}={session_cookie['Value']}")
+    api_key = server_conn.get('ApiKey', '')
+    if api_key:
+        req.add_header('ApiKey', api_key)
+
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+        plugins = data.get('data', {}).get('configuration', {}).get('plugins', {})
+        return plugins.get('Stash2Plex', {})
+    except Exception as e:
+        log_warn(f" Direct config fetch failed: {e}")
+        return {}
+
+
 def fetch_plugin_settings(stash) -> dict:
     """
     Fetch Stash2Plex plugin settings from Stash configuration.
@@ -256,19 +304,25 @@ def extract_config_from_input(input_data: dict, existing_stash=None) -> dict:
             else:
                 config_dict['stash_session_cookie'] = str(session_cookie)
 
-    # Reuse existing connection if provided, otherwise create a new one.
-    # This avoids a duplicate StashInterface instantiation (which makes 2 extra
-    # GQL calls to Stash for version + apiKey checks) when called from hook
-    # invocations that already created a temp_stash for scan detection.
+    # Primary path: direct urllib GraphQL call (stdlib only, immune to stashapi install issues).
+    if server_conn:
+        stash_settings = fetch_plugin_settings_direct(server_conn)
+        if stash_settings:
+            log_trace(f"Loaded settings from Stash (direct): {list(stash_settings.keys())}")
+            config_dict.update(stash_settings)
+
+    # Secondary path: StashInterface (provides richer API for hook handlers).
+    # Reuse existing connection if provided to avoid duplicate GQL calls.
     if existing_stash is not None:
         stash = existing_stash
     else:
         stash = get_stash_interface(input_data)
     stash_interface = stash  # Store globally for hook handlers
-    if stash:
+    if stash and not config_dict.get('plex_url'):
+        # Only call if direct fetch didn't already get settings
         stash_settings = fetch_plugin_settings(stash)
         if stash_settings:
-            log_trace(f"Loaded settings from Stash: {list(stash_settings.keys())}")
+            log_trace(f"Loaded settings from Stash (StashInterface): {list(stash_settings.keys())}")
             config_dict.update(stash_settings)
 
     # Fallback to environment variables
