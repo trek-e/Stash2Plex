@@ -1,5 +1,5 @@
 persist-queue>=1.1.0
-stashapp-tools
+stashapp-tools>=0.2.59
 plexapi>=4.17.0
 tenacity>=9.0.0
 pydantic>=2.0.0
