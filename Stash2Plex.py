@@ -288,7 +288,7 @@ def get_stash_interface(input_data: dict):
         from stashapi.stashapp import StashInterface
         return StashInterface(conn)
     except Exception as e:
-        log_warn(f" Could not connect to Stash: {e}")
+        log_debug(f" stashapi unavailable ({e}), using DirectStashInterface")
     return DirectStashInterface(conn)
 
 
