@@ -78,6 +78,7 @@ class SyncWorker:
         self._library_cache: Optional['PlexCache'] = None
         self._match_cache: Optional['MatchCache'] = None
         self._metadata_updater = None
+        self._plex_sync_orchestrator = None
 
         # Initialize stats tracking
         self._stats = SyncStats()
@@ -661,6 +662,24 @@ class SyncWorker:
             self._metadata_updater = MetadataUpdater(self.config)
         return self._metadata_updater
 
+    def _get_plex_sync_orchestrator(self):
+        """Get PlexSyncOrchestrator with lazy initialization."""
+        if self._plex_sync_orchestrator is None:
+            from worker.plex_sync_orchestrator import (
+                PlexSyncOrchestrator,
+                DefaultMatcherAdapter,
+                DefaultMetadataAdapter,
+                DefaultCacheAdapter,
+            )  # lazy: test isolation
+            _, match_cache = self._get_caches()
+            self._plex_sync_orchestrator = PlexSyncOrchestrator(
+                matcher_adapter=DefaultMatcherAdapter(),
+                metadata_adapter=DefaultMetadataAdapter(self._get_metadata_updater()),
+                cache_adapter=DefaultCacheAdapter(match_cache),
+                config=self.config,
+            )
+        return self._plex_sync_orchestrator
+
     def _log_cache_stats(self):
         """Log cache hit/miss statistics."""
         library_cache, match_cache = self._get_caches()
@@ -701,10 +720,10 @@ class SyncWorker:
         _start_time = _time.perf_counter()
 
         from plex.exceptions import PlexTemporaryError, PlexPermanentError, PlexNotFound, translate_plex_exception  # lazy: circular import
-        from plex.matcher import find_plex_items_with_confidence, MatchConfidence  # lazy: imports plexapi
         from validation.obfuscation import obfuscate_path  # lazy: test isolation
         from sync_queue.operations import save_sync_timestamp  # lazy: test isolation
         from hooks.handlers import unmark_scene_pending  # lazy: test isolation
+        from worker.plex_sync_orchestrator import SyncOutcomeKind  # lazy: avoid import cycles in tests
 
         _dbg = getattr(self.config, 'debug_logging', False)
 
@@ -724,7 +743,6 @@ class SyncWorker:
             # Get library section(s) to search
             configured_libs = self.config.plex_libraries  # parsed comma-separated list
             if configured_libs:
-                # Search only the configured libraries
                 sections = []
                 not_found = []
                 for lib_name in configured_libs:
@@ -738,96 +756,26 @@ class SyncWorker:
                     raise PermanentError(f"None of the configured libraries found: {configured_libs}")
                 log_trace(f"Searching {len(sections)} configured library(s): {[s.title for s in sections]}")
             else:
-                # Search all libraries (slow)
                 sections = client.server.library.sections()
                 log_info(f"Searching all {len(sections)} libraries (set plex_library to speed up)")
 
             if _dbg:
                 log_info(f"[DEBUG] Searching {len(sections)} section(s): {[s.title for s in sections]}")
 
-            # Get caches for optimized matching
             library_cache, match_cache = self._get_caches()
+            orchestrator = self._get_plex_sync_orchestrator()
+            outcome = orchestrator.sync_scene_to_plex(
+                scene_id=scene_id,
+                scene_data=data,
+                file_path=file_path,
+                sections=sections,
+                library_cache=library_cache,
+                match_cache=match_cache,
+                debug=_dbg,
+            )
 
-            # Search library sections, collect ALL candidates
-            all_candidates = []
-            # Track which library section each candidate belongs to, so we can
-            # write the confirmed match to match_cache after metadata update succeeds.
-            _section_by_candidate_key: dict = {}
-            for section in sections:
-                try:
-                    confidence, item, candidates = find_plex_items_with_confidence(
-                        section,
-                        file_path,
-                        library_cache=library_cache,
-                        match_cache=match_cache,
-                        debug_logging=_dbg,
-                    )
-                    all_candidates.extend(candidates)
-                    for c in candidates:
-                        _section_by_candidate_key[c.key] = section.title
-                    if _dbg:
-                        log_info(f"[DEBUG] Section '{section.title}': {len(candidates)} candidate(s)")
-                except PlexNotFound:
-                    if _dbg:
-                        log_info(f"[DEBUG] Section '{section.title}': no match")
-                    continue  # No match in this section, try next
-
-            # Deduplicate candidates (same item might be in multiple sections)
-            seen_keys = set()
-            unique_candidates = []
-            for c in all_candidates:
-                if c.key not in seen_keys:
-                    seen_keys.add(c.key)
-                    unique_candidates.append(c)
-
-            if _dbg:
-                log_info(f"[DEBUG] Dedup: {len(all_candidates)} total -> {len(unique_candidates)} unique candidate(s)")
-
-            # Apply confidence scoring
-            confidence = None
-            if len(unique_candidates) == 0:
-                raise PlexNotFound(f"Could not find Plex item for path: {obfuscate_path(file_path)}")
-            elif len(unique_candidates) == 1:
-                # HIGH confidence - single unique match
-                confidence = 'high'
-                plex_item = unique_candidates[0]
-                if _dbg:
-                    log_info(f"[DEBUG] HIGH confidence match: {plex_item.title}")
-                self._get_metadata_updater().update(plex_item, data)
-                # Write to match_cache AFTER metadata update succeeds.
-                # This ensures the cache only records items that have been
-                # fully synced. Writing before the update (as was previously
-                # done inside find_plex_items_with_confidence) could cache
-                # matches whose metadata was never pushed (e.g. process killed
-                # mid-sync), causing subsequent cache-hits to find a Plex item
-                # with auto-scanned metadata that "matches" an empty Stash
-                # scene and silently skip the real metadata push.
-                if match_cache is not None:
-                    section_title = _section_by_candidate_key.get(plex_item.key)
-                    if section_title:
-                        item_key = getattr(plex_item, 'key', None) or str(getattr(plex_item, 'ratingKey', None))
-                        if item_key:
-                            match_cache.set_match(section_title, file_path, item_key)
-            else:
-                # LOW confidence - multiple matches
-                confidence = 'low'
-                paths = [c.media[0].parts[0].file if c.media and c.media[0].parts else c.key for c in unique_candidates]
-                obfuscated_paths = [obfuscate_path(p) for p in paths]
-                if self.config.strict_matching:
-                    log_warn(
-                        f"LOW CONFIDENCE SKIPPED: scene {scene_id} "
-                        f"Stash path: {obfuscate_path(file_path)} "
-                        f"Plex candidates ({len(unique_candidates)}): {obfuscated_paths}"
-                    )
-                    raise PermanentError(f"Low confidence match skipped (strict_matching=true)")
-                else:
-                    plex_item = unique_candidates[0]
-                    log_warn(
-                        f"LOW CONFIDENCE SYNCED: scene {scene_id} "
-                        f"Chosen: {obfuscated_paths[0]} "
-                        f"Other candidates: {obfuscated_paths[1:]}"
-                    )
-                    self._get_metadata_updater().update(plex_item, data)
+            if outcome.kind == SyncOutcomeKind.SKIPPED_LOW_CONFIDENCE:
+                raise PermanentError(outcome.error_message or "Low confidence match skipped (strict_matching=true)")
 
             # Update sync timestamp after successful sync
             if self.data_dir is not None:
@@ -843,7 +791,7 @@ class SyncWorker:
             else:
                 log_trace(f"_process_job took {_elapsed:.3f}s")
 
-            return confidence
+            return outcome.confidence
 
         except (PlexTemporaryError, PlexPermanentError, PlexNotFound):
             unmark_scene_pending(scene_id)  # Allow re-enqueue on next hook
