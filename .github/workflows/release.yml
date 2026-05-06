@@ -55,6 +55,7 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           sed -i "s/^  version: .*/  version: ${VERSION}/" index.yml
           sed -i "s/^  date: .*/  date: \"${DATE}\"/" index.yml
+          sed -i "s|^  path: .*|  path: Stash2Plex.zip|" index.yml
           sed -i "s/^  sha256: .*/  sha256: ${SHA}/" index.yml
 
       - name: Commit updated files
