@@ -13,21 +13,25 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Determine release branch
         id: branch
         run: |
-          if [[ "${GITHUB_REF_NAME}" == v1.5.* ]]; then
+          git fetch origin v1.5.x main
+          if git branch -r --contains HEAD | grep -q 'origin/v1\.5\.x'; then
             echo "name=v1.5.x" >> "$GITHUB_OUTPUT"
           else
             echo "name=main" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.branch.outputs.name }}
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Switch to release branch
+        run: git checkout ${{ steps.branch.outputs.name }}
 
       - name: Extract version from tag
         id: version
