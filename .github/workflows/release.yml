@@ -65,6 +65,14 @@ jobs:
           git commit -m "chore: update plugin index and zip for v${{ steps.version.outputs.version }}"
           git push origin HEAD:${{ steps.branch.outputs.name }}
 
+      - name: Mirror index.yml to main
+        run: |
+          git fetch origin main
+          git checkout origin/main -b _main_mirror
+          git checkout HEAD~0 -- index.yml Stash2Plex.yml
+          git commit -m "chore: update plugin index for v${{ steps.version.outputs.version }}"
+          git push origin HEAD:main
+
       - name: Generate release notes
         id: notes
         run: |
