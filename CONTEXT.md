@@ -56,19 +56,38 @@ A retry-able failure (network timeout, temporary Plex error). Gets exponential b
 A non-retry-able failure (missing file path, bad job data). Goes straight to the DLQ without retry.
 
 ### PlexNotFound
-A `PlexNotFound` exception meaning the scene's file isn't in the Plex library yet (not yet scanned). Gets extended retry params: 12 retries, longer delays (30s base, 600s cap) to allow time for Plex scanning.
+A `PlexNotFound` exception meaning the scene's file isn't in the Plex library yet (not yet scanned). Gets extended retry params: 12 retries, longer delays (30s base, 600s cap) to allow time for Plex scanning. When `skip_not_found` is enabled, `PlexNotFound` acks immediately and returns `'skipped'` instead of retrying — designed for users with a deliberate partial Plex library.
+
+### skip_not_found
+Config toggle (`bool`, default `false`). When `true`, `PlexNotFound` is treated as an expected permanent condition: the job is acked without retry and without a DLQ entry. Use for setups where Plex holds a deliberate subset of the Stash library (e.g. offline/travel collection). Wired in `_handle_job` (`worker/processor.py`) and exposed in `Stash2PlexConfig` + `Stash2Plex.yml`.
 
 ### PlexServerDown
 Plex is unreachable. Does not count against retry limit — nacked back to queue. Circuit Breaker opens to pause processing during outages.
 
 ### Circuit Breaker
-`worker/circuit_breaker.py` — three-state (CLOSED / OPEN / HALF_OPEN) rate-limiter that pauses all job processing when Plex is down, preventing retry exhaustion during outages.
+`worker/circuit_breaker.py` — three-state (CLOSED / OPEN / HALF_OPEN) rate-limiter that pauses all job processing when Plex is down, preventing retry exhaustion during outages. `CircuitBreaker.load_status(state_file) → dict` is a classmethod for reading CB state without instantiation — used by status/health handlers that have no live `CircuitBreaker` instance. Callers must use this seam; raw `json.load` on `circuit_breaker.json` is forbidden.
 
 ### Exponential Backoff
 `worker/backoff.py` — calculates retry delays with full jitter. Parameters differ by error type (TransientError vs PlexNotFound).
 
 ### Retry Metadata
 Fields stored in the Sync Job dict across retries: `retry_count`, `next_retry_at` (epoch float), `last_error_type`. Persisted in the SQLiteAckQueue so they survive process restart.
+
+---
+
+## Worker Architecture Terms
+
+### _handle_job
+`SyncWorker._handle_job(item, recently_synced, sync_timestamps) → str` — the single ack/retry/DLQ pipeline for one dequeued job. Both `_worker_loop` (background) and `run_batch` (foreground) call this method; retry and DLQ logic lives in exactly one place. Return values: `'success'`, `'skipped'`, `'retrying'`, `'failed'`, `'server_down'`.
+
+### run_batch
+`SyncWorker.run_batch(progress_callback=None, job_delay_secs=0.15) → dict` — synchronous foreground drain of the entire queue. Used by `handle_process_queue` (the "Process Queue" task). Inherits both dedup mechanisms from `_handle_job`. Backoff sleep is capped at 5s (vs 30s in background loop) for progress-bar responsiveness.
+
+### Worker Exclusion Lock
+`SyncWorker._lock_fd` — an `fcntl` `LOCK_EX | LOCK_NB` lock on `worker.lock` that prevents concurrent queue draining. Owned entirely by `SyncWorker` (not the entry point). Acquired via `try_start_exclusive(resume_orphaned=True) → bool` (returns `False` if another process holds the lock), released via `_release_lock()` called by `stop()` and error paths. The entry point (`Stash2Plex.py`) checks `worker._lock_fd is not None` to determine if the worker is active.
+
+### try_start_exclusive
+`SyncWorker.try_start_exclusive(resume_orphaned=True) → bool` — acquires the exclusion lock, resumes any orphaned in-progress items, and starts the worker thread. Returns `False` without starting if the lock is already held (another process is draining). Replaces the former module-global `_worker_lock_fd` pattern in `Stash2Plex.py`.
 
 ---
 
@@ -99,6 +118,12 @@ Reconciliation filter: `"all"` (all scenes), `"recent"` (last 24h), `"7days"` (l
 ### Hook Invocation
 Stash calls the plugin synchronously per event. The plugin must return in <100ms. The hook handler enqueues the job and returns immediately; the worker processes asynchronously in a daemon thread.
 
+### Identification Event
+A `Scene.Update.Post` hook where `input_data` contains `stash_ids` — fired when stash-box completes identification of a scene. This is the canonical moment when a scene acquires real metadata. Both the Plex library scan trigger (`trigger_plex_scan_for_scene`) and the metadata sync enqueue happen here, not at `Scene.Create.Post`. `Scene.Create.Post` is deliberately a no-op: no metadata exists at file-scan time.
+
+### Scene.Create.Post
+Fired when Stash scans a new file into the library. Treated as a no-op by the plugin — no Plex scan, no enqueue. Metadata and Plex sync are deferred to the Identification Event. The PlexNotFound retry window (12×, up to 600s) covers any gap between the Plex scan trigger and the metadata sync job succeeding.
+
 ### Task Invocation
 Stash calls the plugin for explicit user-triggered tasks: `sync_all`, `reconcile_all`, `queue_status`, `process_queue`, `recover_outage_jobs`, etc. These run to completion (no daemon thread needed).
 
@@ -114,3 +139,8 @@ Stash plugins exit after each invocation — there is no persistent process to r
 - **<100ms hook budget**: Hook handlers must return in <100ms. The Pending Scene Set provides O(1) dedup with zero I/O to meet this constraint.
 - **Retry metadata lives in the job dict**: not in worker state. Survives process restart because the job is persisted in SQLiteAckQueue.
 - **`persist-queue` nack cannot modify job data**: `reenqueue()` exists specifically to work around this — ack the old job, enqueue a new one with updated metadata.
+- **Release branch is `v1.x.x`** (not `v1.5.x` or version-specific). Tags `v1.6.*` trigger the release workflow. The workflow builds the zip, updates `index.yml` (version + date + sha256 + resets `path: Stash2Plex.zip`), commits to `v1.x.x`, then mirrors `index.yml` + `Stash2Plex.zip` to `main`. Stash resolves `path: Stash2Plex.zip` relative to `main/` — this must remain a relative path, never an absolute URL.
+- **Feature work uses PRs**: new features are developed on `feature/*` branches and merged to `main` via squash-merge PR. Fixes targeting a release also need a direct commit to `v1.x.x`. Issues are tracked in GitHub Issues; triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`.
+- **`_handle_job` is the single retry/DLQ seam**: do not add retry or DLQ logic anywhere else in the worker. Both `_worker_loop` and `run_batch` delegate to it.
+- **`CircuitBreaker.load_status` is the single CB state-read seam**: status and health handlers must use it; do not open `circuit_breaker.json` directly.
+- **`Scene.Create.Post` is a no-op**: do not add logic here. All Plex interaction for new scenes belongs in the Identification Event handler.
