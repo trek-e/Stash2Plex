@@ -362,7 +362,7 @@ def initialize(config_dict: dict = None, resume_orphaned: bool = True):
 
     # Start background worker with data_dir for timestamp updates
     worker = SyncWorker(
-        queue_manager.get_queue(),
+        queue_manager,
         dlq,
         config,
         data_dir=data_dir,
@@ -429,6 +429,9 @@ def shutdown():
         try:
             import fcntl
             fcntl.flock(_worker_lock_fd.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
             _worker_lock_fd.close()
         except OSError:
             pass
@@ -550,7 +553,7 @@ def handle_hook(hook_context: dict, stash=None):
                 on_scene_update(
                     scene_id,
                     input_data,
-                    queue_manager.get_queue(),
+                    queue_manager,
                     data_dir=data_dir,
                     sync_timestamps=sync_timestamps,
                     stash=stash,
@@ -867,7 +870,7 @@ def handle_process_queue():
             worker.stop()
 
         # Check initial queue state
-        from sync_queue.operations import get_stats, get_pending, ack_job, nack_job, fail_job
+        from sync_queue.operations import get_stats
         stats = get_stats(queue_path)
         total = stats['pending'] + stats['in_progress']
 
@@ -884,12 +887,8 @@ def handle_process_queue():
         # Configure device identity before Plex operations
         configure_plex_device_identity(data_dir)
 
-        # Use global queue (don't create a second QueueManager — auto_resume
-        # on a second instance can steal in-flight items from the first)
-        queue = queue_manager.get_queue()
-
         # Create worker instance for processing (NOT started as background thread)
-        worker_local = SyncWorker(queue, dlq, config, data_dir=data_dir)
+        worker_local = SyncWorker(queue_manager, dlq, config, data_dir=data_dir)
 
         processed = 0
         failed = 0
@@ -908,7 +907,7 @@ def handle_process_queue():
                 break
 
             # Get next job (1 second timeout to check for empty queue)
-            job = get_pending(queue, timeout=1)
+            job = queue_manager.get_pending(timeout=1)
             if job is None:
                 break  # Queue is empty
 
@@ -918,7 +917,7 @@ def handle_process_queue():
             # Skip duplicate scene IDs — queue may contain multiple entries
             # for the same scene from overlapping reconciliation runs or hooks
             if scene_id != '?' and scene_id in processed_scenes:
-                ack_job(queue, job)  # Remove duplicate without processing
+                queue_manager.ack(job)  # Remove duplicate without processing
                 skipped_dupes += 1
                 continue
 
@@ -928,13 +927,13 @@ def handle_process_queue():
             # Without this guard the batch loop immediately re-dequeues a just-
             # re-enqueued job and retries it, causing the 3-5x rapid retry storm.
             if not worker_local._is_ready_for_retry(job):
-                nack_job(queue, job)
+                queue_manager.nack(job)
                 time.sleep(0.1)  # Avoid tight spin; backoff-expired jobs will be ready soon
                 continue
 
             try:
                 worker_local._process_job(job)
-                ack_job(queue, job)
+                queue_manager.ack(job)
                 worker_local.circuit_breaker.record_success()
                 processed += 1
                 if scene_id != '?':
@@ -952,7 +951,7 @@ def handle_process_queue():
 
                 if job.get('retry_count', 0) >= max_retries:
                     log_warn(f"Scene {scene_id}: max retries exceeded, moving to DLQ")
-                    fail_job(queue, job)
+                    queue_manager.fail(job)
                     dlq.add(job, e, job.get('retry_count', 0))
                     failed += 1
                 else:
@@ -971,7 +970,7 @@ def handle_process_queue():
 
                 if job.get('retry_count', 0) >= max_retries:
                     log_warn(f"Scene {scene_id}: max retries exceeded, moving to DLQ")
-                    fail_job(queue, job)
+                    queue_manager.fail(job)
                     dlq.add(job, e, job.get('retry_count', 0))
                     failed += 1
                 else:
@@ -980,14 +979,14 @@ def handle_process_queue():
 
             except PermanentError as e:
                 log_warn(f"Scene {scene_id}: permanent error: {e}")
-                fail_job(queue, job)
+                queue_manager.fail(job)
                 dlq.add(job, e, retry_count)
                 failed += 1
 
             except Exception as e:
                 last_error = e
                 log_error(f"Scene {scene_id}: unexpected error: {e}")
-                fail_job(queue, job)
+                queue_manager.fail(job)
                 dlq.add(job, e, retry_count)
                 failed += 1
 
@@ -995,7 +994,7 @@ def handle_process_queue():
             now = time.time()
             if processed % 5 == 0 or (now - last_progress_time) >= 10:
                 progress = (processed / total) * 100 if total > 0 else 100
-                remaining = queue.size
+                remaining = queue_manager.get_queue().size
                 log_progress(progress)
                 elapsed = now - start_time
                 rate = processed / elapsed if elapsed > 0 else 0
@@ -1033,7 +1032,7 @@ def handle_reconcile(scope: str):
     try:
         data_dir = get_plugin_data_dir()
 
-        from reconciliation.engine import GapDetectionEngine, GapDetectionResult
+        from reconciliation.engine import GapDetectionEngine
 
         # Need stash and config globals
         if not stash_interface:
@@ -1045,9 +1044,7 @@ def handle_reconcile(scope: str):
 
         # Get queue for enqueue mode
         # Note: SQLiteAckQueue.__bool__ returns False when empty,
-        # so we must check `is None` not truthiness
-        queue = queue_manager.get_queue() if queue_manager else None
-        if queue is None:
+        if queue_manager is None:
             log_warn("No queue available - running in detection-only mode")
 
         scope_labels = {
@@ -1063,7 +1060,7 @@ def handle_reconcile(scope: str):
             stash=stash_interface,
             config=config,
             data_dir=data_dir,
-            queue=queue
+            queue_manager=queue_manager
         )
         result = engine.run(scope=scope)
 
@@ -1079,7 +1076,7 @@ def handle_reconcile(scope: str):
         log_info(f"  Empty metadata: {result.empty_metadata_count}")
         log_info(f"  Stale sync: {result.stale_sync_count}")
         log_info(f"  Missing from Plex: {result.missing_count}")
-        if queue is not None:
+        if queue_manager is not None:
             log_info(f"Enqueued: {result.enqueued_count}")
             if result.skipped_already_queued:
                 log_info(f"Skipped (already queued): {result.skipped_already_queued}")
@@ -1145,8 +1142,7 @@ def maybe_check_recovery():
 
         # Log queue drain info if recovery completed
         if is_healthy and worker.circuit_breaker.state == CircuitState.CLOSED:
-            queue = queue_manager.get_queue() if queue_manager else None
-            pending = queue.size if queue is not None else 0
+            pending = queue_manager.get_queue().size if queue_manager else 0
             if pending > 0:
                 log_info(f"Queue will drain automatically ({pending} jobs pending)")
 
@@ -1207,13 +1203,11 @@ def _run_auto_reconcile(scheduler, scope: str, is_startup: bool):
         data_dir = get_plugin_data_dir()
         from reconciliation.engine import GapDetectionEngine
 
-        queue = queue_manager.get_queue() if queue_manager else None
-
         engine = GapDetectionEngine(
             stash=stash_interface,
             config=config,
             data_dir=data_dir,
-            queue=queue
+            queue_manager=queue_manager
         )
         result = engine.run(scope=scope)
 
@@ -1450,8 +1444,7 @@ def handle_health_check():
 
         # Report queue size
         if queue_manager:
-            queue = queue_manager.get_queue()
-            pending = queue.size
+            pending = queue_manager.get_queue().size
             if pending > 0:
                 log_info(f"Queue: {pending} pending items")
 
@@ -1518,7 +1511,6 @@ def handle_bulk_sync(mode: str, stash):
         mode: 'all' for every scene, 'recent' for last 24 hours.
         stash: StashInterface for GQL queries.
     """
-    from sync_queue.operations import enqueue, get_queued_scene_ids
     from validation.scene_extractor import extract_scene_metadata, get_scene_file_path
 
     if not stash:
@@ -1535,12 +1527,6 @@ def handle_bulk_sync(mode: str, stash):
 
         data_dir = get_plugin_data_dir()
         current_timestamps = load_sync_timestamps(data_dir)
-        queue_path = os.path.join(data_dir, 'queue')
-        existing_in_queue = get_queued_scene_ids(queue_path)
-        if existing_in_queue:
-            log_debug(f"{len(existing_in_queue)} scenes already in queue, will skip duplicates")
-
-        queue = queue_manager.get_queue()
         queued = 0
         skipped = 0
         already_synced = 0
@@ -1560,18 +1546,14 @@ def handle_bulk_sync(mode: str, stash):
                 already_synced += 1
                 continue
 
-            if int(scene_id) in existing_in_queue:
-                already_queued += 1
-                continue
-
             job_data = extract_scene_metadata(scene)
             job_data['path'] = file_path
 
-            try:
-                enqueue(queue, int(scene_id), "metadata", job_data)
+            result = queue_manager.try_enqueue(int(scene_id), "metadata", job_data)
+            if result.enqueued:
                 queued += 1
-            except Exception as e:
-                log_warn(f"Failed to queue scene {scene_id}: {e}")
+            else:
+                already_queued += 1
 
         parts = [f"Queued {queued} scenes for sync"]
         if already_synced:
@@ -1628,7 +1610,7 @@ def _is_already_synced(scene: dict, scene_id: int, timestamps: dict) -> bool:
     if not last_synced:
         return False
     try:
-        from datetime import datetime, timezone
+        from datetime import datetime
         dt = datetime.fromisoformat(scene_updated_at.replace('Z', '+00:00'))
         return dt.timestamp() <= last_synced
     except (ValueError, AttributeError):

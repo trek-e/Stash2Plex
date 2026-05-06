@@ -6,11 +6,10 @@ and field limit enforcement across the full sync workflow.
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from validation.limits import (
     MAX_TITLE_LENGTH,
-    MAX_STUDIO_LENGTH,
     MAX_SUMMARY_LENGTH,
     MAX_PERFORMERS,
     MAX_TAGS,
@@ -22,7 +21,7 @@ class TestFieldClearing:
     """Test LOCKED decision: missing optional fields clear Plex values."""
 
     @pytest.fixture
-    def clearing_worker(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def clearing_worker(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Create SyncWorker configured for clearing tests."""
         from worker.processor import SyncWorker
 
@@ -33,7 +32,7 @@ class TestFieldClearing:
         mock_config.dlq_retention_days = 30
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -99,7 +98,7 @@ class TestFieldClearing:
         captured = capsys.readouterr()
         assert "Clearing performers" in captured.err
 
-    def test_empty_tags_clears_plex_genres(self, clearing_worker, capsys):
+    def test_empty_tags_clears_plex_genres(self, clearing_worker, capsys, mock_queue_manager):
         """When Stash sends tags=[], existing Plex genres are cleared."""
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -117,7 +116,7 @@ class TestFieldClearing:
         captured = capsys.readouterr()
         assert "Clearing tags" in captured.err
 
-    def test_field_not_in_data_preserves_plex_value(self, clearing_worker):
+    def test_field_not_in_data_preserves_plex_value(self, clearing_worker, mock_queue_manager):
         """When field key not in data dict, existing Plex value preserved."""
         mock_plex_item = MagicMock()
         mock_plex_item.studio = "Existing Studio"
@@ -137,7 +136,7 @@ class TestFieldClearing:
             if call[1]:  # has kwargs
                 assert 'studio.value' not in call[1]
 
-    def test_none_date_clears_plex_date(self, clearing_worker):
+    def test_none_date_clears_plex_date(self, clearing_worker, mock_queue_manager):
         """When Stash sends date=None, existing Plex date is cleared."""
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -166,7 +165,7 @@ class TestFieldLimits:
     """Test field length and count limits."""
 
     @pytest.fixture
-    def limits_worker(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def limits_worker(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Create SyncWorker configured for limits tests."""
         from worker.processor import SyncWorker
 
@@ -177,7 +176,7 @@ class TestFieldLimits:
         mock_config.dlq_retention_days = 30
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -297,7 +296,7 @@ class TestFieldLimits:
 class TestEmojiHandling:
     """Test emoji handling in metadata."""
 
-    def test_emoji_in_title_preserved_by_default(self):
+    def test_emoji_in_title_preserved_by_default(self, mock_queue_manager):
         """Emojis in title are preserved by default."""
         # U+1F600 GRINNING FACE
         text = "Hello \U0001F600 World"
@@ -306,7 +305,7 @@ class TestEmojiHandling:
         assert "Hello" in result
         assert "World" in result
 
-    def test_emoji_stripping_when_enabled(self):
+    def test_emoji_stripping_when_enabled(self, mock_queue_manager):
         """Emojis stripped when strip_emoji=True."""
         # U+1F600 GRINNING FACE
         text = "Hello \U0001F600 World"
@@ -315,7 +314,7 @@ class TestEmojiHandling:
         assert "Hello" in result
         assert "World" in result
 
-    def test_strip_emojis_basic(self):
+    def test_strip_emojis_basic(self, mock_queue_manager):
         """strip_emojis removes common emojis."""
         # U+1F525 FIRE, U+1F389 PARTY POPPER
         text = "Test \U0001F525 \U0001F389 content"
@@ -326,7 +325,7 @@ class TestEmojiHandling:
         assert "\U0001F525" not in result
         assert "\U0001F389" not in result
 
-    def test_emoji_with_control_chars(self):
+    def test_emoji_with_control_chars(self, mock_queue_manager):
         """Emoji and control chars are handled correctly together."""
         # U+1F525 FIRE emoji
         text = "Test\x00\U0001F525 data"
@@ -339,7 +338,7 @@ class TestEmojiHandling:
         assert "Test" in result
         assert "data" in result
 
-    def test_unicode_text_preserved_with_emoji_strip(self):
+    def test_unicode_text_preserved_with_emoji_strip(self, mock_queue_manager):
         """Unicode letters preserved when stripping emojis."""
         # U+2B50 WHITE MEDIUM STAR
         text = "Caf\u00e9 \u2B50 r\u00e9sum\u00e9"
@@ -354,7 +353,7 @@ class TestFullReliabilityWorkflow:
     """Integration tests for full reliability workflow."""
 
     @pytest.fixture
-    def workflow_worker(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def workflow_worker(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Create SyncWorker for workflow tests."""
         from worker.processor import SyncWorker
 
@@ -365,7 +364,7 @@ class TestFullReliabilityWorkflow:
         mock_config.dlq_retention_days = 30
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -449,7 +448,7 @@ class TestFullReliabilityWorkflow:
         # Title preservation logged
         assert "preserving existing Plex title" in captured.err
 
-    def test_sanitization_applied_with_limits(self, workflow_worker):
+    def test_sanitization_applied_with_limits(self, workflow_worker, mock_queue_manager):
         """Sanitization and truncation applied together."""
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -478,7 +477,7 @@ class TestPartialFailure:
     """Integration tests for partial sync failure recovery."""
 
     @pytest.fixture
-    def partial_worker(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def partial_worker(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Create SyncWorker for partial failure tests."""
         from worker.processor import SyncWorker
 
@@ -489,7 +488,7 @@ class TestPartialFailure:
         mock_config.dlq_retention_days = 30
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -556,7 +555,7 @@ class TestPartialFailure:
         assert 'metadata' in result.fields_updated
         assert any(w.field_name == 'poster' for w in result.warnings)
 
-    def test_multiple_field_failures_aggregated(self, partial_worker, capsys):
+    def test_multiple_field_failures_aggregated(self, partial_worker, capsys, mock_queue_manager):
         """Multiple non-critical failures are aggregated into warnings."""
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -593,7 +592,7 @@ class TestPartialFailure:
         captured = capsys.readouterr()
         assert "2 warnings" in captured.err
 
-    def test_title_failure_fails_job(self, partial_worker):
+    def test_title_failure_fails_job(self, partial_worker, mock_queue_manager):
         """Title (critical field) failure propagates and fails job."""
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -620,7 +619,7 @@ class TestResponseValidation:
     """Integration tests for API response validation."""
 
     @pytest.fixture
-    def validation_worker(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def validation_worker(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Create SyncWorker for validation tests."""
         from worker.processor import SyncWorker
 
@@ -631,7 +630,7 @@ class TestResponseValidation:
         mock_config.dlq_retention_days = 30
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),

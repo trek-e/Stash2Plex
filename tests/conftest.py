@@ -13,7 +13,6 @@ like plexapi or stashapi during test execution.
 
 import pytest
 from unittest.mock import Mock, MagicMock
-from typing import Any
 
 
 # =============================================================================
@@ -241,6 +240,26 @@ def mock_queue():
 
 
 @pytest.fixture
+def mock_queue_manager(mock_queue):
+    """
+    Mock QueueManager for testing SyncWorker and hook handlers.
+
+    Provides QueueManager interface with successful enqueue by default.
+    The underlying mock_queue is accessible via get_queue() for tests that
+    check raw queue operations (e.g. reenqueue -> put).
+
+    Usage:
+        def test_enqueue(mock_queue_manager):
+            mock_queue_manager.try_enqueue.assert_called_once()
+    """
+    from sync_queue.operations import EnqueueResult
+    qm = MagicMock()
+    qm.try_enqueue.return_value = EnqueueResult(enqueued=True, job={"scene_id": 0}, reason=None)
+    qm.get_queue.return_value = mock_queue
+    return qm
+
+
+@pytest.fixture
 def mock_dlq():
     """
     Mock DeadLetterQueue for testing failed job handling.
@@ -389,3 +408,10 @@ def sample_stash_scene():
             {"path": "/stash/media/scene_789.mp4"}
         ],
     }
+
+
+@pytest.fixture
+def real_queue_manager(tmp_path):
+    """Real QueueManager for tests requiring actual queue/dedup behavior."""
+    from sync_queue.manager import QueueManager
+    return QueueManager(data_dir=str(tmp_path / "queue_manager_data"))

@@ -15,12 +15,12 @@ from unittest.mock import MagicMock, patch
 class TestSyncWorkerCacheInitialization:
     """Tests for SyncWorker cache initialization."""
 
-    def test_caches_none_when_data_dir_none(self, mock_queue, mock_dlq, integration_config):
+    def test_caches_none_when_data_dir_none(self, mock_queue, mock_dlq, integration_config, mock_queue_manager):
         """Caches are None when data_dir is not provided."""
         from worker.processor import SyncWorker
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=integration_config,
             data_dir=None,
@@ -31,12 +31,12 @@ class TestSyncWorkerCacheInitialization:
 
     def test_caches_none_before_first_job(
         self, mock_queue, mock_dlq, integration_config, tmp_path
-    ):
+    , mock_queue_manager):
         """Caches are lazily initialized on first _get_caches() call."""
         from worker.processor import SyncWorker
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=integration_config,
             data_dir=str(tmp_path),
@@ -48,12 +48,12 @@ class TestSyncWorkerCacheInitialization:
 
     def test_get_caches_returns_none_tuple_without_data_dir(
         self, mock_queue, mock_dlq, integration_config
-    ):
+    , mock_queue_manager):
         """_get_caches() returns (None, None) when data_dir is None."""
         from worker.processor import SyncWorker
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=integration_config,
             data_dir=None,
@@ -66,13 +66,13 @@ class TestSyncWorkerCacheInitialization:
 
     def test_get_caches_creates_caches_with_data_dir(
         self, mock_queue, mock_dlq, integration_config, tmp_path
-    ):
+    , mock_queue_manager):
         """_get_caches() creates cache instances when data_dir is set."""
         from worker.processor import SyncWorker
         from plex.cache import PlexCache, MatchCache
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=integration_config,
             data_dir=str(tmp_path),
@@ -87,12 +87,12 @@ class TestSyncWorkerCacheInitialization:
 
     def test_get_caches_returns_same_instances(
         self, mock_queue, mock_dlq, integration_config, tmp_path
-    ):
+    , mock_queue_manager):
         """_get_caches() returns same cache instances on subsequent calls."""
         from worker.processor import SyncWorker
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=integration_config,
             data_dir=str(tmp_path),
@@ -111,13 +111,12 @@ class TestSyncWorkerCacheStatsLogging:
 
     def test_log_cache_stats_no_crash_without_caches(
         self, mock_queue, mock_dlq, integration_config, caplog
-    ):
+    , mock_queue_manager):
         """_log_cache_stats() works when caches are None."""
         from worker.processor import SyncWorker
-        import logging
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=integration_config,
             data_dir=None,
@@ -128,13 +127,12 @@ class TestSyncWorkerCacheStatsLogging:
 
     def test_log_cache_stats_no_crash_with_empty_caches(
         self, mock_queue, mock_dlq, integration_config, tmp_path, caplog
-    ):
+    , mock_queue_manager):
         """_log_cache_stats() works when caches have no hits/misses."""
         from worker.processor import SyncWorker
-        import logging
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=integration_config,
             data_dir=str(tmp_path),
@@ -148,12 +146,12 @@ class TestSyncWorkerCacheStatsLogging:
 
     def test_log_cache_stats_logs_hit_rate(
         self, mock_queue, mock_dlq, integration_config, tmp_path, capsys
-    ):
+    , mock_queue_manager):
         """_log_cache_stats() logs hit rate when caches have activity."""
         from worker.processor import SyncWorker
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=integration_config,
             data_dir=str(tmp_path),
@@ -180,7 +178,7 @@ class TestSyncWorkerCacheUsage:
 
     def test_process_job_passes_caches_to_matcher(
         self, integration_worker, sample_sync_job
-    ):
+    , mock_queue_manager):
         """_process_job() passes caches to find_plex_items_with_confidence."""
         worker, mock_plex_item = integration_worker
 
@@ -203,8 +201,7 @@ class TestSyncWorkerCacheUsage:
                 [mock_plex_item],
             )
 
-            with patch('hooks.handlers.unmark_scene_pending'):
-                worker._process_job(sample_sync_job)
+            worker._process_job(sample_sync_job)
 
             # Verify caches were passed
             mock_find.assert_called()
@@ -214,12 +211,12 @@ class TestSyncWorkerCacheUsage:
 
     def test_process_job_works_without_data_dir(
         self, mock_queue, mock_dlq, integration_config, sample_sync_job, mock_plex_item
-    ):
+    , mock_queue_manager):
         """_process_job() works when data_dir is None (no caching)."""
         from worker.processor import SyncWorker
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=integration_config,
             data_dir=None,  # No caching
@@ -244,17 +241,16 @@ class TestSyncWorkerCacheUsage:
 
         # Should not crash
         # Patch at source location since it's a lazy import
-        with patch('hooks.handlers.unmark_scene_pending'):
-            with patch('plex.matcher.find_plex_items_with_confidence') as mock_find:
-                from plex.matcher import MatchConfidence
-                mock_find.return_value = (
-                    MatchConfidence.HIGH,
-                    mock_plex_item,
-                    [mock_plex_item],
-                )
-                worker._process_job(sample_sync_job)
+        with patch('plex.matcher.find_plex_items_with_confidence') as mock_find:
+            from plex.matcher import MatchConfidence
+            mock_find.return_value = (
+                MatchConfidence.HIGH,
+                mock_plex_item,
+                [mock_plex_item],
+            )
+            worker._process_job(sample_sync_job)
 
-            # Verify caches were None
-            call_kwargs = mock_find.call_args.kwargs
-            assert call_kwargs.get('library_cache') is None
-            assert call_kwargs.get('match_cache') is None
+        # Verify caches were None
+        call_kwargs = mock_find.call_args.kwargs
+        assert call_kwargs.get('library_cache') is None
+        assert call_kwargs.get('match_cache') is None

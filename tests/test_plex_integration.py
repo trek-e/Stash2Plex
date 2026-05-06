@@ -231,7 +231,7 @@ class TestSyncWorkerIntegration(unittest.TestCase):
         from worker.processor import SyncWorker, PermanentError
 
         worker = SyncWorker(
-            queue=Mock(),
+            queue_manager=MagicMock(),
             dlq=Mock(),
             config=self.mock_config,
         )
@@ -253,7 +253,7 @@ class TestSyncWorkerIntegration(unittest.TestCase):
         from plex.exceptions import PlexNotFound
 
         worker = SyncWorker(
-            queue=MagicMock(),
+            queue_manager=MagicMock(),
             dlq=MagicMock(),
             config=self.mock_config,
         )
@@ -288,7 +288,7 @@ class TestSyncWorkerIntegration(unittest.TestCase):
         self.mock_config.preserve_plex_edits = False
 
         worker = SyncWorker(
-            queue=MagicMock(),
+            queue_manager=MagicMock(),
             dlq=MagicMock(),
             config=self.mock_config,
         )
@@ -340,7 +340,7 @@ class TestSyncWorkerIntegration(unittest.TestCase):
         from worker.processor import SyncWorker
 
         worker = SyncWorker(
-            queue=Mock(),
+            queue_manager=MagicMock(),
             dlq=Mock(),
             config=self.mock_config,
         )

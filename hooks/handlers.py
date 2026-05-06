@@ -6,28 +6,18 @@ Includes metadata validation before enqueueing.
 """
 
 import time
-from typing import Optional
-
+from typing import Optional, TYPE_CHECKING
 
 from shared.log import create_logger
 log_trace, log_debug, log_info, log_warn, log_error = create_logger("Hook")
 
-
-try:
-    from sync_queue.operations import enqueue, load_sync_timestamps
-except ImportError:
-    enqueue = None
-    load_sync_timestamps = None
+if TYPE_CHECKING:
+    from sync_queue.manager import QueueManager
 
 try:
     from validation.metadata import validate_metadata
 except ImportError:
     validate_metadata = None
-
-
-# In-memory tracking of pending scene IDs for deduplication
-# Resets on restart - acceptable tradeoff for <100ms hook handler requirement
-_pending_scene_ids: set[int] = set()
 
 
 # GraphQL query for fetching complete scene metadata
@@ -62,21 +52,6 @@ query FindScene($id: ID!) {
     }
 }
 """
-
-
-def mark_scene_pending(scene_id: int) -> None:
-    """Mark scene as having a pending job in queue."""
-    _pending_scene_ids.add(scene_id)
-
-
-def unmark_scene_pending(scene_id: int) -> None:
-    """Remove scene from pending set (called after job completes)."""
-    _pending_scene_ids.discard(scene_id)
-
-
-def is_scene_pending(scene_id: int) -> bool:
-    """Check if scene already has a pending job."""
-    return scene_id in _pending_scene_ids
 
 
 def is_scan_running(stash) -> bool:
@@ -157,7 +132,7 @@ def requires_plex_sync(update_data: dict) -> bool:
 def on_scene_update(
     scene_id: int,
     update_data: dict,
-    queue,
+    queue_manager: 'QueueManager',
     data_dir: Optional[str] = None,
     sync_timestamps: Optional[dict[int, float]] = None,
     stash=None,
@@ -173,7 +148,7 @@ def on_scene_update(
     Args:
         scene_id: Stash scene ID
         update_data: Scene update data from hook
-        queue: Queue instance for job storage
+        queue_manager: QueueManager instance (owns dedup + enqueue)
         data_dir: Plugin data directory for sync timestamps
         sync_timestamps: Dict mapping scene_id to last sync timestamp
         stash: StashInterface for fetching scene file path
@@ -212,16 +187,6 @@ def on_scene_update(
         if last_synced and stash_updated_at <= last_synced:
             log_trace(f"Scene {scene_id} already synced (Stash: {stash_updated_at} <= Last: {last_synced})")
             return False
-
-    # Filter: Queue deduplication using in-memory tracking
-    if is_scene_pending(scene_id):
-        log_trace(f"Scene {scene_id} already in queue, skipping duplicate")
-        return False
-
-    # Enqueue job for background processing
-    if enqueue is None:
-        log_error("queue.operations not available")
-        return False
 
     # Fetch full scene data from Stash - needed for file path and complete metadata
     file_path = None
@@ -332,17 +297,18 @@ def on_scene_update(
                 if key in update_data:
                     sanitized_data[key] = update_data[key]
 
-            enqueue(queue, scene_id, "metadata", sanitized_data)
+            result = queue_manager.try_enqueue(scene_id, "metadata", sanitized_data)
         else:
             # Validation failed critically (title issues), already logged above
             return False
     else:
         # No title in update or validation not available, enqueue as-is
         # (title might be in Stash already, worker can lookup)
-        enqueue(queue, scene_id, "metadata", update_data)
+        result = queue_manager.try_enqueue(scene_id, "metadata", update_data)
 
-    # Mark scene as pending to prevent duplicate enqueues
-    mark_scene_pending(scene_id)
+    if not result.enqueued:
+        log_trace(f"Scene {scene_id} already in queue, skipping duplicate ({result.reason})")
+        return False
 
     # Calculate elapsed time and warn if over target
     elapsed_ms = (time.time() - start) * 1000

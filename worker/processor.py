@@ -9,7 +9,6 @@ Implements reliable job processing with acknowledgment workflow:
 """
 
 import os
-import sys
 import time
 import threading
 from typing import Optional, TYPE_CHECKING
@@ -55,7 +54,7 @@ class SyncWorker:
 
     def __init__(
         self,
-        queue,
+        queue_manager: 'QueueManager',
         dlq: 'DeadLetterQueue',
         config: 'Stash2PlexConfig',
         data_dir: Optional[str] = None,
@@ -65,13 +64,13 @@ class SyncWorker:
         Initialize sync worker.
 
         Args:
-            queue: SQLiteAckQueue instance
+            queue_manager: QueueManager instance (owns queue + dedup)
             dlq: DeadLetterQueue for permanently failed jobs
             config: Stash2PlexConfig with Plex URL, token, and timeouts
             data_dir: Plugin data directory for sync timestamp updates
             max_retries: Maximum retry attempts before moving to DLQ (default for standard errors)
         """
-        self.queue = queue
+        self.queue_manager = queue_manager
         self.dlq = dlq
         self.config = config
         self.data_dir = data_dir
@@ -279,44 +278,31 @@ class SyncWorker:
 
         persist-queue's nack() doesn't support modifying job data,
         so we ack the current job and enqueue a fresh copy with
-        updated metadata.
+        updated metadata. Bypasses dedup — the scene is still in flight.
 
         Args:
             job: Job dict with retry metadata already added
         """
-        # Lazy import to avoid module-level import pollution in tests
-        from sync_queue.operations import ack_job as _ack_job, _job_counter
+        from sync_queue.operations import _job_counter
 
-        # Extract original job fields for re-enqueue
         scene_id = job.get('scene_id')
-        update_type = job.get('update_type')
-        data = job.get('data', {})
-
-        # Create new job with all metadata preserved
         new_job = {
             'job_id': next(_job_counter),
             'scene_id': scene_id,
-            'update_type': update_type,
-            'data': data,
+            'update_type': job.get('update_type'),
+            'data': job.get('data', {}),
             'enqueued_at': job.get('enqueued_at', time.time()),
             'job_key': job.get('job_key', f"scene_{scene_id}"),
-            # Preserve retry metadata
             'retry_count': job.get('retry_count', 0),
             'next_retry_at': job.get('next_retry_at', 0),
             'last_error_type': job.get('last_error_type'),
         }
-
-        # Ack the old job (removes from queue)
-        _ack_job(self.queue, job)
-        # Enqueue fresh copy with metadata
-        self.queue.put(new_job)
+        self.queue_manager.reenqueue(job, new_job)
 
     def _worker_loop(self):
         """Main worker loop - runs in background thread"""
         from worker.circuit_breaker import CircuitState
         from plex.exceptions import PlexServerDown, PlexNotFound
-        # Lazy imports to avoid module-level pollution in tests
-        from sync_queue.operations import get_pending, ack_job, nack_job, fail_job
 
         # Track recently-processed scene IDs to skip duplicates within this session.
         _recently_synced: set = set()
@@ -405,7 +391,7 @@ class SyncWorker:
                     log_info("Recovery period complete: normal processing speed resumed")
 
                 # Get next pending job (2 second timeout — short so stop() isn't blocked)
-                item = get_pending(self.queue, timeout=2)
+                item = self.queue_manager.get_pending(timeout=2)
                 if item is None:
                     if _dbg:
                         log_info("[DEBUG] Queue poll: timeout, no items")
@@ -422,14 +408,14 @@ class SyncWorker:
                         _dbg_id = item.get('job_id') or item.get('scene_id')
                         log_info(f"[DEBUG] Job {_dbg_id} backoff not elapsed ({remaining:.1f}s remaining), streak={_consecutive_not_ready}")
 
-                    nack_job(self.queue, item)
+                    self.queue_manager.nack(item)
 
                     # If we've cycled through many not-ready items without finding
                     # a ready one, all items are waiting for backoff. Sleep until
                     # the earliest retry time instead of spinning.
                     # Threshold: after 50 consecutive not-ready nacks (or queue.size,
                     # whichever is larger), assume everything is waiting.
-                    queue_size = max(self.queue.size, 50)
+                    queue_size = max(self.queue_manager.get_queue().size, 50)
                     if _consecutive_not_ready >= queue_size:
                         sleep_until = _earliest_retry_at - time.time()
                         # Clamp to [1, 30] seconds — don't sleep too long (stop() responsiveness)
@@ -463,7 +449,7 @@ class SyncWorker:
                 # Skip duplicate scene IDs (queue may have multiple entries from
                 # overlapping reconciliation runs, repeated hooks, or retry copies)
                 if scene_id is not None and scene_id in _recently_synced:
-                    ack_job(self.queue, item)
+                    self.queue_manager.ack(item)
                     log_debug(f"Job {jid} skipped — scene {scene_id} already synced this session")
                     continue
 
@@ -476,7 +462,7 @@ class SyncWorker:
                     enqueued_at = item.get('enqueued_at', 0)
                     last_synced = _sync_timestamps.get(int(scene_id))
                     if last_synced and enqueued_at <= last_synced and retry_count == 0:
-                        ack_job(self.queue, item)
+                        self.queue_manager.ack(item)
                         log_debug(f"Job {jid} skipped — scene {scene_id} already synced (enqueued {enqueued_at:.0f} <= synced {last_synced:.0f})")
                         continue
 
@@ -493,7 +479,7 @@ class SyncWorker:
 
                     # Success: acknowledge job and record with circuit breaker
                     previous_state = self.circuit_breaker.state
-                    ack_job(self.queue, item)
+                    self.queue_manager.ack(item)
                     self.circuit_breaker.record_success()
 
                     # Record result with rate limiter for error monitoring
@@ -536,14 +522,14 @@ class SyncWorker:
                 except PlexServerDown:
                     # Server unreachable: don't count against retry limit
                     # Nack job back to queue, circuit breaker pauses processing
-                    nack_job(self.queue, item)
+                    self.queue_manager.nack(item)
                     self.circuit_breaker.record_failure()
 
                     # Record result with rate limiter for error monitoring
                     self._rate_limiter.record_result(success=False)
 
                     if self.circuit_breaker.state == CircuitState.OPEN:
-                        pending = self.queue.size
+                        pending = self.queue_manager.get_queue().size
                         log_warn(f"Plex server is down — pausing, {pending} job(s) waiting")
 
                 except PlexNotFound as e:
@@ -559,7 +545,7 @@ class SyncWorker:
 
                     if job_retry_count >= max_retries:
                         log_warn(f"Job {jid} exceeded max retries ({max_retries}), moving to DLQ")
-                        fail_job(self.queue, item)
+                        self.queue_manager.fail(item)
                         self.dlq.add(job, e, job_retry_count)
                         self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
                     else:
@@ -586,7 +572,7 @@ class SyncWorker:
 
                     if job_retry_count >= max_retries:
                         log_warn(f"Job {jid} exceeded max retries ({max_retries}), moving to DLQ")
-                        fail_job(self.queue, item)
+                        self.queue_manager.fail(item)
                         self.dlq.add(job, e, job_retry_count)
                         self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
                     else:
@@ -599,7 +585,7 @@ class SyncWorker:
                     _job_elapsed = time.perf_counter() - _job_start
                     # Permanent error: move to DLQ immediately (doesn't count against circuit)
                     log_error(f"Job {jid} permanent failure, moving to DLQ: {e}")
-                    fail_job(self.queue, item)
+                    self.queue_manager.fail(item)
                     self.dlq.add(item, e, item.get('retry_count', 0))
                     self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
 
@@ -616,7 +602,7 @@ class SyncWorker:
 
                     if job_retry_count >= max_retries:
                         log_warn(f"Job {jid} unexpected error exceeded max retries ({max_retries}), moving to DLQ: {e}")
-                        fail_job(self.queue, item)
+                        self.queue_manager.fail(item)
                         self.dlq.add(job, e, job_retry_count)
                         self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
                     else:
@@ -747,11 +733,9 @@ class SyncWorker:
         _start_time = _time.perf_counter()
 
         from plex.exceptions import PlexTemporaryError, PlexPermanentError, PlexNotFound, translate_plex_exception
-        from plex.matcher import find_plex_items_with_confidence, MatchConfidence
+        from plex.matcher import find_plex_items_with_confidence
         from validation.obfuscation import obfuscate_path
-        # Lazy imports to avoid module-level pollution in tests
         from sync_queue.operations import save_sync_timestamp
-        from hooks.handlers import unmark_scene_pending
 
         _dbg = getattr(self.config, 'debug_logging', False)
 
@@ -866,7 +850,7 @@ class SyncWorker:
                         f"Stash path: {obfuscate_path(file_path)} "
                         f"Plex candidates ({len(unique_candidates)}): {obfuscated_paths}"
                     )
-                    raise PermanentError(f"Low confidence match skipped (strict_matching=true)")
+                    raise PermanentError("Low confidence match skipped (strict_matching=true)")
                 else:
                     plex_item = unique_candidates[0]
                     log_warn(
@@ -880,9 +864,6 @@ class SyncWorker:
             if self.data_dir is not None:
                 save_sync_timestamp(self.data_dir, scene_id, time.time())
 
-            # Remove from pending set (always, even on failure - will be re-added on retry)
-            unmark_scene_pending(scene_id)
-
             # Log job processing time
             _elapsed = _time.perf_counter() - _start_time
             if _elapsed >= 1.0:
@@ -893,10 +874,8 @@ class SyncWorker:
             return confidence
 
         except (PlexTemporaryError, PlexPermanentError, PlexNotFound):
-            unmark_scene_pending(scene_id)  # Allow re-enqueue on next hook
             raise
         except Exception as e:
-            unmark_scene_pending(scene_id)
             raise translate_plex_exception(e)
 
     def _validate_edit_result(self, plex_item, expected_edits: dict) -> list:
@@ -1211,7 +1190,7 @@ class SyncWorker:
                 finally:
                     os.unlink(temp_path)
             else:
-                result.add_warning(field_name, ValueError(f"No image data returned from Stash"))
+                result.add_warning(field_name, ValueError("No image data returned from Stash"))
         except Exception as e:
             log_warn(f" Failed to upload {field_name}: {e}")
             result.add_warning(field_name, e)

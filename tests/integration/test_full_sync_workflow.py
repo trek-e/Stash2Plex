@@ -19,7 +19,7 @@ mock_plex_item.edit.assert_called() - confirming the fixture wiring works.
 
 import pytest
 import time
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 
 def get_all_edit_kwargs(mock_plex_item):
@@ -139,14 +139,6 @@ class TestFullSyncWorkflow:
             assert args[1] == sample_sync_job['scene_id']  # scene_id
             assert isinstance(args[2], float)  # timestamp
 
-    def test_scene_unmarked_pending_after_processing(self, integration_worker, sample_sync_job):
-        """Scene removed from pending set after processing."""
-        worker, mock_plex_item = integration_worker
-
-        with patch('hooks.handlers.unmark_scene_pending') as mock_unmark:
-            worker._process_job(sample_sync_job)
-
-            mock_unmark.assert_called_once_with(sample_sync_job['scene_id'])
 
 
 @pytest.mark.integration
@@ -204,7 +196,7 @@ class TestJobWithMissingFields:
         worker._process_job(job)
         assert mock_plex_item.edit.called
 
-    def test_job_with_only_path_processes_without_error(self, integration_worker):
+    def test_job_with_only_path_processes_without_error(self, integration_worker, mock_queue_manager):
         """Job with only path field processes (finds item, no metadata to sync)."""
         worker, mock_plex_item = integration_worker
 
@@ -226,7 +218,7 @@ class TestJobWithMissingFields:
 class TestObservabilityIntegration:
     """Integration tests for observability features."""
 
-    def test_stats_tracked_on_successful_sync(self, integration_worker, sample_sync_job):
+    def test_stats_tracked_on_successful_sync(self, integration_worker, sample_sync_job, mock_queue_manager):
         """Verify stats are updated after successful job processing."""
         worker, mock_plex_item = integration_worker
 
@@ -242,7 +234,6 @@ class TestObservabilityIntegration:
         # To test integration, we need to simulate what worker loop does
 
         # Manually track as worker loop would
-        import time
         start = time.perf_counter()
         confidence = worker._process_job(sample_sync_job)
         elapsed = time.perf_counter() - start
@@ -252,13 +243,12 @@ class TestObservabilityIntegration:
         assert worker._stats.jobs_succeeded == 1
         assert worker._stats.total_processing_time > 0
 
-    def test_stats_tracked_on_failed_sync(self, integration_worker_no_match, sample_sync_job):
+    def test_stats_tracked_on_failed_sync(self, integration_worker_no_match, sample_sync_job, mock_queue_manager):
         """Verify stats are updated after failed job processing."""
         worker = integration_worker_no_match
         from plex.exceptions import PlexNotFound
 
         # Process job - will fail with PlexNotFound
-        import time
         start = time.perf_counter()
         try:
             worker._process_job(sample_sync_job)
@@ -270,7 +260,7 @@ class TestObservabilityIntegration:
         assert worker._stats.jobs_failed >= 1
         assert 'PlexNotFound' in worker._stats.errors_by_type
 
-    def test_stats_persisted_to_file(self, mock_queue, mock_dlq, integration_config, mock_plex_item, tmp_path):
+    def test_stats_persisted_to_file(self, mock_queue, mock_dlq, integration_config, mock_plex_item, tmp_path, mock_queue_manager):
         """Verify stats are saved to JSON file."""
         from worker.processor import SyncWorker
         import json
@@ -278,7 +268,7 @@ class TestObservabilityIntegration:
 
         # Create worker with data_dir
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=integration_config,
             data_dir=str(tmp_path),
@@ -316,7 +306,7 @@ class TestObservabilityIntegration:
         assert saved['high_confidence_matches'] == 1
         assert saved['low_confidence_matches'] == 1
 
-    def test_dlq_error_summary_in_batch_log(self, integration_worker, capsys, tmp_path):
+    def test_dlq_error_summary_in_batch_log(self, integration_worker, capsys, tmp_path, mock_queue_manager):
         """Verify DLQ summary appears in batch logs."""
         worker, mock_plex_item = integration_worker
 
@@ -347,7 +337,7 @@ class TestObservabilityIntegration:
         assert "PermanentError" in captured.err
         assert "TransientError" in captured.err
 
-    def test_high_confidence_tracked(self, integration_worker, sample_sync_job):
+    def test_high_confidence_tracked(self, integration_worker, sample_sync_job, mock_queue_manager):
         """Verify high confidence match is tracked in stats."""
         worker, mock_plex_item = integration_worker
 
@@ -361,14 +351,13 @@ class TestObservabilityIntegration:
         assert worker._stats.high_confidence_matches == 1
         assert worker._stats.low_confidence_matches == 0
 
-    def test_stats_preserved_across_worker_restart(self, mock_queue, mock_dlq, integration_config, tmp_path):
+    def test_stats_preserved_across_worker_restart(self, mock_queue, mock_dlq, integration_config, tmp_path, mock_queue_manager):
         """Verify stats survive worker restart (loaded from file)."""
         from worker.processor import SyncWorker
-        import json
 
         # Create initial worker and save some stats
         worker1 = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=integration_config,
             data_dir=str(tmp_path),
@@ -384,7 +373,7 @@ class TestObservabilityIntegration:
 
         # Simulate restart by creating new worker
         worker2 = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=integration_config,
             data_dir=str(tmp_path),

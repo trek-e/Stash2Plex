@@ -10,6 +10,7 @@ import os
 import pickle
 import sqlite3
 import time
+from dataclasses import dataclass
 from typing import Optional
 
 from shared.log import create_logger
@@ -25,6 +26,20 @@ try:
 except ImportError:
     _SQLiteAckQueue = None
     from queue import Empty  # fallback for tests
+
+
+@dataclass
+class EnqueueResult:
+    """Result from QueueManager.try_enqueue().
+
+    Attributes:
+        enqueued: True if job was added to the queue.
+        job: The enqueued job dict, or None if skipped.
+        reason: None if enqueued; "already_pending" or "recently_completed" if skipped.
+    """
+    enqueued: bool
+    job: Optional[dict]
+    reason: Optional[str]
 
 
 def enqueue(queue: 'persistqueue.SQLiteAckQueue', scene_id: int, update_type: str, data: dict) -> dict:

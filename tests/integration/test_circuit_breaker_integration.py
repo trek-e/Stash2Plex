@@ -88,7 +88,7 @@ class TestCircuitBreakerRecoveryWithTimeControl:
             assert fresh_circuit_breaker.can_execute() is False
 
     @freeze_time("2026-01-01 12:00:00")
-    def test_transitions_to_half_open_after_timeout(self, fresh_circuit_breaker):
+    def test_transitions_to_half_open_after_timeout(self, fresh_circuit_breaker, mock_queue_manager):
         """Circuit transitions to HALF_OPEN after 60s recovery timeout."""
         from worker.circuit_breaker import CircuitState
 
@@ -105,7 +105,7 @@ class TestCircuitBreakerRecoveryWithTimeControl:
             assert fresh_circuit_breaker.can_execute() is True
 
     @freeze_time("2026-01-01 12:00:00")
-    def test_success_in_half_open_closes_circuit(self, fresh_circuit_breaker):
+    def test_success_in_half_open_closes_circuit(self, fresh_circuit_breaker, mock_queue_manager):
         """Success in HALF_OPEN state closes the circuit."""
         from worker.circuit_breaker import CircuitState
 
@@ -125,7 +125,7 @@ class TestCircuitBreakerRecoveryWithTimeControl:
             assert fresh_circuit_breaker.can_execute() is True
 
     @freeze_time("2026-01-01 12:00:00")
-    def test_failure_in_half_open_reopens_circuit(self, fresh_circuit_breaker):
+    def test_failure_in_half_open_reopens_circuit(self, fresh_circuit_breaker, mock_queue_manager):
         """Failure in HALF_OPEN state reopens the circuit."""
         from worker.circuit_breaker import CircuitState
 
@@ -149,13 +149,13 @@ class TestCircuitBreakerRecoveryWithTimeControl:
 class TestCircuitBreakerWithWorker:
     """Tests for circuit breaker integrated with SyncWorker."""
 
-    def test_worker_has_circuit_breaker(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_worker_has_circuit_breaker(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """SyncWorker initializes with circuit breaker."""
         from worker.processor import SyncWorker
         from worker.circuit_breaker import CircuitBreaker
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -164,13 +164,13 @@ class TestCircuitBreakerWithWorker:
         assert hasattr(worker, 'circuit_breaker')
         assert isinstance(worker.circuit_breaker, CircuitBreaker)
 
-    def test_worker_circuit_opens_after_failures(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_worker_circuit_opens_after_failures(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Worker's circuit breaker opens after 5 failures."""
         from worker.processor import SyncWorker
         from worker.circuit_breaker import CircuitState
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -182,13 +182,13 @@ class TestCircuitBreakerWithWorker:
 
         assert worker.circuit_breaker.state == CircuitState.OPEN
 
-    def test_worker_blocks_when_circuit_open(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_worker_blocks_when_circuit_open(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Worker cannot execute when circuit is OPEN."""
         from worker.processor import SyncWorker
         from worker.circuit_breaker import CircuitState
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -202,13 +202,13 @@ class TestCircuitBreakerWithWorker:
         assert worker.circuit_breaker.can_execute() is False
 
     @freeze_time("2026-01-01 12:00:00")
-    def test_worker_resumes_after_recovery_timeout(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_worker_resumes_after_recovery_timeout(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Worker can execute after circuit recovers."""
         from worker.processor import SyncWorker
         from worker.circuit_breaker import CircuitState
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -230,7 +230,7 @@ class TestCircuitBreakerWithWorker:
 class TestCircuitBreakerReset:
     """Tests for manual circuit breaker reset."""
 
-    def test_reset_closes_open_circuit(self, fresh_circuit_breaker):
+    def test_reset_closes_open_circuit(self, fresh_circuit_breaker, mock_queue_manager):
         """reset() closes an OPEN circuit."""
         from worker.circuit_breaker import CircuitState
 
@@ -246,7 +246,7 @@ class TestCircuitBreakerReset:
         assert fresh_circuit_breaker.state == CircuitState.CLOSED
         assert fresh_circuit_breaker.can_execute() is True
 
-    def test_reset_clears_failure_count(self, fresh_circuit_breaker):
+    def test_reset_clears_failure_count(self, fresh_circuit_breaker, mock_queue_manager):
         """reset() clears accumulated failure count."""
         from worker.circuit_breaker import CircuitState
 
@@ -272,7 +272,7 @@ class TestCircuitBreakerReset:
 class TestBackoffDelayWithTimeControl:
     """Tests for exponential backoff delay calculation."""
 
-    def test_delay_increases_with_retry_count(self):
+    def test_delay_increases_with_retry_count(self, mock_queue_manager):
         """Delay range increases exponentially with retry count."""
         from worker.backoff import calculate_delay
 
@@ -286,7 +286,7 @@ class TestBackoffDelayWithTimeControl:
         assert delay_0 <= 5.0
         assert delay_2 <= 20.0
 
-    def test_delay_respects_cap(self):
+    def test_delay_respects_cap(self, mock_queue_manager):
         """Delay never exceeds cap regardless of retry count."""
         from worker.backoff import calculate_delay
 
@@ -296,12 +296,12 @@ class TestBackoffDelayWithTimeControl:
         assert delay <= 80.0
 
     @freeze_time("2026-01-01 12:00:00")
-    def test_next_retry_at_calculation(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_next_retry_at_calculation(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """next_retry_at is calculated as current time + delay."""
         from worker.processor import SyncWorker, TransientError
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -322,7 +322,7 @@ class TestCircuitBreakerFullCycle:
     """Test complete circuit breaker lifecycle with time control."""
 
     @freeze_time("2026-01-01 12:00:00")
-    def test_full_cycle_closed_open_half_open_closed(self, fresh_circuit_breaker):
+    def test_full_cycle_closed_open_half_open_closed(self, fresh_circuit_breaker, mock_queue_manager):
         """Test complete state cycle: CLOSED -> OPEN -> HALF_OPEN -> CLOSED."""
         from worker.circuit_breaker import CircuitState
 
@@ -347,7 +347,7 @@ class TestCircuitBreakerFullCycle:
             assert fresh_circuit_breaker.can_execute() is True
 
     @freeze_time("2026-01-01 12:00:00")
-    def test_full_cycle_closed_open_half_open_open(self, fresh_circuit_breaker):
+    def test_full_cycle_closed_open_half_open_open(self, fresh_circuit_breaker, mock_queue_manager):
         """Test failure recovery cycle: CLOSED -> OPEN -> HALF_OPEN -> OPEN."""
         from worker.circuit_breaker import CircuitState
 
@@ -373,13 +373,13 @@ class TestCircuitBreakerFullCycle:
 class TestCircuitBreakerWithWorkerFullWorkflow:
     """Test circuit breaker integrated with worker in full workflow scenarios."""
 
-    def test_worker_circuit_breaker_affects_job_processing_decision(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_worker_circuit_breaker_affects_job_processing_decision(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Worker checks circuit breaker state before processing."""
         from worker.processor import SyncWorker
         from worker.circuit_breaker import CircuitState
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -398,13 +398,13 @@ class TestCircuitBreakerWithWorkerFullWorkflow:
         assert worker.circuit_breaker.state == CircuitState.OPEN
 
     @freeze_time("2026-01-01 12:00:00")
-    def test_worker_can_recover_after_timeout(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_worker_can_recover_after_timeout(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Worker's circuit breaker recovers after timeout."""
         from worker.processor import SyncWorker
         from worker.circuit_breaker import CircuitState
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -430,14 +430,14 @@ class TestCircuitBreakerWithWorkerFullWorkflow:
 class TestCircuitBreakerPersistenceIntegration:
     """Tests for circuit breaker state persistence across worker instances."""
 
-    def test_state_persists_across_worker_instances(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_state_persists_across_worker_instances(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Circuit breaker OPEN state survives creating a new worker (simulates plugin restart)."""
         from worker.processor import SyncWorker
         from worker.circuit_breaker import CircuitState
 
         # First worker instance: open circuit via 5 failures
         worker1 = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -452,7 +452,7 @@ class TestCircuitBreakerPersistenceIntegration:
 
         # Second worker instance (simulates plugin restart): loads OPEN state
         worker2 = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -460,14 +460,14 @@ class TestCircuitBreakerPersistenceIntegration:
         assert worker2.circuit_breaker.state == CircuitState.OPEN
         assert worker2.circuit_breaker.can_execute() is False
 
-    def test_closed_state_persists_after_recovery(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_closed_state_persists_after_recovery(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """After recovery (HALF_OPEN -> CLOSED), new worker sees CLOSED state."""
         from worker.processor import SyncWorker
         from worker.circuit_breaker import CircuitState
 
         # First worker: open circuit
         worker1 = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -483,7 +483,7 @@ class TestCircuitBreakerPersistenceIntegration:
 
         # New worker: should be CLOSED
         worker2 = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -491,12 +491,12 @@ class TestCircuitBreakerPersistenceIntegration:
         assert worker2.circuit_breaker.state == CircuitState.CLOSED
         assert worker2.circuit_breaker.can_execute() is True
 
-    def test_no_state_file_without_data_dir(self, mock_queue, mock_dlq, mock_config):
+    def test_no_state_file_without_data_dir(self, mock_queue, mock_dlq, mock_config, mock_queue_manager):
         """Worker without data_dir creates circuit breaker without persistence."""
         from worker.processor import SyncWorker
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=None,
@@ -504,14 +504,14 @@ class TestCircuitBreakerPersistenceIntegration:
         assert worker.circuit_breaker._state_file is None
 
     @freeze_time("2026-01-01 12:00:00")
-    def test_half_open_state_persists_across_restart(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_half_open_state_persists_across_restart(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """HALF_OPEN state persists, allowing recovery test on restart."""
         from worker.processor import SyncWorker
         from worker.circuit_breaker import CircuitState
 
         # First worker: open circuit
         worker1 = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -525,7 +525,7 @@ class TestCircuitBreakerPersistenceIntegration:
 
             # New worker should load HALF_OPEN state
             worker2 = SyncWorker(
-                queue=mock_queue,
+                queue_manager=mock_queue_manager,
                 dlq=mock_dlq,
                 config=mock_config,
                 data_dir=str(tmp_path),
@@ -533,12 +533,12 @@ class TestCircuitBreakerPersistenceIntegration:
             assert worker2.circuit_breaker.state == CircuitState.HALF_OPEN
             assert worker2.circuit_breaker.can_execute() is True
 
-    def test_state_file_location(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_state_file_location(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """State file is stored in data_dir as circuit_breaker.json."""
         from worker.processor import SyncWorker
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),

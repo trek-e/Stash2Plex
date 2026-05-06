@@ -16,14 +16,14 @@ Error classification is critical for retry behavior:
 """
 
 import pytest
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock
 
 
 @pytest.mark.integration
 class TestPlexDownScenarios:
     """Tests for when Plex server is unavailable."""
 
-    def test_connection_refused_raises_transient(self, integration_worker_connection_error):
+    def test_connection_refused_raises_transient(self, integration_worker_connection_error, mock_queue_manager):
         """Connection refused translates to TransientError for retry."""
         from worker.processor import TransientError
         from plex.exceptions import PlexTemporaryError
@@ -40,7 +40,7 @@ class TestPlexDownScenarios:
         with pytest.raises((TransientError, PlexTemporaryError)):
             worker._process_job(job)
 
-    def test_timeout_error_raises_transient(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_timeout_error_raises_transient(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Socket timeout translates to TransientError for retry."""
         from worker.processor import SyncWorker, TransientError
         from plex.exceptions import PlexTemporaryError
@@ -54,7 +54,7 @@ class TestPlexDownScenarios:
         mock_config.dlq_retention_days = 30
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -75,7 +75,7 @@ class TestPlexDownScenarios:
         with pytest.raises((TransientError, PlexTemporaryError)):
             worker._process_job(job)
 
-    def test_http_500_raises_transient(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_http_500_raises_transient(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """HTTP 500 error translates to TransientError for retry."""
         from worker.processor import SyncWorker, TransientError
         from plex.exceptions import PlexTemporaryError
@@ -89,7 +89,7 @@ class TestPlexDownScenarios:
         mock_config.dlq_retention_days = 30
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -147,7 +147,7 @@ class TestPlexNotFoundScenarios:
         max_retries = worker._get_max_retries_for_error(error)
         assert max_retries == 12
 
-    def test_plex_not_found_does_not_trip_circuit_breaker(self, integration_worker_no_match):
+    def test_plex_not_found_does_not_trip_circuit_breaker(self, integration_worker_no_match, mock_queue_manager):
         """PlexNotFound should NOT count toward circuit breaker failures.
 
         Item-level "not found" is different from server-level outage.
@@ -174,7 +174,7 @@ class TestPlexNotFoundScenarios:
         assert worker.circuit_breaker.state == CircuitState.CLOSED
         assert worker.circuit_breaker._failure_count == 0
 
-    def test_plex_not_found_gets_longer_base_delay(self):
+    def test_plex_not_found_gets_longer_base_delay(self, mock_queue_manager):
         """PlexNotFound gets 30s base delay (vs 5s for other transient)."""
         from worker.backoff import get_retry_params
         from plex.exceptions import PlexNotFound, PlexTemporaryError
@@ -191,7 +191,7 @@ class TestPlexNotFoundScenarios:
 class TestPermanentErrorScenarios:
     """Tests for non-retryable permanent errors."""
 
-    def test_missing_path_raises_permanent(self, integration_worker):
+    def test_missing_path_raises_permanent(self, integration_worker, mock_queue_manager):
         """Job without file path raises PermanentError (no retry)."""
         from worker.processor import PermanentError
 
@@ -207,7 +207,7 @@ class TestPermanentErrorScenarios:
         with pytest.raises(PermanentError, match="missing file path"):
             worker._process_job(job)
 
-    def test_library_not_found_raises_transient(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_library_not_found_raises_transient(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Configured library not existing raises TransientError (via translate_plex_exception).
 
         Note: Library not found errors inside the try block get caught and translated.
@@ -226,7 +226,7 @@ class TestPermanentErrorScenarios:
         mock_config.plex_library = "NonexistentLibrary"
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -248,7 +248,7 @@ class TestPermanentErrorScenarios:
         with pytest.raises((TransientError, PlexTemporaryError)):
             worker._process_job(job)
 
-    def test_http_401_wrapped_as_library_error(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_http_401_wrapped_as_library_error(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """HTTP 401 Unauthorized during library lookup gets wrapped as library error.
 
         When plexapi raises Unauthorized while looking up the library section,
@@ -269,7 +269,7 @@ class TestPermanentErrorScenarios:
         mock_config.dlq_retention_days = 30
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -304,7 +304,7 @@ class TestPermanentErrorScenarios:
 class TestStrictMatchingScenarios:
     """Tests for strict_matching configuration."""
 
-    def test_multiple_matches_with_strict_raises_permanent(self, mock_queue, mock_dlq, mock_config, mock_plex_item, tmp_path):
+    def test_multiple_matches_with_strict_raises_permanent(self, mock_queue, mock_dlq, mock_config, mock_plex_item, tmp_path, mock_queue_manager):
         """Multiple Plex matches with strict_matching=True raises PermanentError.
 
         When multiple Plex items have files with the same filename (in different
@@ -322,7 +322,7 @@ class TestStrictMatchingScenarios:
         mock_config.plex_library = "Movies"
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -365,7 +365,7 @@ class TestStrictMatchingScenarios:
         with pytest.raises((PermanentError, PlexTemporaryError)):
             worker._process_job(job)
 
-    def test_multiple_matches_without_strict_uses_first(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_multiple_matches_without_strict_uses_first(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Multiple Plex matches with strict_matching=False uses first match.
 
         When multiple Plex items have files with the same filename and strict_matching
@@ -382,7 +382,7 @@ class TestStrictMatchingScenarios:
         mock_config.plex_library = "Movies"
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -427,141 +427,3 @@ class TestStrictMatchingScenarios:
         # Should not raise - uses first match
         worker._process_job(job)
         mock_item1.edit.assert_called()
-
-
-@pytest.mark.integration
-class TestSceneUnmarkedOnError:
-    """Tests verifying scene is unmarked from pending on all outcomes."""
-
-    def test_scene_unmarked_on_transient_error(self, integration_worker_connection_error):
-        """Scene unmarked from pending even on transient error."""
-        from plex.exceptions import PlexTemporaryError
-        from worker.processor import TransientError
-
-        worker = integration_worker_connection_error
-
-        job = {
-            'scene_id': 999,
-            'update_type': 'metadata',
-            'data': {'path': '/test.mp4'},
-            'job_id': 1,
-        }
-
-        with patch('hooks.handlers.unmark_scene_pending') as mock_unmark:
-            try:
-                worker._process_job(job)
-            except (TransientError, PlexTemporaryError):
-                pass
-
-            mock_unmark.assert_called_once_with(999)
-
-    def test_scene_unmarked_on_not_found(self, integration_worker_no_match):
-        """Scene unmarked from pending on PlexNotFound."""
-        from plex.exceptions import PlexNotFound
-
-        worker = integration_worker_no_match
-
-        job = {
-            'scene_id': 888,
-            'update_type': 'metadata',
-            'data': {'path': '/missing.mp4'},
-            'job_id': 1,
-        }
-
-        with patch('hooks.handlers.unmark_scene_pending') as mock_unmark:
-            try:
-                worker._process_job(job)
-            except PlexNotFound:
-                pass
-
-            mock_unmark.assert_called_once_with(888)
-
-    def test_scene_unmarked_on_strict_match_error(self, mock_queue, mock_dlq, mock_config, tmp_path):
-        """Scene unmarked from pending when strict_matching causes error.
-
-        Errors that occur inside the try block (after file path validation)
-        should still unmark the scene from pending.
-        """
-        from plex.exceptions import PlexTemporaryError
-        from worker.processor import SyncWorker
-
-        # Add required config attributes
-        mock_config.plex_connect_timeout = 10.0
-        mock_config.plex_read_timeout = 30.0
-        mock_config.preserve_plex_edits = False
-        mock_config.strict_matching = True
-        mock_config.dlq_retention_days = 30
-        mock_config.plex_library = "Movies"
-
-        worker = SyncWorker(
-            queue=mock_queue,
-            dlq=mock_dlq,
-            config=mock_config,
-            data_dir=str(tmp_path),
-        )
-
-        # Create two different mock items with SAME FILENAME to trigger strict match error
-        mock_item1 = MagicMock()
-        mock_item1.key = "/library/item/1"
-        mock_item1.title = "Match 1"
-        mock_item1.media = [MagicMock()]
-        mock_item1.media[0].parts = [MagicMock()]
-        mock_item1.media[0].parts[0].file = "/media/folder1/test.mp4"
-
-        mock_item2 = MagicMock()
-        mock_item2.key = "/library/item/2"
-        mock_item2.title = "Match 2"
-        mock_item2.media = [MagicMock()]
-        mock_item2.media[0].parts = [MagicMock()]
-        mock_item2.media[0].parts[0].file = "/media/folder2/test.mp4"
-
-        mock_section = MagicMock()
-        mock_section.search.return_value = [mock_item1, mock_item2]
-        mock_section.all.return_value = [mock_item1, mock_item2]
-        mock_section.title = "Movies"
-
-        mock_client = MagicMock()
-        mock_client.server.library.section.return_value = mock_section
-        worker._plex_client = mock_client
-
-        job = {
-            'scene_id': 777,
-            'update_type': 'metadata',
-            'data': {'path': '/media/test.mp4'},
-            'job_id': 1,
-        }
-
-        with patch('hooks.handlers.unmark_scene_pending') as mock_unmark:
-            try:
-                worker._process_job(job)
-            except (PlexTemporaryError, Exception):
-                pass
-
-            mock_unmark.assert_called_once_with(777)
-
-    def test_missing_path_does_not_unmark(self, integration_worker):
-        """Missing file path error happens before try block, no unmark called.
-
-        This is expected behavior - if we can't even validate the job has a path,
-        we shouldn't modify the pending state since the scene_id might be invalid too.
-        """
-        from worker.processor import PermanentError
-
-        worker, _ = integration_worker
-
-        job = {
-            'scene_id': 666,
-            'update_type': 'metadata',
-            'data': {},  # No path triggers PermanentError before try block
-            'job_id': 1,
-        }
-
-        with patch('hooks.handlers.unmark_scene_pending') as mock_unmark:
-            try:
-                worker._process_job(job)
-            except PermanentError:
-                pass
-
-            # unmark_scene_pending should NOT be called because error happens
-            # before entering the try block where cleanup happens
-            mock_unmark.assert_not_called()

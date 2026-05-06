@@ -13,19 +13,18 @@ These tests use real SQLiteAckQueue (not mocked) to verify persistence.
 
 import pytest
 import time
-from unittest.mock import Mock, MagicMock, patch
 
 
 @pytest.mark.integration
 class TestRetryMetadataPersistence:
     """Tests for retry metadata stored in job dict."""
 
-    def test_retry_count_stored_in_job(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_retry_count_stored_in_job(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """retry_count field added to job dict on first failure."""
         from worker.processor import SyncWorker, TransientError
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -39,12 +38,12 @@ class TestRetryMetadataPersistence:
         assert 'retry_count' in updated_job
         assert updated_job['retry_count'] == 1
 
-    def test_retry_count_increments(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_retry_count_increments(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """retry_count increments on subsequent failures."""
         from worker.processor import SyncWorker, TransientError
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -57,12 +56,12 @@ class TestRetryMetadataPersistence:
 
         assert updated_job['retry_count'] == 3
 
-    def test_next_retry_at_stored_in_job(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_next_retry_at_stored_in_job(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """next_retry_at timestamp added to job dict."""
         from worker.processor import SyncWorker, TransientError
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -78,12 +77,12 @@ class TestRetryMetadataPersistence:
         assert 'next_retry_at' in updated_job
         assert updated_job['next_retry_at'] >= before  # In future or now
 
-    def test_last_error_type_stored_in_job(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_last_error_type_stored_in_job(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """last_error_type field stores exception class name."""
         from worker.processor import SyncWorker, TransientError
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -101,14 +100,14 @@ class TestRetryMetadataPersistence:
 class TestQueuePersistenceAcrossRestart:
     """Tests for retry metadata surviving worker restart."""
 
-    def test_retry_metadata_survives_in_real_queue(self, real_queue, mock_dlq, mock_config, tmp_path):
+    def test_retry_metadata_survives_in_real_queue(self, real_queue, mock_dlq, mock_config, tmp_path, real_queue_manager):
         """Retry metadata persists in SQLiteAckQueue across instances."""
         from worker.processor import SyncWorker, TransientError
         from persistqueue.sqlackqueue import SQLiteAckQueue
 
         # Worker 1 prepares job for retry
         worker1 = SyncWorker(
-            queue=real_queue,
+            queue_manager=real_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -142,15 +141,12 @@ class TestQueuePersistenceAcrossRestart:
         assert 'next_retry_at' in retrieved_job
         assert retrieved_job['last_error_type'] == 'TransientError'
 
-    def test_requeue_preserves_all_job_fields(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_requeue_preserves_all_job_fields(self, mock_queue_manager, mock_dlq, mock_config, tmp_path):
         """_requeue_with_metadata preserves original job data plus retry metadata."""
         from worker.processor import SyncWorker
-        from unittest.mock import patch
-
-        mock_queue.put = Mock()
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -169,13 +165,11 @@ class TestQueuePersistenceAcrossRestart:
             'last_error_type': 'TransientError',
         }
 
-        # Patch ack_job in sync_queue.operations (lazy import in _requeue_with_metadata)
-        with patch('sync_queue.operations.ack_job', Mock()):
-            worker._requeue_with_metadata(job)
+        worker._requeue_with_metadata(job)
 
-        # Verify new job was put with all fields
-        mock_queue.put.assert_called_once()
-        new_job = mock_queue.put.call_args[0][0]
+        # Verify reenqueue was called with the original job and a new job copy
+        mock_queue_manager.reenqueue.assert_called_once()
+        _, new_job = mock_queue_manager.reenqueue.call_args[0]
 
         assert new_job['scene_id'] == 456
         assert new_job['update_type'] == 'metadata'
@@ -188,12 +182,12 @@ class TestQueuePersistenceAcrossRestart:
 class TestRetryReadiness:
     """Tests for is_ready_for_retry logic."""
 
-    def test_job_ready_when_delay_elapsed(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_job_ready_when_delay_elapsed(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Job is ready when next_retry_at is in the past."""
         from worker.processor import SyncWorker
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -203,12 +197,12 @@ class TestRetryReadiness:
 
         assert worker._is_ready_for_retry(job) is True
 
-    def test_job_not_ready_when_in_backoff(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_job_not_ready_when_in_backoff(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Job not ready when next_retry_at is in the future."""
         from worker.processor import SyncWorker
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -218,12 +212,12 @@ class TestRetryReadiness:
 
         assert worker._is_ready_for_retry(job) is False
 
-    def test_new_job_immediately_ready(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_new_job_immediately_ready(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """New job without next_retry_at is immediately ready."""
         from worker.processor import SyncWorker
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -238,12 +232,12 @@ class TestRetryReadiness:
 class TestDLQAfterMaxRetries:
     """Tests for jobs moving to DLQ after max retries."""
 
-    def test_standard_error_exhausts_after_5_retries(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_standard_error_exhausts_after_5_retries(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """TransientError exhausts after 5 retries."""
         from worker.processor import SyncWorker, TransientError
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -254,13 +248,13 @@ class TestDLQAfterMaxRetries:
 
         assert max_retries == 5
 
-    def test_plex_not_found_exhausts_after_12_retries(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_plex_not_found_exhausts_after_12_retries(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """PlexNotFound exhausts after 12 retries."""
         from worker.processor import SyncWorker
         from plex.exceptions import PlexNotFound
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -271,12 +265,12 @@ class TestDLQAfterMaxRetries:
 
         assert max_retries == 12
 
-    def test_job_sent_to_dlq_when_retries_exceeded(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_job_sent_to_dlq_when_retries_exceeded(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Job with retry_count >= max_retries should go to DLQ."""
         from worker.processor import SyncWorker, TransientError
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -298,12 +292,12 @@ class TestDLQAfterMaxRetries:
 class TestRealQueueIntegration:
     """Tests for full queue persistence workflow with real SQLiteAckQueue."""
 
-    def test_multiple_retry_metadata_updates_persist(self, real_queue, mock_dlq, mock_config, tmp_path):
+    def test_multiple_retry_metadata_updates_persist(self, real_queue, mock_dlq, mock_config, tmp_path, real_queue_manager):
         """Multiple retry updates persist correctly in queue."""
         from worker.processor import SyncWorker, TransientError
 
         worker = SyncWorker(
-            queue=real_queue,
+            queue_manager=real_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -329,14 +323,14 @@ class TestRealQueueIntegration:
         assert job['retry_count'] == 3
         assert job['last_error_type'] == 'TransientError'
 
-    def test_plex_not_found_uses_different_backoff_params(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_plex_not_found_uses_different_backoff_params(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """PlexNotFound gets longer delays than standard errors."""
         from worker.processor import SyncWorker, TransientError
         from plex.exceptions import PlexNotFound
         from worker.backoff import get_retry_params
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),

@@ -12,7 +12,7 @@ All integration tests should be marked with @pytest.mark.integration
 """
 
 import pytest
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock
 import time
 
 
@@ -20,7 +20,7 @@ import time
 
 
 @pytest.fixture
-def integration_config(mock_config):
+def integration_config(mock_config, mock_queue_manager):
     """
     Extended mock config with all attributes needed by SyncWorker.
 
@@ -39,7 +39,7 @@ def integration_config(mock_config):
 
 
 @pytest.fixture
-def integration_worker(mock_queue, mock_dlq, integration_config, mock_plex_item, tmp_path):
+def integration_worker(mock_queue, mock_dlq, integration_config, mock_plex_item, tmp_path, mock_queue_manager):
     """
     Complete SyncWorker with all dependencies mocked for integration testing.
 
@@ -49,14 +49,14 @@ def integration_worker(mock_queue, mock_dlq, integration_config, mock_plex_item,
         - Plex client mocked to return mock_plex_item on search
 
     Usage:
-        def test_sync_workflow(integration_worker):
+        def test_sync_workflow(integration_worker, mock_queue_manager):
             worker, plex_item = integration_worker
             # worker processes jobs, plex_item.edit() will be called
     """
     from worker.processor import SyncWorker
 
     worker = SyncWorker(
-        queue=mock_queue,
+        queue_manager=mock_queue_manager,
         dlq=mock_dlq,
         config=integration_config,
         data_dir=str(tmp_path),
@@ -79,19 +79,19 @@ def integration_worker(mock_queue, mock_dlq, integration_config, mock_plex_item,
 
 
 @pytest.fixture
-def integration_worker_no_match(mock_queue, mock_dlq, integration_config, tmp_path):
+def integration_worker_no_match(mock_queue, mock_dlq, integration_config, tmp_path, mock_queue_manager):
     """
     SyncWorker configured to return no Plex matches (PlexNotFound scenario).
 
     Usage:
-        def test_not_found_scenario(integration_worker_no_match):
+        def test_not_found_scenario(integration_worker_no_match, mock_queue_manager):
             worker = integration_worker_no_match
             # Processing will raise PlexNotFound
     """
     from worker.processor import SyncWorker
 
     worker = SyncWorker(
-        queue=mock_queue,
+        queue_manager=mock_queue_manager,
         dlq=mock_dlq,
         config=integration_config,
         data_dir=str(tmp_path),
@@ -112,19 +112,19 @@ def integration_worker_no_match(mock_queue, mock_dlq, integration_config, tmp_pa
 
 
 @pytest.fixture
-def integration_worker_connection_error(mock_queue, mock_dlq, integration_config, tmp_path):
+def integration_worker_connection_error(mock_queue, mock_dlq, integration_config, tmp_path, mock_queue_manager):
     """
     SyncWorker configured to raise connection errors (Plex down scenario).
 
     Usage:
-        def test_plex_down_scenario(integration_worker_connection_error):
+        def test_plex_down_scenario(integration_worker_connection_error, mock_queue_manager):
             worker = integration_worker_connection_error
             # Processing will raise PlexTemporaryError
     """
     from worker.processor import SyncWorker
 
     worker = SyncWorker(
-        queue=mock_queue,
+        queue_manager=mock_queue_manager,
         dlq=mock_dlq,
         config=integration_config,
         data_dir=str(tmp_path),
@@ -154,6 +154,17 @@ def real_queue(tmp_path):
     from persistqueue.sqlackqueue import SQLiteAckQueue
     queue_path = str(tmp_path / "test_queue")
     return SQLiteAckQueue(queue_path, auto_resume=True)
+
+
+@pytest.fixture
+def real_queue_manager(tmp_path):
+    """
+    Real QueueManager for integration tests requiring actual queue behavior.
+
+    Uses tmp_path to create an isolated database per test.
+    """
+    from sync_queue.manager import QueueManager
+    return QueueManager(data_dir=str(tmp_path / "queue_manager_data"))
 
 
 @pytest.fixture

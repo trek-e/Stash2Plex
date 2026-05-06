@@ -6,9 +6,8 @@ to orchestrate end-to-end gap detection: fetch scenes, match against Plex, run d
 and enqueue discovered gaps.
 """
 
-import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, Optional, TYPE_CHECKING
 
 from reconciliation.detector import GapDetector, has_meaningful_metadata
@@ -16,7 +15,6 @@ from reconciliation.detector import GapDetector, has_meaningful_metadata
 if TYPE_CHECKING:
     from stashapi.stashapp import StashInterface
     from config.config import Stash2PlexConfig
-    from persistqueue import SQLiteAckQueue
 
 from shared.log import create_logger
 _, log_debug, log_info, log_warn, log_error = create_logger("Gap Engine")
@@ -69,12 +67,12 @@ class GapDetectionEngine:
         stash: "StashInterface",
         config: "Stash2PlexConfig",
         data_dir: str,
-        queue: Optional["SQLiteAckQueue"] = None
+        queue_manager=None
     ):
         self.stash = stash
         self.config = config
         self.data_dir = data_dir
-        self.queue = queue
+        self.queue_manager = queue_manager
         self.detector = GapDetector()
 
     def run(self, scope: str = "all") -> GapDetectionResult:
@@ -145,8 +143,8 @@ class GapDetectionEngine:
         log_info(f"Gaps detected: {result.empty_metadata_count} empty metadata, "
                  f"{result.stale_sync_count} stale, {result.missing_count} missing")
 
-        # Step 6: Enqueue gaps (if queue provided)
-        if self.queue is not None:
+        # Step 6: Enqueue gaps (if queue_manager provided)
+        if self.queue_manager is not None:
             try:
                 enqueued, skipped, skipped_no_metadata = self._enqueue_gaps(empty_gaps, stale_gaps, missing_gaps)
                 result.enqueued_count = enqueued
@@ -486,15 +484,8 @@ class GapDetectionEngine:
         Returns:
             Tuple of (enqueued_count, skipped_already_queued, skipped_no_metadata)
         """
-        from sync_queue.operations import enqueue, get_queued_scene_ids, load_sync_timestamps
-        from datetime import datetime, timezone
-        import os
-
-        # Load existing queue scene IDs for deduplication.
-        # completed_window=604800 (7 days) extends the guard window so that scenes
-        # completed during a long-running session are not re-enqueued after 24h.
-        queue_path = os.path.join(self.data_dir, 'queue')
-        existing_in_queue = get_queued_scene_ids(queue_path, completed_window=604800.0)
+        from sync_queue.operations import load_sync_timestamps
+        from datetime import datetime
 
         # Load sync timestamps for persistent already-synced guard.
         # This is the primary defence against infinite requeue: if a scene has a
@@ -502,8 +493,6 @@ class GapDetectionEngine:
         # data and must not be re-enqueued regardless of how old its queue row is.
         sync_timestamps = load_sync_timestamps(self.data_dir)
 
-        # Track scenes we've already enqueued in this run (cross-gap-type dedup)
-        enqueued_this_run = set()
         enqueued_count = 0
         skipped_count = 0
         skipped_no_metadata_count = 0
@@ -514,16 +503,6 @@ class GapDetectionEngine:
         for gap in all_gaps:
             scene_id = gap.scene_id
             scene_data = gap.scene_data
-
-            # Skip if already in queue (pending, in-progress, or recently completed)
-            if scene_id in existing_in_queue:
-                skipped_count += 1
-                continue
-
-            # Skip if already enqueued this run
-            if scene_id in enqueued_this_run:
-                skipped_count += 1
-                continue
 
             # Persistent already-synced guard: skip if sync_timestamp >= updated_at.
             # This prevents re-enqueue of scenes processed in sessions older than the
@@ -563,13 +542,13 @@ class GapDetectionEngine:
                 skipped_no_metadata_count += 1
                 continue
 
-            # Enqueue
-            try:
-                enqueue(self.queue, scene_id, "metadata", job_data)
-                enqueued_this_run.add(scene_id)
+            # Enqueue via queue_manager — handles both in-memory and cross-session dedup.
+            # The in-memory _pending_scene_ids set provides cross-gap-type dedup within
+            # this run (same scene can appear in empty, stale, and missing lists).
+            result = self.queue_manager.try_enqueue(scene_id, "metadata", job_data)
+            if result.enqueued:
                 enqueued_count += 1
-            except Exception as e:
-                log_warn(f"Failed to enqueue scene {scene_id}: {e}")
+            else:
                 skipped_count += 1
 
         return enqueued_count, skipped_count, skipped_no_metadata_count

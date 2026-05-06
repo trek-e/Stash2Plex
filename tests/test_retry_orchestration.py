@@ -11,7 +11,7 @@ Tests verify:
 
 import pytest
 import time
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, MagicMock
 
 
 class TestRetryMetadata:
@@ -22,7 +22,7 @@ class TestRetryMetadata:
         from worker.processor import SyncWorker, TransientError
 
         worker = SyncWorker(
-            queue=Mock(),
+            queue_manager=MagicMock(),
             dlq=Mock(),
             config=Mock(poll_interval=1.0),
         )
@@ -40,7 +40,7 @@ class TestRetryMetadata:
         from worker.processor import SyncWorker, TransientError
 
         worker = SyncWorker(
-            queue=Mock(),
+            queue_manager=MagicMock(),
             dlq=Mock(),
             config=Mock(poll_interval=1.0),
         )
@@ -57,7 +57,7 @@ class TestRetryMetadata:
         from worker.processor import SyncWorker, TransientError
 
         worker = SyncWorker(
-            queue=Mock(),
+            queue_manager=MagicMock(),
             dlq=Mock(),
             config=Mock(poll_interval=1.0),
         )
@@ -78,7 +78,7 @@ class TestRetryMetadata:
         from worker.processor import SyncWorker, TransientError
 
         worker = SyncWorker(
-            queue=Mock(),
+            queue_manager=MagicMock(),
             dlq=Mock(),
             config=Mock(poll_interval=1.0),
         )
@@ -99,7 +99,7 @@ class TestBackoffDelay:
         from worker.processor import SyncWorker, TransientError
 
         worker = SyncWorker(
-            queue=Mock(),
+            queue_manager=MagicMock(),
             dlq=Mock(),
             config=Mock(poll_interval=1.0),
         )
@@ -128,7 +128,7 @@ class TestBackoffDelay:
         from worker.processor import SyncWorker
 
         worker = SyncWorker(
-            queue=Mock(),
+            queue_manager=MagicMock(),
             dlq=Mock(),
             config=Mock(poll_interval=1.0),
         )
@@ -142,7 +142,7 @@ class TestBackoffDelay:
         from worker.processor import SyncWorker
 
         worker = SyncWorker(
-            queue=Mock(),
+            queue_manager=MagicMock(),
             dlq=Mock(),
             config=Mock(poll_interval=1.0),
         )
@@ -151,12 +151,12 @@ class TestBackoffDelay:
 
         assert worker._is_ready_for_retry(job) is False
 
-    def test_is_ready_for_retry_true_for_new_job(self):
+    def test_is_ready_for_retry_true_for_new_job(self, mock_queue_manager):
         """New job without next_retry_at is immediately ready."""
         from worker.processor import SyncWorker
 
         worker = SyncWorker(
-            queue=Mock(),
+            queue_manager=MagicMock(),
             dlq=Mock(),
             config=Mock(poll_interval=1.0),
         )
@@ -169,13 +169,13 @@ class TestBackoffDelay:
 class TestPlexNotFoundRetryWindow:
     """Test PlexNotFound uses longer retry window."""
 
-    def test_plex_not_found_uses_longer_delay(self):
+    def test_plex_not_found_uses_longer_delay(self, mock_queue_manager):
         """PlexNotFound gets 30s base instead of 5s."""
         from worker.processor import SyncWorker
         from plex.exceptions import PlexNotFound, PlexTemporaryError
 
         worker = SyncWorker(
-            queue=Mock(),
+            queue_manager=MagicMock(),
             dlq=Mock(),
             config=Mock(poll_interval=1.0),
         )
@@ -190,9 +190,9 @@ class TestPlexNotFoundRetryWindow:
         assert max_temp == 5
         assert max_not_found > max_temp
 
-    def test_plex_not_found_delay_larger_than_temporary_error(self):
+    def test_plex_not_found_delay_larger_than_temporary_error(self, mock_queue_manager):
         """PlexNotFound delay range is larger than PlexTemporaryError."""
-        from worker.backoff import calculate_delay, get_retry_params
+        from worker.backoff import get_retry_params
         from plex.exceptions import PlexNotFound, PlexTemporaryError
 
         # Get params for both error types
@@ -211,9 +211,9 @@ class TestPlexNotFoundRetryWindow:
 class TestDLQAfterMaxRetries:
     """Test jobs move to DLQ after exceeding max retries."""
 
-    def test_job_moves_to_dlq_after_max_retries(self):
+    def test_job_moves_to_dlq_after_max_retries(self, mock_queue_manager):
         """Job goes to DLQ when retries exhausted."""
-        from worker.processor import SyncWorker, TransientError
+        from worker.processor import SyncWorker
         from plex.exceptions import PlexTemporaryError
 
         mock_queue = Mock()
@@ -221,7 +221,7 @@ class TestDLQAfterMaxRetries:
         mock_config = Mock(poll_interval=1.0)
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
         )
@@ -255,7 +255,7 @@ class TestCircuitBreaker:
         from worker.circuit_breaker import CircuitBreaker
 
         worker = SyncWorker(
-            queue=Mock(),
+            queue_manager=MagicMock(),
             dlq=Mock(),
             config=Mock(poll_interval=1.0),
         )
@@ -269,7 +269,7 @@ class TestCircuitBreaker:
         from worker.circuit_breaker import CircuitState
 
         worker = SyncWorker(
-            queue=Mock(),
+            queue_manager=MagicMock(),
             dlq=Mock(),
             config=Mock(poll_interval=1.0),
         )
@@ -292,7 +292,7 @@ class TestCircuitBreaker:
         from worker.circuit_breaker import CircuitState
 
         worker = SyncWorker(
-            queue=Mock(),
+            queue_manager=MagicMock(),
             dlq=Mock(),
             config=Mock(poll_interval=1.0),
         )
@@ -320,7 +320,7 @@ class TestRetrySurvivesRestart:
 
         # First worker prepares job for retry
         worker1 = SyncWorker(
-            queue=Mock(),
+            queue_manager=MagicMock(),
             dlq=Mock(),
             config=Mock(poll_interval=1.0),
         )
@@ -333,7 +333,7 @@ class TestRetrySurvivesRestart:
 
         # Simulate passing job to "new" worker (after restart)
         worker2 = SyncWorker(
-            queue=Mock(),
+            queue_manager=MagicMock(),
             dlq=Mock(),
             config=Mock(poll_interval=1.0),
         )
@@ -348,16 +348,15 @@ class TestRetrySurvivesRestart:
         # Will be ready once delay elapses (or not ready if still in delay)
         assert isinstance(ready, bool)
 
-    def test_requeue_preserves_retry_metadata(self):
+    def test_requeue_preserves_retry_metadata(self, mock_queue_manager):
         """_requeue_with_metadata preserves all retry fields."""
         from worker.processor import SyncWorker
-        from unittest.mock import patch
+        from unittest.mock import MagicMock
 
-        mock_queue = Mock()
-        mock_queue.put = Mock()
+        mock_qm = MagicMock()
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_qm,
             dlq=Mock(),
             config=Mock(poll_interval=1.0),
         )
@@ -375,15 +374,13 @@ class TestRetrySurvivesRestart:
             'last_error_type': 'TransientError',
         }
 
-        # Patch ack_job in sync_queue.operations (lazy import in _requeue_with_metadata)
-        with patch('sync_queue.operations.ack_job', Mock()):
-            worker._requeue_with_metadata(job)
+        worker._requeue_with_metadata(job)
 
-        # Verify new job was put in queue
-        mock_queue.put.assert_called_once()
-        new_job = mock_queue.put.call_args[0][0]
+        # Verify reenqueue was called with the original job and a new job copy
+        mock_qm.reenqueue.assert_called_once()
+        _, new_job = mock_qm.reenqueue.call_args[0]
 
-        # All fields should be preserved
+        # All fields should be preserved in the new job
         assert new_job['scene_id'] == '123'
         assert new_job['update_type'] == 'metadata'
         assert new_job['data'] == {'path': '/test.mp4'}
@@ -395,7 +392,7 @@ class TestRetrySurvivesRestart:
 class TestWorkerLoopIntegration:
     """Integration tests for the full worker loop with mocks."""
 
-    def test_worker_checks_circuit_breaker_before_processing(self):
+    def test_worker_checks_circuit_breaker_before_processing(self, mock_queue_manager):
         """Worker checks can_execute before getting jobs."""
         from worker.processor import SyncWorker
 
@@ -403,7 +400,7 @@ class TestWorkerLoopIntegration:
         mock_queue.get = Mock(return_value=None)  # No jobs
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=Mock(),
             config=Mock(poll_interval=0.1),
         )
@@ -421,7 +418,7 @@ class TestWorkerLoopIntegration:
         from worker.processor import SyncWorker
 
         worker = SyncWorker(
-            queue=Mock(),
+            queue_manager=MagicMock(),
             dlq=Mock(),
             config=Mock(poll_interval=1.0),
         )
@@ -441,7 +438,7 @@ class TestWorkerLoopIntegration:
         from worker.circuit_breaker import CircuitState
 
         worker = SyncWorker(
-            queue=Mock(),
+            queue_manager=MagicMock(),
             dlq=Mock(),
             config=Mock(poll_interval=1.0),
         )

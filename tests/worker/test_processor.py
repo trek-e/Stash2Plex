@@ -13,11 +13,11 @@ Tests verify:
 import json
 import os
 import pytest
-from unittest.mock import Mock, MagicMock, patch, call
+from unittest.mock import Mock, MagicMock, patch
 
 
 @pytest.fixture
-def processor_worker(mock_queue, mock_dlq, mock_config, tmp_path):
+def processor_worker(mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
     """Create SyncWorker with mocked dependencies for stats testing."""
     from worker.processor import SyncWorker
 
@@ -29,7 +29,7 @@ def processor_worker(mock_queue, mock_dlq, mock_config, tmp_path):
     mock_config.dlq_retention_days = 30
 
     worker = SyncWorker(
-        queue=mock_queue,
+        queue_manager=mock_queue_manager,
         dlq=mock_dlq,
         config=mock_config,
         data_dir=str(tmp_path),
@@ -39,7 +39,7 @@ def processor_worker(mock_queue, mock_dlq, mock_config, tmp_path):
 
 
 @pytest.fixture
-def processor_worker_no_data_dir(mock_queue, mock_dlq, mock_config):
+def processor_worker_no_data_dir(mock_queue, mock_dlq, mock_config, mock_queue_manager):
     """Create SyncWorker without data_dir for testing default stats."""
     from worker.processor import SyncWorker
 
@@ -51,7 +51,7 @@ def processor_worker_no_data_dir(mock_queue, mock_dlq, mock_config):
     mock_config.dlq_retention_days = 30
 
     worker = SyncWorker(
-        queue=mock_queue,
+        queue_manager=mock_queue_manager,
         dlq=mock_dlq,
         config=mock_config,
         data_dir=None,
@@ -63,14 +63,14 @@ def processor_worker_no_data_dir(mock_queue, mock_dlq, mock_config):
 class TestStatsInitialization:
     """Tests for _stats initialization in SyncWorker."""
 
-    def test_stats_initialized_on_worker_creation(self, processor_worker_no_data_dir):
+    def test_stats_initialized_on_worker_creation(self, processor_worker_no_data_dir, mock_queue_manager):
         """SyncWorker initializes _stats as SyncStats instance."""
         from worker.stats import SyncStats
 
         assert hasattr(processor_worker_no_data_dir, '_stats')
         assert isinstance(processor_worker_no_data_dir._stats, SyncStats)
 
-    def test_stats_default_values_without_data_dir(self, processor_worker_no_data_dir):
+    def test_stats_default_values_without_data_dir(self, processor_worker_no_data_dir, mock_queue_manager):
         """Stats have default values when data_dir is None."""
         stats = processor_worker_no_data_dir._stats
 
@@ -78,7 +78,7 @@ class TestStatsInitialization:
         assert stats.jobs_succeeded == 0
         assert stats.jobs_failed == 0
 
-    def test_stats_loaded_from_file_when_data_dir_set(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_stats_loaded_from_file_when_data_dir_set(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Stats are loaded from file if data_dir is set and file exists."""
         from worker.processor import SyncWorker
 
@@ -105,7 +105,7 @@ class TestStatsInitialization:
 
         # Create worker - should load stats from file
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -382,7 +382,7 @@ class TestStatsPersistence:
 class TestProcessJobReturnValue:
     """Tests for _process_job return value (confidence)."""
 
-    def test_process_job_returns_high_confidence(self, processor_worker, mock_plex_item):
+    def test_process_job_returns_high_confidence(self, processor_worker, mock_plex_item, mock_queue_manager):
         """_process_job returns 'high' for single match."""
         # Setup single match
         mock_section = MagicMock()
@@ -406,7 +406,7 @@ class TestProcessJobReturnValue:
             result = processor_worker._process_job(job)
             assert result == 'high'
 
-    def test_process_job_returns_low_confidence_for_multiple_matches(self, processor_worker):
+    def test_process_job_returns_low_confidence_for_multiple_matches(self, processor_worker, mock_queue_manager):
         """_process_job returns 'low' for multiple matches."""
         # Create multiple mock items
         mock_item1 = MagicMock()
@@ -447,7 +447,7 @@ class TestFieldClearing:
     """Tests for LOCKED decision: missing optional fields clear Plex values."""
 
     @pytest.fixture
-    def clearing_worker(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def clearing_worker(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Create SyncWorker configured for clearing tests."""
         from worker.processor import SyncWorker
 
@@ -458,7 +458,7 @@ class TestFieldClearing:
         mock_config.dlq_retention_days = 30
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -527,7 +527,7 @@ class TestFieldClearing:
             edit_kwargs = mock_plex_item.edit.call_args[1]
             assert 'studio.value' not in edit_kwargs
 
-    def test_none_summary_clears_plex_summary(self, clearing_worker):
+    def test_none_summary_clears_plex_summary(self, clearing_worker, mock_queue_manager):
         """When Stash sends details=None, existing Plex summary is cleared."""
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -548,7 +548,7 @@ class TestFieldClearing:
         assert 'summary.value' in edit_kwargs
         assert edit_kwargs['summary.value'] == ''
 
-    def test_none_tagline_clears_plex_tagline(self, clearing_worker):
+    def test_none_tagline_clears_plex_tagline(self, clearing_worker, mock_queue_manager):
         """When Stash sends tagline=None, existing Plex tagline is cleared."""
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -568,7 +568,7 @@ class TestFieldClearing:
         assert 'tagline.value' in edit_kwargs
         assert edit_kwargs['tagline.value'] == ''
 
-    def test_valid_value_sets_field(self, clearing_worker):
+    def test_valid_value_sets_field(self, clearing_worker, mock_queue_manager):
         """When Stash sends valid value, Plex field is set."""
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -594,7 +594,7 @@ class TestListFieldLimits:
     """Tests for list field limits (performers, tags)."""
 
     @pytest.fixture
-    def limits_worker(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def limits_worker(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Create SyncWorker configured for limits tests."""
         from worker.processor import SyncWorker
 
@@ -605,7 +605,7 @@ class TestListFieldLimits:
         mock_config.dlq_retention_days = 30
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -664,7 +664,7 @@ class TestListFieldLimits:
         assert str(max_tags + excess_count) in captured.err
         assert str(max_tags) in captured.err
 
-    def test_performers_under_limit_not_truncated(self, limits_worker, capsys):
+    def test_performers_under_limit_not_truncated(self, limits_worker, capsys, mock_queue_manager):
         """Performers under MAX_PERFORMERS are not truncated."""
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -684,7 +684,7 @@ class TestListFieldLimits:
         captured = capsys.readouterr()
         assert "Truncating performers list" not in captured.err
 
-    def test_empty_performers_clears_actors(self, limits_worker, capsys):
+    def test_empty_performers_clears_actors(self, limits_worker, capsys, mock_queue_manager):
         """Empty performers list clears all actors (LOCKED decision)."""
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -703,7 +703,7 @@ class TestListFieldLimits:
         captured = capsys.readouterr()
         assert "Clearing performers" in captured.err
 
-    def test_empty_tags_clears_genres(self, limits_worker, capsys):
+    def test_empty_tags_clears_genres(self, limits_worker, capsys, mock_queue_manager):
         """Empty tags list clears all genres (LOCKED decision)."""
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -727,7 +727,7 @@ class TestPartialSyncFailure:
     """Tests for partial sync failure handling - non-critical field failures don't fail job."""
 
     @pytest.fixture
-    def partial_worker(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def partial_worker(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Create SyncWorker for partial failure tests."""
         from worker.processor import SyncWorker
 
@@ -738,7 +738,7 @@ class TestPartialSyncFailure:
         mock_config.dlq_retention_days = 30
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -747,7 +747,6 @@ class TestPartialSyncFailure:
 
     def test_performer_sync_fails_job_still_succeeds(self, partial_worker, capsys):
         """When performer sync fails, title sync succeeds, job succeeds."""
-        from validation.errors import PartialSyncResult
 
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -786,7 +785,6 @@ class TestPartialSyncFailure:
 
     def test_tag_sync_fails_other_fields_succeed(self, partial_worker, capsys):
         """When tag sync fails, other fields succeed, job succeeds."""
-        from validation.errors import PartialSyncResult
 
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -822,7 +820,6 @@ class TestPartialSyncFailure:
 
     def test_poster_upload_fails_metadata_succeeds(self, partial_worker):
         """When poster upload fails, metadata sync succeeds, job succeeds."""
-        from validation.errors import PartialSyncResult
 
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -856,7 +853,6 @@ class TestPartialSyncFailure:
 
     def test_multiple_non_critical_failures_aggregated(self, partial_worker, capsys):
         """Multiple non-critical failures are aggregated in warnings."""
-        from validation.errors import PartialSyncResult
 
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -983,7 +979,7 @@ class TestPartialSyncFailure:
         assert 'metadata' in result.fields_updated
         assert any(w.field_name == 'collection' for w in result.warnings)
 
-    def test_background_upload_failure_doesnt_fail_job(self, partial_worker):
+    def test_background_upload_failure_doesnt_fail_job(self, partial_worker, mock_queue_manager):
         """When background upload fails, job still succeeds."""
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -1014,7 +1010,7 @@ class TestSyncToggles:
     """Tests for field sync toggle behavior."""
 
     @pytest.fixture
-    def toggle_worker(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def toggle_worker(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Create SyncWorker configured for toggle tests."""
         from worker.processor import SyncWorker
 
@@ -1036,7 +1032,7 @@ class TestSyncToggles:
         mock_config.sync_collection = True
 
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -1393,7 +1389,7 @@ class TestActiveHealthProbes:
 
         assert processor_worker._consecutive_health_failures == 3
 
-    def test_backoff_calculation_parameters(self):
+    def test_backoff_calculation_parameters(self, mock_queue_manager):
         """Verify backoff uses correct parameters (5s base, 60s cap)."""
         from worker.backoff import calculate_delay
 
@@ -1409,7 +1405,7 @@ class TestActiveHealthProbes:
         assert 0.0 <= delay3 <= 60.0  # 2^4 = 16, 5*16 = 80, capped at 60
         assert 0.0 <= delay4 <= 60.0  # Well over cap, should be capped
 
-    def test_health_check_timeout_value(self):
+    def test_health_check_timeout_value(self, mock_queue_manager):
         """Verify health check uses 5s timeout constant."""
         # This test verifies the constant is 5.0, not tied to config
         timeout = 5.0
@@ -1419,19 +1415,19 @@ class TestActiveHealthProbes:
 class TestRateLimiterIntegration:
     """Tests for RecoveryRateLimiter integration in worker loop."""
 
-    def test_rate_limiter_initialized(self, processor_worker):
+    def test_rate_limiter_initialized(self, processor_worker, mock_queue_manager):
         """Worker initializes _rate_limiter on creation."""
         from worker.rate_limiter import RecoveryRateLimiter
 
         assert hasattr(processor_worker, '_rate_limiter')
         assert isinstance(processor_worker._rate_limiter, RecoveryRateLimiter)
 
-    def test_was_in_recovery_flag_initialized(self, processor_worker):
+    def test_was_in_recovery_flag_initialized(self, processor_worker, mock_queue_manager):
         """Worker initializes _was_in_recovery flag to False."""
         assert hasattr(processor_worker, '_was_in_recovery')
         assert processor_worker._was_in_recovery is False
 
-    def test_no_rate_limiting_in_normal_operation(self, processor_worker):
+    def test_no_rate_limiting_in_normal_operation(self, processor_worker, mock_queue_manager):
         """When circuit is CLOSED and no recovery period, should_wait returns 0.0."""
         from worker.circuit_breaker import CircuitState
 
@@ -1443,7 +1439,7 @@ class TestRateLimiterIntegration:
         wait_time = processor_worker._rate_limiter.should_wait()
         assert wait_time == 0.0
 
-    def test_cross_restart_resume_from_recovery_state(self, mock_queue, mock_dlq, mock_config, tmp_path):
+    def test_cross_restart_resume_from_recovery_state(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Worker resumes recovery period from recovery_state.json on startup."""
         from worker.processor import SyncWorker
         from worker.recovery import RecoveryScheduler, RecoveryState
@@ -1464,7 +1460,7 @@ class TestRateLimiterIntegration:
 
         # Create worker (should load and resume recovery period)
         worker = SyncWorker(
-            queue=mock_queue,
+            queue_manager=mock_queue_manager,
             dlq=mock_dlq,
             config=mock_config,
             data_dir=str(tmp_path),
@@ -1476,7 +1472,6 @@ class TestRateLimiterIntegration:
 
     def test_recovery_period_starts_on_half_open_to_closed_transition(self, processor_worker):
         """When circuit transitions HALF_OPEN->CLOSED, recovery period starts."""
-        from worker.circuit_breaker import CircuitState
 
         # Simulate the HALF_OPEN->CLOSED transition by directly testing the
         # rate limiter behavior that would be triggered in the worker loop
@@ -1856,11 +1851,8 @@ class TestRequeueWithMetadata:
 
         processor_worker._requeue_with_metadata(job)
 
-        # Old job ack'd
-        processor_worker.queue.ack.assert_called_once_with(job)
-        # New job enqueued
-        processor_worker.queue.put.assert_called_once()
-        new_job = processor_worker.queue.put.call_args[0][0]
+        processor_worker.queue_manager.reenqueue.assert_called_once()
+        _, new_job = processor_worker.queue_manager.reenqueue.call_args[0]
         assert new_job['scene_id'] == 42
         assert new_job['retry_count'] == 2
         assert new_job['next_retry_at'] == 2000.0
@@ -1878,7 +1870,7 @@ class TestRequeueWithMetadata:
 
         processor_worker._requeue_with_metadata(job)
 
-        new_job = processor_worker.queue.put.call_args[0][0]
+        _, new_job = processor_worker.queue_manager.reenqueue.call_args[0]
         assert new_job['job_id'] != 999  # Fresh counter value
 
 
@@ -1948,13 +1940,12 @@ class TestWorkerLoop:
     def _run_one_iteration(self, worker, job, process_side_effect=None):
         """Run _worker_loop for exactly one job, then stop.
 
-        Patches sync_queue.operations (the import source) so that
-        _worker_loop's lazy `from sync_queue.operations import ...`
-        picks up the mocks.
+        Configures queue_manager mock so get_pending() feeds one job
+        then sets running=False, matching _worker_loop's method-call API.
         """
         call_count = 0
 
-        def feed_one_job(queue, timeout=2):
+        def feed_one_job(timeout=2):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -1962,32 +1953,21 @@ class TestWorkerLoop:
             worker.running = False
             return None
 
-        mock_get_pending = Mock(side_effect=feed_one_job)
-        mock_ack = Mock()
-        mock_nack = Mock()
-        mock_fail = Mock()
+        worker.queue_manager.get_pending.side_effect = feed_one_job
+        worker.queue_manager.ack.reset_mock()
+        worker.queue_manager.nack.reset_mock()
+        worker.queue_manager.fail.reset_mock()
+        worker.queue_manager.get_queue.return_value.size = 0
 
         process_mock = Mock(return_value='high')
         if process_side_effect:
             process_mock = Mock(side_effect=process_side_effect)
 
-        # Patch at the source module — _worker_loop does
-        # `from sync_queue.operations import get_pending, ack_job, ...`
-        with patch('sync_queue.operations.get_pending', mock_get_pending), \
-             patch('sync_queue.operations.ack_job', mock_ack), \
-             patch('sync_queue.operations.nack_job', mock_nack), \
-             patch('sync_queue.operations.fail_job', mock_fail), \
-             patch.object(worker, '_process_job', process_mock):
+        with patch.object(worker, '_process_job', process_mock):
             worker.running = True
             worker._worker_loop()
 
-        return {
-            'process_job': process_mock,
-            'ack_job': mock_ack,
-            'nack_job': mock_nack,
-            'fail_job': mock_fail,
-            'get_pending': mock_get_pending,
-        }
+        return {'process_job': process_mock}
 
     def test_successful_job_is_acked(self, processor_worker):
         """Successful job processing acks the job and records success."""
@@ -1996,7 +1976,7 @@ class TestWorkerLoop:
         mocks = self._run_one_iteration(processor_worker, job)
 
         mocks['process_job'].assert_called_once_with(job)
-        mocks['ack_job'].assert_called_once_with(processor_worker.queue, job)
+        processor_worker.queue_manager.ack.assert_called_once_with(job)
         assert processor_worker._stats.jobs_succeeded >= 1
 
     def test_permanent_error_goes_to_dlq_immediately(self, processor_worker):
@@ -2009,9 +1989,9 @@ class TestWorkerLoop:
             process_side_effect=PermanentError("bad data"),
         )
 
-        mocks['fail_job'].assert_called_once()
+        processor_worker.queue_manager.fail.assert_called_once()
         processor_worker.dlq.add.assert_called_once()
-        mocks['ack_job'].assert_not_called()
+        processor_worker.queue_manager.ack.assert_not_called()
 
     def test_transient_error_requeues_with_retry_metadata(self, processor_worker):
         """TransientError triggers retry with backoff metadata."""
@@ -2038,7 +2018,7 @@ class TestWorkerLoop:
             process_side_effect=TransientError("timeout"),
         )
 
-        mocks['fail_job'].assert_called_once()
+        processor_worker.queue_manager.fail.assert_called_once()
         processor_worker.dlq.add.assert_called_once()
 
     def test_plex_server_down_nacks_without_retry_count(self, processor_worker):
@@ -2051,8 +2031,8 @@ class TestWorkerLoop:
             process_side_effect=PlexServerDown("connection refused"),
         )
 
-        mocks['nack_job'].assert_called_once_with(processor_worker.queue, job)
-        mocks['fail_job'].assert_not_called()
+        processor_worker.queue_manager.nack.assert_called_once_with(job)
+        processor_worker.queue_manager.fail.assert_not_called()
         processor_worker.dlq.add.assert_not_called()
 
     def test_plex_not_found_retry_progression(self, processor_worker):
@@ -2068,7 +2048,7 @@ class TestWorkerLoop:
 
             mock_requeue.assert_called_once()
             # PlexNotFound gets 12 retries, so first failure should requeue
-            mocks['fail_job'].assert_not_called()
+            processor_worker.queue_manager.fail.assert_not_called()
 
     def test_unknown_exception_requeues_with_retry(self, processor_worker):
         """Unknown exceptions now use retry progression (not bare nack)."""
@@ -2094,7 +2074,7 @@ class TestWorkerLoop:
             process_side_effect=RuntimeError("unexpected"),
         )
 
-        mocks['fail_job'].assert_called_once()
+        processor_worker.queue_manager.fail.assert_called_once()
         processor_worker.dlq.add.assert_called_once()
 
     def test_dedup_skips_recently_synced_scene(self, processor_worker):
@@ -2104,7 +2084,7 @@ class TestWorkerLoop:
 
         call_count = 0
 
-        def feed_two_jobs(queue, timeout=2):
+        def feed_two_jobs(timeout=2):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -2114,18 +2094,18 @@ class TestWorkerLoop:
             processor_worker.running = False
             return None
 
-        with patch('sync_queue.operations.get_pending', Mock(side_effect=feed_two_jobs)), \
-             patch('sync_queue.operations.ack_job') as mock_ack, \
-             patch('sync_queue.operations.nack_job'), \
-             patch('sync_queue.operations.fail_job'), \
-             patch.object(processor_worker, '_process_job', return_value='high') as mock_process:
+        processor_worker.queue_manager.get_pending.side_effect = feed_two_jobs
+        processor_worker.queue_manager.ack.reset_mock()
+        processor_worker.queue_manager.get_queue.return_value.size = 0
+
+        with patch.object(processor_worker, '_process_job', return_value='high') as mock_process:
             processor_worker.running = True
             processor_worker._worker_loop()
 
         # _process_job called once (first job), second was deduped
         mock_process.assert_called_once()
         # Both jobs acked (first for success, second for dedup skip)
-        assert mock_ack.call_count == 2
+        assert processor_worker.queue_manager.ack.call_count == 2
 
     def test_backoff_delay_not_elapsed_nacks_job(self, processor_worker):
         """Job with future next_retry_at is nacked back to queue."""
@@ -2134,7 +2114,7 @@ class TestWorkerLoop:
 
         mocks = self._run_one_iteration(processor_worker, job)
 
-        mocks['nack_job'].assert_called_once()
+        processor_worker.queue_manager.nack.assert_called_once()
         mocks['process_job'].assert_not_called()
 
     def test_circuit_breaker_open_skips_processing(self, processor_worker):

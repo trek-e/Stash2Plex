@@ -1,14 +1,12 @@
 """Tests for GapDetectionEngine orchestration and integration."""
 
-import os
 import tempfile
-from datetime import datetime, timedelta
-from unittest.mock import Mock, MagicMock, patch, call, PropertyMock
+from datetime import datetime
+from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
 
-from reconciliation.engine import GapDetectionEngine, GapDetectionResult
-from reconciliation.detector import GapResult
+from reconciliation.engine import GapDetectionEngine
 
 
 # =============================================================================
@@ -113,14 +111,14 @@ def test_run_detects_empty_metadata_gaps(mock_stash, mock_config, tmp_data_dir, 
         from plex.matcher import MatchConfidence
         mock_matcher.return_value = (MatchConfidence.HIGH, mock_plex_item, [mock_plex_item])
 
-        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=None)
+        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue_manager=None)
         result = engine.run(scope="all")
 
         assert result.empty_metadata_count == 1
         assert result.scenes_checked == 1
 
 
-def test_run_detects_stale_sync_gaps(mock_stash, mock_config, tmp_data_dir, sample_scenes):
+def test_run_detects_stale_sync_gaps(mock_stash, mock_config, tmp_data_dir, sample_scenes, mock_queue_manager):
     """Test that engine detects scenes with stale sync timestamps."""
     # Setup: Scene updated at 2026-02-10, but last synced at 2026-02-01
     mock_stash.find_scenes.return_value = [sample_scenes[0]]
@@ -140,14 +138,14 @@ def test_run_detects_stale_sync_gaps(mock_stash, mock_config, tmp_data_dir, samp
         mock_plex_server.library.section.return_value = MagicMock()
         MockPlexClient.return_value.connect.return_value = mock_plex_server
 
-        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=None)
+        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue_manager=None)
         result = engine.run(scope="all")
 
         assert result.stale_sync_count == 1
         assert result.scenes_checked == 1
 
 
-def test_run_detects_missing_gaps(mock_stash, mock_config, tmp_data_dir, sample_scenes, mock_plex_client):
+def test_run_detects_missing_gaps(mock_stash, mock_config, tmp_data_dir, sample_scenes, mock_plex_client, mock_queue_manager):
     """Test that engine detects scenes with no Plex match."""
     # Setup: Scene with no sync timestamp, matcher raises PlexNotFound
     mock_stash.find_scenes.return_value = [sample_scenes[0]]
@@ -160,14 +158,14 @@ def test_run_detects_missing_gaps(mock_stash, mock_config, tmp_data_dir, sample_
         from plex.exceptions import PlexNotFound
         mock_matcher.side_effect = PlexNotFound("Not found")
 
-        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=None)
+        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue_manager=None)
         result = engine.run(scope="all")
 
         assert result.missing_count == 1
         assert result.scenes_checked == 1
 
 
-def test_run_enqueues_gaps_when_queue_provided(mock_stash, mock_config, tmp_data_dir, sample_scenes, mock_queue, mock_plex_client):
+def test_run_enqueues_gaps_when_queue_provided(mock_stash, mock_config, tmp_data_dir, sample_scenes, mock_queue, mock_plex_client, mock_queue_manager):
     """Test that engine enqueues gaps when queue is provided."""
     # Setup: Multiple gap types
     mock_stash.find_scenes.return_value = sample_scenes[:2]
@@ -181,16 +179,14 @@ def test_run_enqueues_gaps_when_queue_provided(mock_stash, mock_config, tmp_data
     with patch('plex.client.PlexClient', return_value=mock_plex_client), \
          patch('plex.cache.PlexCache'), \
          patch('plex.cache.MatchCache'), \
-         patch('plex.matcher.find_plex_items_with_confidence') as mock_matcher, \
-         patch('sync_queue.operations.enqueue') as mock_enqueue, \
-         patch('sync_queue.operations.get_queued_scene_ids', return_value=set()):
+         patch('plex.matcher.find_plex_items_with_confidence') as mock_matcher:
 
         from plex.exceptions import PlexNotFound
         # Scene 1 has sync timestamp, won't call matcher
         # Scene 2 has no sync timestamp, will call matcher -> PlexNotFound
         mock_matcher.side_effect = PlexNotFound("Not found")
 
-        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=mock_queue)
+        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue_manager=mock_queue_manager)
         result = engine.run(scope="all")
 
         # Should detect 1 stale + 1 missing = 2 gaps
@@ -200,10 +196,10 @@ def test_run_enqueues_gaps_when_queue_provided(mock_stash, mock_config, tmp_data
 
         # Should enqueue both
         assert result.enqueued_count == 2
-        assert mock_enqueue.call_count == 2
+        assert mock_queue_manager.try_enqueue.call_count == 2
 
 
-def test_run_deduplicates_against_existing_queue(mock_stash, mock_config, tmp_data_dir, sample_scenes, mock_queue, mock_plex_client):
+def test_run_deduplicates_against_existing_queue(mock_stash, mock_config, tmp_data_dir, sample_scenes, mock_queue, mock_plex_client, mock_queue_manager):
     """Test that engine skips scenes already in queue."""
     # Setup: Scene with gap, but already in queue
     mock_stash.find_scenes.return_value = [sample_scenes[0]]
@@ -215,21 +211,25 @@ def test_run_deduplicates_against_existing_queue(mock_stash, mock_config, tmp_da
 
     with patch('plex.client.PlexClient', return_value=mock_plex_client), \
          patch('plex.cache.PlexCache'), \
-         patch('plex.cache.MatchCache'), \
-         patch('sync_queue.operations.enqueue') as mock_enqueue, \
-         patch('sync_queue.operations.get_queued_scene_ids', return_value={1}):  # Scene 1 already in queue
+         patch('plex.cache.MatchCache'):
 
-        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=mock_queue)
+        from sync_queue.operations import EnqueueResult
+
+        mock_queue_manager.try_enqueue.return_value = EnqueueResult(
+            enqueued=False, job=None, reason="already_pending"
+        )
+
+        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue_manager=mock_queue_manager)
         result = engine.run(scope="all")
 
         # Should detect gap but not enqueue
         assert result.stale_sync_count == 1
         assert result.enqueued_count == 0
         assert result.skipped_already_queued == 1
-        mock_enqueue.assert_not_called()
+        mock_queue_manager.try_enqueue.assert_called_once()
 
 
-def test_run_deduplicates_across_gap_types(mock_stash, mock_config, tmp_data_dir, sample_scenes, mock_queue, mock_plex_client):
+def test_run_deduplicates_across_gap_types(mock_stash, mock_config, tmp_data_dir, sample_scenes, mock_queue, mock_plex_client, real_queue_manager):
     """Test that engine enqueues each scene only once when it appears in multiple gap lists."""
     # Setup: Scene appears as both empty_metadata AND stale_sync gap
     mock_stash.find_scenes.return_value = [sample_scenes[0]]
@@ -251,30 +251,19 @@ def test_run_deduplicates_across_gap_types(mock_stash, mock_config, tmp_data_dir
     with patch('plex.client.PlexClient', return_value=mock_plex_client), \
          patch('plex.cache.PlexCache'), \
          patch('plex.cache.MatchCache'), \
-         patch('plex.matcher.find_plex_items_with_confidence') as mock_matcher, \
-         patch('sync_queue.operations.enqueue') as mock_enqueue, \
-         patch('sync_queue.operations.get_queued_scene_ids', return_value=set()):
+         patch('plex.matcher.find_plex_items_with_confidence') as mock_matcher:
 
         from plex.matcher import MatchConfidence
         # Scene has sync timestamp, but we'll force matcher to run by returning HIGH confidence
         # This creates both gaps: stale (sync timestamp old) + empty (Plex has no metadata)
         mock_matcher.return_value = (MatchConfidence.HIGH, mock_plex_item, [mock_plex_item])
 
-        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=mock_queue)
+        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue_manager=real_queue_manager)
         result = engine.run(scope="all")
 
-        # Should detect both gap types
-        assert result.stale_sync_count == 1
-        # Note: empty_metadata won't trigger because scene has sync timestamp,
-        # so lighter pre-check skips matcher. Let's adjust test.
-
-        # Actually, the lighter pre-check means: if scene in sync_timestamps, mark as matched but don't fetch metadata
-        # So we won't detect empty_metadata for already-synced scenes without fetching the item
-        # This is correct behavior - empty detection is for NEW matches only
-
-        # So this test actually only has stale_sync gap
+        # Scene appears in both stale_sync and empty_metadata gap lists, but
+        # QueueManager._pending_scene_ids deduplicates within the run — only enqueued once
         assert result.enqueued_count == 1
-        mock_enqueue.assert_called_once()
 
 
 def test_run_scope_recent(mock_stash, mock_config, tmp_data_dir, sample_scenes, mock_plex_client):
@@ -285,7 +274,7 @@ def test_run_scope_recent(mock_stash, mock_config, tmp_data_dir, sample_scenes, 
          patch('plex.cache.PlexCache'), \
          patch('plex.cache.MatchCache'):
 
-        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=None)
+        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue_manager=None)
         result = engine.run(scope="recent")
 
         # Verify find_scenes called with created_at filter (date added, not metadata update)
@@ -303,7 +292,7 @@ def test_run_scope_all(mock_stash, mock_config, tmp_data_dir, sample_scenes, moc
          patch('plex.cache.PlexCache'), \
          patch('plex.cache.MatchCache'):
 
-        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=None)
+        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue_manager=None)
         result = engine.run(scope="all")
 
         # Verify find_scenes called without filter
@@ -322,7 +311,7 @@ def test_run_handles_plex_server_down(mock_stash, mock_config, tmp_data_dir, sam
         mock_client = MockPlexClient.return_value
         type(mock_client).server = PropertyMock(side_effect=PlexServerDown("Server down"))
 
-        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=None)
+        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue_manager=None)
         result = engine.run(scope="all")
 
         # Should return partial result with error, no crash
@@ -345,7 +334,7 @@ def test_run_detection_only_without_queue(mock_stash, mock_config, tmp_data_dir,
          patch('plex.cache.MatchCache'), \
          patch('sync_queue.operations.enqueue') as mock_enqueue:
 
-        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=None)
+        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue_manager=None)
         result = engine.run(scope="all")
 
         # Should detect gap but not enqueue
@@ -368,7 +357,7 @@ def test_lighter_pre_check_uses_sync_timestamps_first(mock_stash, mock_config, t
          patch('plex.cache.MatchCache'), \
          patch('plex.matcher.find_plex_items_with_confidence') as mock_matcher:
 
-        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=None)
+        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue_manager=None)
         result = engine.run(scope="all")
 
         # Matcher IS called even for synced scenes (to get Plex metadata for
@@ -377,9 +366,9 @@ def test_lighter_pre_check_uses_sync_timestamps_first(mock_stash, mock_config, t
         mock_matcher.assert_called()
 
 
-def test_job_data_builder_extracts_all_fields(mock_stash, mock_config, tmp_data_dir, sample_scenes):
+def test_job_data_builder_extracts_all_fields(mock_stash, mock_config, tmp_data_dir, sample_scenes, mock_queue_manager):
     """Test _build_job_data extracts all fields correctly."""
-    engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=None)
+    engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue_manager=None)
 
     job_data = engine._build_job_data(sample_scenes[0])
 
@@ -396,7 +385,7 @@ def test_job_data_builder_extracts_all_fields(mock_stash, mock_config, tmp_data_
     assert job_data['background_url'] == 'http://stash/scene1_preview.mp4'
 
 
-def test_scenes_without_files_skipped(mock_stash, mock_config, tmp_data_dir, mock_plex_client):
+def test_scenes_without_files_skipped(mock_stash, mock_config, tmp_data_dir, mock_plex_client, mock_queue_manager):
     """Test that scenes without files are skipped gracefully."""
     scene_no_files = {
         'id': '999',
@@ -411,7 +400,7 @@ def test_scenes_without_files_skipped(mock_stash, mock_config, tmp_data_dir, moc
          patch('plex.cache.PlexCache'), \
          patch('plex.cache.MatchCache'):
 
-        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=None)
+        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue_manager=None)
         result = engine.run(scope="all")
 
         # Should complete without errors
@@ -420,7 +409,7 @@ def test_scenes_without_files_skipped(mock_stash, mock_config, tmp_data_dir, moc
         assert len(result.errors) == 0
 
 
-def test_enqueue_skips_scenes_without_meaningful_metadata(mock_stash, mock_config, tmp_data_dir, mock_queue, mock_plex_client):
+def test_enqueue_skips_scenes_without_meaningful_metadata(mock_stash, mock_config, tmp_data_dir, mock_queue, mock_plex_client, mock_queue_manager):
     """Test that scenes without meaningful metadata are not enqueued (quality gate)."""
     # Scene with only title/path but no studio, performers, tags, details, or date
     bare_scene = {
@@ -450,7 +439,7 @@ def test_enqueue_skips_scenes_without_meaningful_metadata(mock_stash, mock_confi
          patch('sync_queue.operations.enqueue') as mock_enqueue, \
          patch('sync_queue.operations.get_queued_scene_ids', return_value=set()):
 
-        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=mock_queue)
+        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue_manager=mock_queue_manager)
         result = engine.run(scope="all")
 
         # Gap is detected but NOT enqueued (quality gate blocks it)
@@ -472,7 +461,7 @@ def test_reconcile_missing_disabled_skips_missing_detection(mock_stash, mock_con
         from plex.exceptions import PlexNotFound
         mock_matcher.side_effect = PlexNotFound("Not found")
 
-        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue=None)
+        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue_manager=None)
         result = engine.run(scope="all")
 
         # Should NOT detect missing gaps even though matcher raises PlexNotFound
