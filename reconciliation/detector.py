@@ -1,7 +1,9 @@
 """Gap detection engine for identifying metadata discrepancies between Stash and Plex."""
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
+
+from validation.quality import has_meaningful_metadata
 
 
 @dataclass
@@ -18,38 +20,6 @@ class GapResult:
     gap_type: str
     scene_data: dict[str, Any]
     reason: str
-
-
-def has_meaningful_metadata(data: dict[str, Any]) -> bool:
-    """Check if data dict has any meaningful metadata fields.
-
-    This reuses the same quality gate logic from handlers.py (lines 266-272).
-    A scene has meaningful metadata if it has any of:
-    - studio
-    - performers
-    - tags
-    - details
-    - date
-
-    NOTE: rating100 is intentionally EXCLUDED. A rating alone is not considered
-    "meaningful metadata" because:
-    1. Ratings are often auto-assigned defaults (not user-curated)
-    2. A scene with ONLY a rating shouldn't trigger sync (would clear other Plex fields)
-    3. Per LOCKED architecture decision: empty/null fields clear Plex values
-
-    Args:
-        data: Dictionary to check for metadata fields
-
-    Returns:
-        True if data has at least one meaningful metadata field, False otherwise
-    """
-    return any([
-        data.get('studio'),
-        data.get('performers'),
-        data.get('tags'),
-        data.get('details'),
-        data.get('date'),
-    ])
 
 
 class GapDetector:

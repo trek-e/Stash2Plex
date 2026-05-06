@@ -43,7 +43,7 @@ The module (`sync_queue/manager.py`) that owns the Queue lifecycle and all dedup
 A per-scene float timestamp (`sync_timestamps.json`) recording when a scene was last successfully synced. Used by the worker to skip stale queue entries and by reconciliation to detect stale-sync gaps.
 
 ### Metadata Quality Gate
-A filter in both the hook handler and reconciliation enqueue path: skip scenes with no meaningful Stash metadata (no studio, performers, tags, details, or date). Prevents clearing existing Plex values during the stash-box identification race window.
+A filter in both the hook handler and reconciliation enqueue path: skip scenes with no meaningful Stash metadata (no studio, performers, tags, details, or date). Prevents clearing existing Plex values during the stash-box identification race window. Implemented as `has_meaningful_metadata(data: dict) -> bool` in `validation/quality.py` — the single source of truth. `rating100` is explicitly excluded: a rating alone would trigger sync and clear all other Plex fields. Both `hooks/handlers.py` and `reconciliation/detector.py` import from this module; do not inline the rule.
 
 ---
 

@@ -19,6 +19,14 @@ try:
 except ImportError:
     validate_metadata = None
 
+try:
+    from validation.quality import has_meaningful_metadata
+except ImportError:
+    # Fallback: inline gate if validation package unavailable
+    def has_meaningful_metadata(data: dict) -> bool:  # type: ignore[misc]
+        return any([data.get('studio'), data.get('performers'),
+                    data.get('tags'), data.get('details'), data.get('date')])
+
 
 # GraphQL query for fetching complete scene metadata
 # stashapi's find_scene uses a minimal fragment that only returns id for nested objects
@@ -234,14 +242,7 @@ def on_scene_update(
     # but before stash-box identification completes — syncing empty metadata would
     # clear existing Plex values. The post-identification Scene.Update.Post will
     # have the real metadata and sync correctly.
-    _has_metadata = any([
-        update_data.get('studio'),
-        update_data.get('performers'),
-        update_data.get('tags'),
-        update_data.get('details'),
-        update_data.get('date'),
-    ])
-    if not _has_metadata:
+    if not has_meaningful_metadata(update_data):
         log_debug(f"Scene {scene_id} has no metadata beyond title/path, deferring sync (may still be identifying)")
         return False
 
