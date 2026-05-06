@@ -13,7 +13,7 @@ Tests verify:
 import json
 import os
 import pytest
-from unittest.mock import Mock, MagicMock, patch, call
+from unittest.mock import Mock, MagicMock, patch
 
 
 @pytest.fixture
@@ -27,6 +27,7 @@ def processor_worker(mock_queue, mock_dlq, mock_config, tmp_path):
     mock_config.preserve_plex_edits = False
     mock_config.strict_matching = False
     mock_config.dlq_retention_days = 30
+    mock_config.skip_not_found = False  # default: retry on PlexNotFound
 
     worker = SyncWorker(
         queue=mock_queue,
@@ -49,6 +50,7 @@ def processor_worker_no_data_dir(mock_queue, mock_dlq, mock_config):
     mock_config.preserve_plex_edits = False
     mock_config.strict_matching = False
     mock_config.dlq_retention_days = 30
+    mock_config.skip_not_found = False  # default: retry on PlexNotFound
 
     worker = SyncWorker(
         queue=mock_queue,
@@ -467,7 +469,6 @@ class TestPartialSyncFailure:
 
     def test_performer_sync_fails_job_still_succeeds(self, partial_worker, capsys):
         """When performer sync fails, title sync succeeds, job succeeds."""
-        from validation.errors import PartialSyncResult
 
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -506,7 +507,6 @@ class TestPartialSyncFailure:
 
     def test_tag_sync_fails_other_fields_succeed(self, partial_worker, capsys):
         """When tag sync fails, other fields succeed, job succeeds."""
-        from validation.errors import PartialSyncResult
 
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -542,7 +542,6 @@ class TestPartialSyncFailure:
 
     def test_poster_upload_fails_metadata_succeeds(self, partial_worker):
         """When poster upload fails, metadata sync succeeds, job succeeds."""
-        from validation.errors import PartialSyncResult
 
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -576,7 +575,6 @@ class TestPartialSyncFailure:
 
     def test_multiple_non_critical_failures_aggregated(self, partial_worker, capsys):
         """Multiple non-critical failures are aggregated in warnings."""
-        from validation.errors import PartialSyncResult
 
         mock_plex_item = MagicMock()
         mock_plex_item.studio = ""
@@ -1196,7 +1194,6 @@ class TestRateLimiterIntegration:
 
     def test_recovery_period_starts_on_half_open_to_closed_transition(self, processor_worker):
         """When circuit transitions HALF_OPEN->CLOSED, recovery period starts."""
-        from worker.circuit_breaker import CircuitState
 
         # Simulate the HALF_OPEN->CLOSED transition by directly testing the
         # rate limiter behavior that would be triggered in the worker loop
@@ -1788,6 +1785,38 @@ class TestWorkerLoop:
 
             mock_requeue.assert_called_once()
             # PlexNotFound gets 12 retries, so first failure should requeue
+            mocks['fail_job'].assert_not_called()
+
+    def test_skip_not_found_enabled_acks_without_dlq(self, processor_worker):
+        """skip_not_found=True: PlexNotFound acks immediately, no requeue, no DLQ."""
+        from plex.exceptions import PlexNotFound
+        job = self._make_job()
+        processor_worker.config.skip_not_found = True
+
+        with patch.object(processor_worker, '_requeue_with_metadata') as mock_requeue:
+            mocks = self._run_one_iteration(
+                processor_worker, job,
+                process_side_effect=PlexNotFound("not in library"),
+            )
+
+            mocks['ack_job'].assert_called_once_with(processor_worker.queue, job)
+            mock_requeue.assert_not_called()
+            mocks['fail_job'].assert_not_called()
+
+    def test_skip_not_found_disabled_retries_normally(self, processor_worker):
+        """skip_not_found=False (default): PlexNotFound uses normal retry path."""
+        from plex.exceptions import PlexNotFound
+        job = self._make_job()
+        # skip_not_found=False is already set by the fixture; verify retry path
+
+        with patch.object(processor_worker, '_requeue_with_metadata') as mock_requeue:
+            mocks = self._run_one_iteration(
+                processor_worker, job,
+                process_side_effect=PlexNotFound("not in library"),
+            )
+
+            mock_requeue.assert_called_once()
+            mocks['ack_job'].assert_not_called()
             mocks['fail_job'].assert_not_called()
 
     def test_unknown_exception_requeues_with_retry(self, processor_worker):
