@@ -734,55 +734,37 @@ def handle_queue_status():
         except Exception as e:
             log_debug(f"Failed to load reconciliation status: {e}")
 
+        # Load circuit breaker status once — used by CB, Recovery, and Outage sections
+        from worker.circuit_breaker import CircuitBreaker
+        from worker.outage_history import format_duration, format_elapsed_since
+        cb_file = os.path.join(data_dir, 'circuit_breaker.json')
+        cb_status = CircuitBreaker.load_status(cb_file)
+
         # Circuit Breaker Status (VISB-01)
         try:
-            from worker.outage_history import format_duration, format_elapsed_since
-            cb_file = os.path.join(data_dir, 'circuit_breaker.json')
-
             log_info("=== Circuit Breaker Status ===")
-            if os.path.exists(cb_file):
-                try:
-                    with open(cb_file, 'r') as f:
-                        cb_data = json.load(f)
-                    state_value = cb_data.get('state', 'closed')
-                    log_info(f"State: {state_value.upper()}")
-
-                    if state_value == 'open' and cb_data.get('opened_at'):
-                        opened_at = cb_data['opened_at']
-                        log_info(f"Opened: {format_elapsed_since(opened_at)}")
-                        log_info(f"Duration: {format_duration(time.time() - opened_at)}")
-                    elif state_value == 'half_open':
-                        log_info("Testing recovery...")
-                except Exception as e:
-                    log_info(f"State: UNKNOWN (corrupted state file: {e})")
-            else:
-                log_info("State: CLOSED (no state file)")
+            log_info(f"State: {cb_status['state'].upper()}")
+            if cb_status['is_open'] and cb_status['opened_at']:
+                log_info(f"Opened: {format_elapsed_since(cb_status['opened_at'])}")
+                log_info(f"Duration: {format_duration(time.time() - cb_status['opened_at'])}")
+            elif cb_status['state'] == 'half_open':
+                log_info("Testing recovery...")
         except Exception as e:
             log_debug(f"Failed to load circuit breaker status: {e}")
 
         # Recovery Status (VISB-01)
         try:
             from worker.recovery import RecoveryScheduler
-            from worker.outage_history import format_elapsed_since
             recovery_scheduler = RecoveryScheduler(data_dir)
             recovery_state = recovery_scheduler.load_state()
 
             log_info("=== Recovery Status ===")
             if recovery_state.last_check_time > 0:
                 log_info(f"Last health check: {format_elapsed_since(recovery_state.last_check_time)}")
-
-                # Show next check timing if circuit is OPEN
-                cb_file = os.path.join(data_dir, 'circuit_breaker.json')
-                if os.path.exists(cb_file):
-                    try:
-                        with open(cb_file, 'r') as f:
-                            cb_data = json.load(f)
-                        if cb_data.get('state') == 'open':
-                            elapsed = time.time() - recovery_state.last_check_time
-                            next_check_in = max(0, 5.0 - elapsed)
-                            log_info(f"Next check: in {next_check_in:.0f}s")
-                    except:
-                        pass
+                if cb_status['is_open']:
+                    elapsed = time.time() - recovery_state.last_check_time
+                    next_check_in = max(0, 5.0 - elapsed)
+                    log_info(f"Next check: in {next_check_in:.0f}s")
             else:
                 log_info("No health checks yet")
 
@@ -795,45 +777,25 @@ def handle_queue_status():
 
         # Recent Outages (VISB-01)
         try:
-            from worker.outage_history import OutageHistory, format_duration
-
+            from worker.outage_history import OutageHistory
             log_info("=== Recent Outages ===")
             history = OutageHistory(data_dir)
             records = history.get_history()
 
-            # Determine if circuit breaker is currently CLOSED (Plex is healthy)
-            # If CLOSED, any open-ended outage record is orphaned (the outage resolved
-            # but the history record was not closed, e.g., due to process restart).
-            cb_is_closed = True  # Default: assume healthy until proven otherwise
-            cb_file = os.path.join(data_dir, 'circuit_breaker.json')
-            if os.path.exists(cb_file):
-                try:
-                    with open(cb_file, 'r') as f:
-                        cb_data = json.load(f)
-                    cb_state = cb_data.get('state', 'closed').lower()
-                    cb_is_closed = (cb_state == 'closed')
-                except Exception:
-                    pass  # Treat as closed on parse error
-
             if records:
-                # Show last 3 outages
-                recent = records[-3:]
-                for record in recent:
+                for record in records[-3:]:
                     if record.ended_at is None:
                         elapsed = time.time() - record.started_at
-                        if cb_is_closed:
-                            # Orphaned record: circuit is CLOSED so outage is over,
-                            # but the history record was never closed (process restart
-                            # or race between workers). Display as resolved.
+                        if cb_status['is_closed']:
+                            # Orphaned: circuit is CLOSED so outage resolved, record never closed
                             log_info(f"Duration: ~{format_duration(elapsed)} (resolved — circuit closed)")
                         else:
                             log_info(f"ONGOING ({format_duration(elapsed)})")
                     else:
                         log_info(f"Duration: {format_duration(record.duration)}")
 
-                # Check for current ongoing outage (only if circuit is actually OPEN)
                 current = history.get_current_outage()
-                if current and not cb_is_closed:
+                if current and cb_status['is_open']:
                     elapsed = time.time() - current.started_at
                     log_info(f"Current outage: {format_duration(elapsed)}")
             else:
@@ -1356,24 +1318,13 @@ def handle_health_check():
         log_info("=== Plex Health Check ===")
 
         # Report circuit breaker state
+        from worker.circuit_breaker import CircuitBreaker
         cb_file = os.path.join(data_dir, 'circuit_breaker.json')
-        if os.path.exists(cb_file):
-            try:
-                with open(cb_file, 'r') as f:
-                    cb_data = json.load(f)
-                state = cb_data.get('state', 'closed').upper()
-                log_info(f"Circuit Breaker State: {state}")
-
-                if state == "OPEN" and cb_data.get('opened_at'):
-                    opened_at = cb_data['opened_at']
-                    elapsed = time.time() - opened_at
-                    minutes = int(elapsed / 60)
-                    seconds = int(elapsed % 60)
-                    log_info(f"Circuit opened {minutes}m {seconds}s ago")
-            except Exception as e:
-                log_info(f"Circuit Breaker State: UNKNOWN (corrupted state file: {e})")
-        else:
-            log_info("Circuit Breaker State: CLOSED (no state file)")
+        cb_status = CircuitBreaker.load_status(cb_file)
+        log_info(f"Circuit Breaker State: {cb_status['state'].upper()}")
+        if cb_status['is_open'] and cb_status['opened_at']:
+            elapsed = time.time() - cb_status['opened_at']
+            log_info(f"Circuit opened {int(elapsed / 60)}m {int(elapsed % 60)}s ago")
 
         # Test Plex connectivity with health probe
         if not config:
@@ -1404,15 +1355,8 @@ def handle_health_check():
             if pending > 0:
                 log_info(f"Queue: {pending} pending items")
 
-                # If circuit is open and jobs are waiting, warn user
-                if os.path.exists(cb_file):
-                    try:
-                        with open(cb_file, 'r') as f:
-                            cb_data = json.load(f)
-                        if cb_data.get('state', 'closed').lower() == 'open':
-                            log_warn(f"{pending} jobs waiting for Plex to recover")
-                    except:
-                        pass
+                if cb_status['is_open']:
+                    log_warn(f"{pending} jobs waiting for Plex to recover")
             else:
                 log_info("Queue: empty")
 

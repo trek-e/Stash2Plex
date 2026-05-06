@@ -156,6 +156,41 @@ class CircuitBreaker:
         except OSError as e:
             log_debug(f"Failed to acquire lock for circuit breaker state: {e}")
 
+    @classmethod
+    def load_status(cls, state_file: str) -> dict:
+        """
+        Read circuit breaker status from its state file without instantiating.
+
+        Used by status/health handlers that need CB state but don't have a
+        live CircuitBreaker instance. Callers should not open or parse the
+        state file directly — this is the single seam for that data.
+
+        Args:
+            state_file: Path to circuit_breaker.json.
+
+        Returns:
+            Dict with keys:
+              state      str   'closed' | 'open' | 'half_open'
+              is_closed  bool
+              is_open    bool
+              opened_at  float | None   epoch when circuit opened (OPEN only)
+        """
+        default = {'state': 'closed', 'is_closed': True, 'is_open': False, 'opened_at': None}
+        if not os.path.exists(state_file):
+            return default
+        try:
+            with open(state_file, 'r') as f:
+                data = json.load(f)
+            state_val = data.get('state', 'closed').lower()
+            return {
+                'state': state_val,
+                'is_closed': state_val == 'closed',
+                'is_open': state_val == 'open',
+                'opened_at': data.get('opened_at'),
+            }
+        except Exception:
+            return default
+
     @property
     def state(self) -> CircuitState:
         """Current circuit state (may transition to HALF_OPEN if timeout elapsed)."""
