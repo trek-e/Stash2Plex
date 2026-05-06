@@ -466,6 +466,11 @@ class SyncWorker:
 
         except PlexNotFound as e:
             _job_elapsed = time.perf_counter() - _job_start
+            if self.config and getattr(self.config, 'skip_not_found', False):
+                self.queue_manager.ack(item)
+                log_info(f"Job {jid} skipped — scene {scene_id} not in Plex (skip_not_found enabled)")
+                self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=False)
+                return 'skipped'
             job = self._prepare_for_retry(item, e)
             max_retries = self._get_max_retries_for_error(e)
             job_retry_count = job.get('retry_count', 0)

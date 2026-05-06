@@ -166,6 +166,10 @@ settings:
     displayName: "Trigger Plex Scan"
     description: "Trigger Plex library scan when Stash identifies a new scene (default: false)"
     type: BOOLEAN
+  skip_not_found:
+    displayName: "Skip Not Found in Plex"
+    description: "When enabled, scenes not found in Plex are silently skipped instead of retried. Use when your Plex library is a deliberate subset of your Stash library (e.g. offline/travel collection). Default: false"
+    type: BOOLEAN
   debug_logging:
     displayName: "Debug Logging"
     description: "WARNING: Very intensive — enable verbose step-by-step debug logging. Use only when providing a log to troubleshoot a problem, run for a few sequences only, then disable."

@@ -27,6 +27,7 @@ def processor_worker(mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_man
     mock_config.preserve_plex_edits = False
     mock_config.strict_matching = False
     mock_config.dlq_retention_days = 30
+    mock_config.skip_not_found = False  # default: retry on PlexNotFound
 
     worker = SyncWorker(
         queue_manager=mock_queue_manager,
@@ -49,6 +50,7 @@ def processor_worker_no_data_dir(mock_queue, mock_dlq, mock_config, mock_queue_m
     mock_config.preserve_plex_edits = False
     mock_config.strict_matching = False
     mock_config.dlq_retention_days = 30
+    mock_config.skip_not_found = False  # default: retry on PlexNotFound
 
     worker = SyncWorker(
         queue_manager=mock_queue_manager,
@@ -2049,6 +2051,40 @@ class TestWorkerLoop:
             mock_requeue.assert_called_once()
             # PlexNotFound gets 12 retries, so first failure should requeue
             processor_worker.queue_manager.fail.assert_not_called()
+
+    def test_skip_not_found_enabled_acks_without_dlq(self, processor_worker):
+        """skip_not_found=True: PlexNotFound acks immediately, no requeue, no DLQ."""
+        from plex.exceptions import PlexNotFound
+        job = self._make_job()
+        processor_worker.config.skip_not_found = True
+
+        with patch.object(processor_worker, '_requeue_with_metadata') as mock_requeue:
+            self._run_one_iteration(
+                processor_worker, job,
+                process_side_effect=PlexNotFound("not in library"),
+            )
+
+            processor_worker.queue_manager.ack.assert_called_once_with(job)
+            mock_requeue.assert_not_called()
+            processor_worker.queue_manager.fail.assert_not_called()
+            processor_worker.dlq.add.assert_not_called()
+
+    def test_skip_not_found_disabled_retries_normally(self, processor_worker):
+        """skip_not_found=False (default): PlexNotFound uses normal retry path."""
+        from plex.exceptions import PlexNotFound
+        job = self._make_job()
+        # skip_not_found=False is already set by the fixture; verify retry path
+
+        with patch.object(processor_worker, '_requeue_with_metadata') as mock_requeue:
+            self._run_one_iteration(
+                processor_worker, job,
+                process_side_effect=PlexNotFound("not in library"),
+            )
+
+            mock_requeue.assert_called_once()
+            processor_worker.queue_manager.ack.assert_not_called()
+            processor_worker.queue_manager.fail.assert_not_called()
+            processor_worker.dlq.add.assert_not_called()
 
     def test_unknown_exception_requeues_with_retry(self, processor_worker):
         """Unknown exceptions now use retry progression (not bare nack)."""

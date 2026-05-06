@@ -127,6 +127,14 @@ class Stash2PlexConfig(BaseModel):
         description="Trigger Plex library scan when Stash identifies a new scene"
     )
 
+    # Partial-library mode: skip scenes not present in Plex instead of retrying
+    skip_not_found: bool = Field(
+        default=False,
+        description="When True, scenes not found in Plex are silently skipped instead of "
+                    "retried. Use when your Plex library is a deliberate subset of your "
+                    "Stash library (e.g. offline/travel collection)."
+    )
+
     # Plex list limits
     max_tags: int = Field(
         default=100,
@@ -222,6 +230,7 @@ class Stash2PlexConfig(BaseModel):
         'sync_master', 'sync_studio', 'sync_summary', 'sync_tagline',
         'sync_date', 'sync_performers', 'sync_tags', 'sync_poster',
         'sync_background', 'sync_collection', 'trigger_plex_scan',
+        'skip_not_found',
         'debug_logging', 'obfuscate_paths', 'reconcile_missing',
         mode='before'
     )
