@@ -644,6 +644,10 @@ def handle_hook(hook_context: dict, stash=None):
         is_identification = 'stash_ids' in input_data
         if is_identification and scene_id:
             log_debug(f"Scene {scene_id} identified via stash-box")
+            # Trigger Plex scan now that the file has real metadata.
+            # The PlexNotFound retry (12× with backoff up to 600s) covers the
+            # race between this scan and the metadata sync job that follows.
+            trigger_plex_scan_for_scene(scene_id, stash)
 
         if scene_id:
             data_dir = get_plugin_data_dir()
@@ -666,17 +670,10 @@ def handle_hook(hook_context: dict, stash=None):
         else:
             log_warn(f"{hook_type} hook missing scene ID")
     elif hook_type == "Scene.Create.Post":
-        # Scene was just created by Stash scan
-        # If trigger_plex_scan is enabled, notify Plex so it discovers the file
-        if not scene_id:
-            log_trace(f"Skipping {hook_type} - no scene ID")
-        elif not config:
-            log_trace(f"Skipping {hook_type} - config not loaded")
-        elif not config.trigger_plex_scan:
-            log_trace(f"Skipping {hook_type} - trigger_plex_scan disabled")
-        else:
-            log_info(f"New scene {scene_id} created, triggering Plex scan")
-            trigger_plex_scan_for_scene(scene_id, stash)
+        # Scene.Create.Post fires when a file is scanned — no metadata is available yet.
+        # Plex scan is deferred to identification time (Scene.Update.Post with stash_ids)
+        # so we never scan an empty scene that would waste a Plex roundtrip.
+        log_trace("Scene.Create.Post ignored — Plex scan deferred to identification event")
     else:
         log_trace(f"Unhandled hook type: {hook_type}")
 
