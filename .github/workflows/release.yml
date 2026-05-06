@@ -12,10 +12,19 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - name: Determine release branch
+        id: branch
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == v1.5.* ]]; then
+            echo "name=v1.5.x" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=main" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ steps.branch.outputs.name }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -49,7 +58,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Stash2Plex.yml index.yml Stash2Plex.zip
           git commit -m "chore: update plugin index and zip for v${{ steps.version.outputs.version }}"
-          git push origin main
+          git push origin HEAD:${{ steps.branch.outputs.name }}
 
       - name: Generate release notes
         id: notes
