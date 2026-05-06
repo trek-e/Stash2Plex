@@ -299,12 +299,167 @@ class SyncWorker:
         }
         self.queue_manager.reenqueue(job, new_job)
 
-    def _worker_loop(self):
-        """Main worker loop - runs in background thread"""
+    def _handle_job(self, item: dict, recently_synced: set, sync_timestamps: dict) -> str:
+        """
+        Process one dequeued job through the full ack/retry/DLQ pipeline.
+
+        Handles in-session and cross-session dedup, all error branches, and
+        updates recently_synced on success. Both _worker_loop and run_batch
+        call this so retry/DLQ logic lives in exactly one place.
+
+        Args:
+            item: Dequeued job dict (already passed backoff check by caller)
+            recently_synced: Mutable set of scene_ids synced this session/batch
+            sync_timestamps: Cross-session sync timestamps for stale-entry dedup
+
+        Returns:
+            'success'    — job processed, caller should apply inter-job delay
+            'skipped'    — dedup hit, acked without processing
+            'retrying'   — requeued with backoff
+            'failed'     — moved to DLQ
+            'server_down' — Plex unreachable, nacked; caller should break/pause
+        """
         from worker.circuit_breaker import CircuitState
         from plex.exceptions import PlexServerDown, PlexNotFound
 
-        # Track recently-processed scene IDs to skip duplicates within this session.
+        scene_id = item.get('scene_id')
+        jid = item.get('job_id') or scene_id
+        retry_count = item.get('retry_count', 0)
+
+        # In-session dedup: skip scenes already synced this run
+        if scene_id is not None and scene_id in recently_synced:
+            self.queue_manager.ack(item)
+            log_debug(f"Job {jid} skipped — scene {scene_id} already synced this session")
+            return 'skipped'
+
+        # Cross-session dedup: skip stale queue entries from before the last sync
+        if scene_id is not None and sync_timestamps:
+            enqueued_at = item.get('enqueued_at', 0)
+            last_synced = sync_timestamps.get(int(scene_id))
+            if last_synced and enqueued_at <= last_synced and retry_count == 0:
+                self.queue_manager.ack(item)
+                log_debug(f"Job {jid} skipped — scene {scene_id} already synced "
+                          f"(enqueued {enqueued_at:.0f} <= synced {last_synced:.0f})")
+                return 'skipped'
+
+        log_debug(f"Processing job {jid} for scene {scene_id} (attempt {retry_count + 1})")
+        _job_start = time.perf_counter()
+
+        try:
+            confidence = self._process_job(item)
+            _job_elapsed = time.perf_counter() - _job_start
+            self._stats.record_success(_job_elapsed, confidence=confidence or 'high')
+
+            previous_state = self.circuit_breaker.state
+            self.queue_manager.ack(item)
+            self.circuit_breaker.record_success()
+            self._rate_limiter.record_result(success=True)
+
+            # Detect HALF_OPEN -> CLOSED transition and start graduated recovery drain
+            if previous_state == CircuitState.HALF_OPEN and self.circuit_breaker.state == CircuitState.CLOSED:
+                self._rate_limiter.start_recovery_period()
+                self._was_in_recovery = True
+                if self.data_dir is not None:
+                    from worker.recovery import RecoveryScheduler
+                    scheduler = RecoveryScheduler(self.data_dir, outage_history=self._outage_history)
+                    state = scheduler.load_state()
+                    state.recovery_started_at = time.time()
+                    scheduler.save_state(state)
+                log_info("Recovery period started: graduated rate limiting enabled")
+
+            log_info(f"Job {jid} completed")
+            if scene_id is not None:
+                recently_synced.add(scene_id)
+
+            # Periodic stats/cache summary
+            self._jobs_since_dlq_log += 1
+            if self._jobs_since_dlq_log >= self._dlq_log_interval:
+                self._log_batch_summary()
+                self._log_cache_stats()
+                self._jobs_since_dlq_log = 0
+                if self.data_dir is not None:
+                    stats_path = os.path.join(self.data_dir, 'stats.json')
+                    self._stats.save_to_file(stats_path)
+
+            return 'success'
+
+        except PlexServerDown:
+            self.queue_manager.nack(item)
+            self.circuit_breaker.record_failure()
+            self._rate_limiter.record_result(success=False)
+            if self.circuit_breaker.state == CircuitState.OPEN:
+                pending = self.queue_manager.get_queue().size
+                log_warn(f"Plex server is down — pausing, {pending} job(s) waiting")
+            return 'server_down'
+
+        except PlexNotFound as e:
+            _job_elapsed = time.perf_counter() - _job_start
+            job = self._prepare_for_retry(item, e)
+            max_retries = self._get_max_retries_for_error(e)
+            job_retry_count = job.get('retry_count', 0)
+            if job_retry_count >= max_retries:
+                log_warn(f"Job {jid} exceeded max retries ({max_retries}), moving to DLQ")
+                self.queue_manager.fail(item)
+                self.dlq.add(job, e, job_retry_count)
+                self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
+                return 'failed'
+            delay = job.get('next_retry_at', 0) - time.time()
+            log_debug(f"Job {jid} not in Plex yet (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s")
+            self._requeue_with_metadata(job)
+            self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=False)
+            return 'retrying'
+
+        except TransientError as e:
+            _job_elapsed = time.perf_counter() - _job_start
+            self.circuit_breaker.record_failure()
+            self._rate_limiter.record_result(success=False)
+            if self.circuit_breaker.state == CircuitState.OPEN:
+                log_warn(f"Circuit breaker OPENED after {type(e).__name__}: {e}")
+            job = self._prepare_for_retry(item, e)
+            max_retries = self._get_max_retries_for_error(e)
+            job_retry_count = job.get('retry_count', 0)
+            if job_retry_count >= max_retries:
+                log_warn(f"Job {jid} exceeded max retries ({max_retries}), moving to DLQ")
+                self.queue_manager.fail(item)
+                self.dlq.add(job, e, job_retry_count)
+                self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
+                return 'failed'
+            delay = job.get('next_retry_at', 0) - time.time()
+            log_debug(f"Job {jid} failed (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s: {e}")
+            self._requeue_with_metadata(job)
+            self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=False)
+            return 'retrying'
+
+        except PermanentError as e:
+            _job_elapsed = time.perf_counter() - _job_start
+            log_error(f"Job {jid} permanent failure, moving to DLQ: {e}")
+            self.queue_manager.fail(item)
+            self.dlq.add(item, e, item.get('retry_count', 0))
+            self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
+            return 'failed'
+
+        except Exception as e:
+            _job_elapsed = time.perf_counter() - _job_start
+            self.circuit_breaker.record_failure()
+            self._rate_limiter.record_result(success=False)
+            job = self._prepare_for_retry(item, e)
+            max_retries = self.max_retries
+            job_retry_count = job.get('retry_count', 0)
+            if job_retry_count >= max_retries:
+                log_warn(f"Job {jid} unexpected error exceeded max retries ({max_retries}), moving to DLQ: {e}")
+                self.queue_manager.fail(item)
+                self.dlq.add(job, e, job_retry_count)
+                self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
+                return 'failed'
+            delay = job.get('next_retry_at', 0) - time.time()
+            log_warn(f"Job {jid} unexpected error (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s: {e}")
+            self._requeue_with_metadata(job)
+            self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=False)
+            return 'retrying'
+
+    def _worker_loop(self):
+        """Main worker loop - runs in background thread"""
+
         _recently_synced: set = set()
 
         # Load sync timestamps for cross-session dedup.
@@ -442,179 +597,146 @@ class SyncWorker:
                 _consecutive_not_ready = 0
                 _earliest_retry_at = float('inf')
 
-                scene_id = item.get('scene_id')
-                jid = item.get('job_id') or scene_id
-                retry_count = item.get('retry_count', 0)
-
-                # Skip duplicate scene IDs (queue may have multiple entries from
-                # overlapping reconciliation runs, repeated hooks, or retry copies)
-                if scene_id is not None and scene_id in _recently_synced:
-                    self.queue_manager.ack(item)
-                    log_debug(f"Job {jid} skipped — scene {scene_id} already synced this session")
-                    continue
-
-                # Cross-session dedup: if this scene was already synced and the
-                # enqueued_at timestamp is OLDER than the last sync, it's a stale
-                # queue entry (auto_resume resurrection or leftover from prior session).
-                # Skip it to prevent the same scene from being re-processed every
-                # plugin invocation.
-                if scene_id is not None and _sync_timestamps:
-                    enqueued_at = item.get('enqueued_at', 0)
-                    last_synced = _sync_timestamps.get(int(scene_id))
-                    if last_synced and enqueued_at <= last_synced and retry_count == 0:
-                        self.queue_manager.ack(item)
-                        log_debug(f"Job {jid} skipped — scene {scene_id} already synced (enqueued {enqueued_at:.0f} <= synced {last_synced:.0f})")
-                        continue
-
-                log_debug(f"Processing job {jid} for scene {scene_id} (attempt {retry_count + 1})")
-
-                _job_start = time.perf_counter()
-                try:
-                    # Process the job and get match confidence
-                    confidence = self._process_job(item)
-                    _job_elapsed = time.perf_counter() - _job_start
-
-                    # Record success with stats
-                    self._stats.record_success(_job_elapsed, confidence=confidence or 'high')
-
-                    # Success: acknowledge job and record with circuit breaker
-                    previous_state = self.circuit_breaker.state
-                    self.queue_manager.ack(item)
-                    self.circuit_breaker.record_success()
-
-                    # Record result with rate limiter for error monitoring
-                    self._rate_limiter.record_result(success=True)
-
-                    # Detect recovery: HALF_OPEN -> CLOSED transition starts recovery period
-                    if previous_state == CircuitState.HALF_OPEN and self.circuit_breaker.state == CircuitState.CLOSED:
-                        self._rate_limiter.start_recovery_period()
-                        self._was_in_recovery = True
-                        # Persist recovery_started_at for cross-restart continuity
-                        if self.data_dir is not None:
-                            from worker.recovery import RecoveryScheduler
-                            scheduler = RecoveryScheduler(self.data_dir, outage_history=self._outage_history)
-                            state = scheduler.load_state()
-                            state.recovery_started_at = time.time()
-                            scheduler.save_state(state)
-                        log_info("Recovery period started: graduated rate limiting enabled")
-
-                    log_info(f"Job {jid} completed")
-
-                    # Track for dedup (skip future duplicates of this scene)
-                    if scene_id is not None:
-                        _recently_synced.add(scene_id)
-
-                    # Brief pause between jobs to avoid overwhelming Plex
-                    time.sleep(0.15)
-
-                    # Periodic batch summary and cache status logging
-                    self._jobs_since_dlq_log += 1
-                    if self._jobs_since_dlq_log >= self._dlq_log_interval:
-                        self._log_batch_summary()
-                        self._log_cache_stats()
-                        self._jobs_since_dlq_log = 0
-
-                        # Save stats periodically
-                        if self.data_dir is not None:
-                            stats_path = os.path.join(self.data_dir, 'stats.json')
-                            self._stats.save_to_file(stats_path)
-
-                except PlexServerDown:
-                    # Server unreachable: don't count against retry limit
-                    # Nack job back to queue, circuit breaker pauses processing
-                    self.queue_manager.nack(item)
-                    self.circuit_breaker.record_failure()
-
-                    # Record result with rate limiter for error monitoring
-                    self._rate_limiter.record_result(success=False)
-
-                    if self.circuit_breaker.state == CircuitState.OPEN:
-                        pending = self.queue_manager.get_queue().size
-                        log_warn(f"Plex server is down — pausing, {pending} job(s) waiting")
-
-                except PlexNotFound as e:
-                    # Item not in Plex library (not yet scanned).
-                    # Does NOT count against circuit breaker — this is an
-                    # item-level issue, not a server outage.
-                    _job_elapsed = time.perf_counter() - _job_start
-
-                    # Prepare job for retry with backoff metadata
-                    job = self._prepare_for_retry(item, e)
-                    max_retries = self._get_max_retries_for_error(e)
-                    job_retry_count = job.get('retry_count', 0)
-
-                    if job_retry_count >= max_retries:
-                        log_warn(f"Job {jid} exceeded max retries ({max_retries}), moving to DLQ")
-                        self.queue_manager.fail(item)
-                        self.dlq.add(job, e, job_retry_count)
-                        self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
-                    else:
-                        delay = job.get('next_retry_at', 0) - time.time()
-                        log_debug(f"Job {jid} not in Plex yet (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s")
-                        self._requeue_with_metadata(job)
-                        self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=False)
-
-                except TransientError as e:
-                    _job_elapsed = time.perf_counter() - _job_start
-                    # Record failure with circuit breaker
-                    self.circuit_breaker.record_failure()
-
-                    # Record result with rate limiter for error monitoring
-                    self._rate_limiter.record_result(success=False)
-
-                    if self.circuit_breaker.state == CircuitState.OPEN:
-                        log_warn(f"Circuit breaker OPENED after {type(e).__name__}: {e}")
-
-                    # Prepare job for retry with backoff metadata
-                    job = self._prepare_for_retry(item, e)
-                    max_retries = self._get_max_retries_for_error(e)
-                    job_retry_count = job.get('retry_count', 0)
-
-                    if job_retry_count >= max_retries:
-                        log_warn(f"Job {jid} exceeded max retries ({max_retries}), moving to DLQ")
-                        self.queue_manager.fail(item)
-                        self.dlq.add(job, e, job_retry_count)
-                        self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
-                    else:
-                        delay = job.get('next_retry_at', 0) - time.time()
-                        log_debug(f"Job {jid} failed (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s: {e}")
-                        self._requeue_with_metadata(job)
-                        self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=False)
-
-                except PermanentError as e:
-                    _job_elapsed = time.perf_counter() - _job_start
-                    # Permanent error: move to DLQ immediately (doesn't count against circuit)
-                    log_error(f"Job {jid} permanent failure, moving to DLQ: {e}")
-                    self.queue_manager.fail(item)
-                    self.dlq.add(item, e, item.get('retry_count', 0))
-                    self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
-
-                except Exception as e:
-                    _job_elapsed = time.perf_counter() - _job_start
-                    # Unknown error: treat as transient with retry progression
-                    self.circuit_breaker.record_failure()
-                    self._rate_limiter.record_result(success=False)
-
-                    # Add retry metadata so job eventually reaches DLQ
-                    job = self._prepare_for_retry(item, e)
-                    max_retries = self.max_retries  # Standard limit for unknown errors
-                    job_retry_count = job.get('retry_count', 0)
-
-                    if job_retry_count >= max_retries:
-                        log_warn(f"Job {jid} unexpected error exceeded max retries ({max_retries}), moving to DLQ: {e}")
-                        self.queue_manager.fail(item)
-                        self.dlq.add(job, e, job_retry_count)
-                        self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=True)
-                    else:
-                        delay = job.get('next_retry_at', 0) - time.time()
-                        log_warn(f"Job {jid} unexpected error (attempt {job_retry_count}/{max_retries}), retry in {delay:.1f}s: {e}")
-                        self._requeue_with_metadata(job)
-                        self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=False)
+                outcome = self._handle_job(item, _recently_synced, _sync_timestamps)
+                if outcome == 'success':
+                    time.sleep(0.15)  # Brief pause between jobs to avoid overwhelming Plex
 
             except Exception as e:
                 # Worker loop error: log and continue
                 log_error(f"Worker loop error: {e}")
                 time.sleep(1)  # Avoid tight loop on persistent errors
+
+    def run_batch(
+        self,
+        progress_callback=None,
+        job_delay_secs: float = 0.15,
+    ) -> dict:
+        """
+        Process all pending jobs synchronously, returning when the queue is empty.
+
+        Shares all job-handling logic with the background worker loop via
+        _handle_job — retry routing, DLQ, dedup, and cross-session timestamp
+        checks are identical in both paths.
+
+        Args:
+            progress_callback: Optional callable(float) receiving progress 0-100.
+                               Called after every 5 jobs or every 10 seconds.
+            job_delay_secs: Inter-job pause in seconds (default 0.15). Keeps
+                            Plex from being overwhelmed during large batches.
+
+        Returns:
+            Dict with keys 'processed', 'failed', 'skipped'.
+        """
+        from sync_queue.operations import get_stats
+
+        recently_synced: set = set()
+        sync_timestamps: dict = {}
+        if self.data_dir is not None:
+            from sync_queue.operations import load_sync_timestamps as _load_ts
+            sync_timestamps = _load_ts(self.data_dir)
+
+        queue_path = os.path.join(self.data_dir, 'queue') if self.data_dir else None
+        total = 0
+        if queue_path:
+            stats = get_stats(queue_path)
+            total = stats['pending'] + stats['in_progress']
+
+        if total == 0:
+            log_info("Queue is empty — nothing to process")
+            if progress_callback:
+                progress_callback(100)
+            return {'processed': 0, 'failed': 0, 'skipped': 0}
+
+        log_info(f"Starting batch processing of {total} items...")
+        if progress_callback:
+            progress_callback(0)
+
+        processed = 0
+        failed = 0
+        skipped = 0
+        start_time = time.time()
+        last_progress_time = start_time
+
+        _consecutive_not_ready = 0
+        _earliest_retry_at = float('inf')
+
+        while True:
+            if not self.circuit_breaker.can_execute():
+                log_warn("Circuit breaker OPEN — Plex may be unavailable")
+                log_info(f"Processed {processed} items before circuit break")
+                break
+
+            item = self.queue_manager.get_pending(timeout=1)
+            if item is None:
+                break  # Queue empty
+
+            if not self._is_ready_for_retry(item):
+                next_retry = item.get('next_retry_at', 0)
+                _earliest_retry_at = min(_earliest_retry_at, next_retry)
+                _consecutive_not_ready += 1
+                self.queue_manager.nack(item)
+
+                queue_size = max(self.queue_manager.get_queue().size, 50)
+                if _consecutive_not_ready >= queue_size:
+                    # All items waiting — sleep until earliest retry, cap at 5s
+                    # (shorter than background worker's 30s to keep progress bar alive)
+                    sleep_secs = max(1.0, min(5.0, _earliest_retry_at - time.time()))
+                    log_debug(f"All {_consecutive_not_ready} items in backoff, sleeping {sleep_secs:.1f}s")
+                    time.sleep(sleep_secs)
+                    _consecutive_not_ready = 0
+                    _earliest_retry_at = float('inf')
+                else:
+                    time.sleep(0.1)
+                continue
+
+            _consecutive_not_ready = 0
+            _earliest_retry_at = float('inf')
+
+            outcome = self._handle_job(item, recently_synced, sync_timestamps)
+
+            if outcome == 'success':
+                processed += 1
+                if job_delay_secs > 0:
+                    time.sleep(job_delay_secs)
+            elif outcome == 'skipped':
+                skipped += 1
+            elif outcome == 'failed':
+                failed += 1
+            elif outcome == 'server_down':
+                log_info(f"Processed {processed} items before Plex went down")
+                break
+            # 'retrying' — job requeued with backoff, continue loop
+
+            now = time.time()
+            if progress_callback and (
+                processed % 5 == 0 or (now - last_progress_time) >= 10
+            ):
+                progress = min((processed / total) * 100, 100) if total > 0 else 100
+                progress_callback(progress)
+                remaining = self.queue_manager.get_queue().size
+                elapsed = now - start_time
+                rate = processed / elapsed if elapsed > 0 else 0
+                log_info(
+                    f"Progress: {processed}/{total} ({progress:.0f}%), "
+                    f"{remaining} remaining, {rate:.1f} items/sec"
+                )
+                last_progress_time = now
+
+        elapsed = time.time() - start_time
+        if progress_callback:
+            progress_callback(100)
+
+        summary = f"Batch processing complete: {processed} succeeded, {failed} failed"
+        if skipped > 0:
+            summary += f", {skipped} duplicates skipped"
+        summary += f" in {elapsed:.1f}s"
+        log_info(summary)
+
+        if failed > 0:
+            dlq_count = self.dlq.get_count()
+            log_warn(f"DLQ contains {dlq_count} items requiring review")
+
+        return {'processed': processed, 'failed': failed, 'skipped': skipped}
 
     def _fetch_stash_image(self, url: str) -> Optional[bytes]:
         """

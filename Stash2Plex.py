@@ -1003,168 +1003,26 @@ def handle_purge_dlq(days: int = 30):
 
 def handle_process_queue():
     """
-    Process all pending queue items until empty.
+    Process all pending queue items synchronously until the queue is empty.
 
-    Runs in foreground (not daemon thread), processing until queue is empty.
-    Reports progress via log_progress() for Stash UI visibility.
-    Respects circuit breaker - stops if Plex becomes unavailable.
+    Delegates entirely to SyncWorker.run_batch(), which shares all retry,
+    DLQ, dedup, and backoff logic with the background worker loop.
     """
     global config, worker, queue_manager, dlq
 
     try:
         data_dir = get_plugin_data_dir()
-        queue_path = os.path.join(data_dir, 'queue')
 
-        # Stop global background worker to avoid competing for queue items
+        # Stop the background worker so it doesn't compete for queue items
         if worker:
             worker.stop()
 
-        # Check initial queue state
-        from sync_queue.operations import get_stats
-        stats = get_stats(queue_path)
-        total = stats['pending'] + stats['in_progress']
-
-        if total == 0:
-            log_info("Queue is empty - nothing to process")
-            return
-
-        log_info(f"Starting batch processing of {total} items...")
-        log_progress(0)
-
-        from worker.processor import SyncWorker, TransientError, PermanentError
-        from plex.exceptions import PlexNotFound
-
-        # Configure device identity before Plex operations
+        # Configure device identity before any Plex operations
         configure_plex_device_identity(data_dir)
 
-        # Create worker instance for processing (NOT started as background thread)
+        from worker.processor import SyncWorker
         worker_local = SyncWorker(queue_manager, dlq, config, data_dir=data_dir)
-
-        processed = 0
-        failed = 0
-        skipped_dupes = 0
-        last_error = None
-        start_time = time.time()
-        last_progress_time = start_time
-        processed_scenes = set()  # Track already-processed scene IDs to skip duplicates
-
-        while True:
-            # Check circuit breaker before processing
-            if not worker_local.circuit_breaker.can_execute():
-                cause = f" (last error: {type(last_error).__name__}: {last_error})" if last_error else ""
-                log_warn(f"Circuit breaker OPEN — Plex may be unavailable{cause}")
-                log_info(f"Processed {processed} items before circuit break")
-                break
-
-            # Get next job (1 second timeout to check for empty queue)
-            job = queue_manager.get_pending(timeout=1)
-            if job is None:
-                break  # Queue is empty
-
-            scene_id = job.get('scene_id', '?')
-            retry_count = job.get('retry_count', 0)
-
-            # Skip duplicate scene IDs — queue may contain multiple entries
-            # for the same scene from overlapping reconciliation runs or hooks
-            if scene_id != '?' and scene_id in processed_scenes:
-                queue_manager.ack(job)  # Remove duplicate without processing
-                skipped_dupes += 1
-                continue
-
-            # Honour per-job backoff delay (e.g. PlexNotFound retry window).
-            # The SQLiteAckQueue has no knowledge of next_retry_at — it lives
-            # inside the job payload — so we must check it here before processing.
-            # Without this guard the batch loop immediately re-dequeues a just-
-            # re-enqueued job and retries it, causing the 3-5x rapid retry storm.
-            if not worker_local._is_ready_for_retry(job):
-                queue_manager.nack(job)
-                time.sleep(0.1)  # Avoid tight spin; backoff-expired jobs will be ready soon
-                continue
-
-            try:
-                worker_local._process_job(job)
-                queue_manager.ack(job)
-                worker_local.circuit_breaker.record_success()
-                processed += 1
-                if scene_id != '?':
-                    processed_scenes.add(scene_id)
-
-                # Brief pause between jobs to avoid overwhelming Plex
-                time.sleep(0.15)
-
-            except PlexNotFound as e:
-                # Item not in Plex library yet (not scanned).
-                # Does NOT count against circuit breaker — item-level, not outage.
-                log_warn(f"Scene {scene_id}: {type(e).__name__}: {e}")
-                job = worker_local._prepare_for_retry(job, e)
-                max_retries = worker_local._get_max_retries_for_error(e)
-
-                if job.get('retry_count', 0) >= max_retries:
-                    log_warn(f"Scene {scene_id}: max retries exceeded, moving to DLQ")
-                    queue_manager.fail(job)
-                    dlq.add(job, e, job.get('retry_count', 0))
-                    failed += 1
-                else:
-                    worker_local._requeue_with_metadata(job)
-                    # Mark as processed so this batch run doesn't immediately re-pull
-                    # the re-enqueued job (it belongs to the next retry window).
-                    if scene_id != '?':
-                        processed_scenes.add(scene_id)
-
-            except TransientError as e:
-                last_error = e
-                worker_local.circuit_breaker.record_failure()
-                log_warn(f"Scene {scene_id}: {type(e).__name__}: {e}")
-                job = worker_local._prepare_for_retry(job, e)
-                max_retries = worker_local._get_max_retries_for_error(e)
-
-                if job.get('retry_count', 0) >= max_retries:
-                    log_warn(f"Scene {scene_id}: max retries exceeded, moving to DLQ")
-                    queue_manager.fail(job)
-                    dlq.add(job, e, job.get('retry_count', 0))
-                    failed += 1
-                else:
-                    # Re-queue for retry
-                    worker_local._requeue_with_metadata(job)
-
-            except PermanentError as e:
-                log_warn(f"Scene {scene_id}: permanent error: {e}")
-                queue_manager.fail(job)
-                dlq.add(job, e, retry_count)
-                failed += 1
-
-            except Exception as e:
-                last_error = e
-                log_error(f"Scene {scene_id}: unexpected error: {e}")
-                queue_manager.fail(job)
-                dlq.add(job, e, retry_count)
-                failed += 1
-
-            # Report progress every 5 items or every 10 seconds
-            now = time.time()
-            if processed % 5 == 0 or (now - last_progress_time) >= 10:
-                progress = (processed / total) * 100 if total > 0 else 100
-                remaining = queue_manager.get_queue().size
-                log_progress(progress)
-                elapsed = now - start_time
-                rate = processed / elapsed if elapsed > 0 else 0
-                log_info(f"Progress: {processed}/{total} ({progress:.0f}%), "
-                        f"{remaining} remaining, {rate:.1f} items/sec")
-                last_progress_time = now
-
-        # Final summary
-        elapsed = time.time() - start_time
-        log_progress(100)
-        summary = f"Batch processing complete: {processed} succeeded, {failed} failed"
-        if skipped_dupes > 0:
-            summary += f", {skipped_dupes} duplicates skipped"
-        summary += f" in {elapsed:.1f}s"
-        log_info(summary)
-
-        # Show DLQ count if items were added
-        if failed > 0:
-            dlq_count = dlq.get_count()
-            log_warn(f"DLQ contains {dlq_count} items requiring review")
+        worker_local.run_batch(progress_callback=log_progress)
 
     except Exception as e:
         log_error(f"Process queue error: {e}")
