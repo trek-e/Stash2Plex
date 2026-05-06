@@ -53,23 +53,27 @@ jobs:
           SHA=$(sha256sum Stash2Plex.zip | awk '{print $1}')
           DATE=$(date -u +"%Y-%m-%d %H:%M:%S")
           VERSION="${{ steps.version.outputs.version }}"
+          TAG="${GITHUB_REF_NAME}"
+          PATH_URL="https://github.com/trek-e/Stash2Plex/releases/download/${TAG}/Stash2Plex.zip"
           sed -i "s/^  version: .*/  version: ${VERSION}/" index.yml
           sed -i "s/^  date: .*/  date: \"${DATE}\"/" index.yml
+          sed -i "s|^  path: .*|  path: ${PATH_URL}|" index.yml
           sed -i "s/^  sha256: .*/  sha256: ${SHA}/" index.yml
 
       - name: Commit updated files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Stash2Plex.yml index.yml Stash2Plex.zip
-          git commit -m "chore: update plugin index and zip for v${{ steps.version.outputs.version }}"
+          git add Stash2Plex.yml index.yml
+          git diff --cached --quiet || git commit -m "chore: update plugin index for v${{ steps.version.outputs.version }}"
           git push origin HEAD:${{ steps.branch.outputs.name }}
 
       - name: Mirror index.yml to main
         run: |
+          BRANCH_COMMIT=$(git rev-parse HEAD)
           git fetch origin main
           git checkout origin/main -b _main_mirror
-          git checkout HEAD~0 -- index.yml Stash2Plex.yml
+          git checkout "$BRANCH_COMMIT" -- index.yml Stash2Plex.yml
           git commit -m "chore: update plugin index for v${{ steps.version.outputs.version }}"
           git push origin HEAD:main
 
