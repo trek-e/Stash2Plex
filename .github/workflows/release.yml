@@ -23,9 +23,9 @@ jobs:
       - name: Determine release branch
         id: branch
         run: |
-          git fetch origin v1.5.x main
-          if git branch -r --contains HEAD | grep -q 'origin/v1\.5\.x'; then
-            echo "name=v1.5.x" >> "$GITHUB_OUTPUT"
+          git fetch origin v1.x.x main
+          if git branch -r --contains HEAD | grep -q 'origin/v1\.x\.x'; then
+            echo "name=v1.x.x" >> "$GITHUB_OUTPUT"
           else
             echo "name=main" >> "$GITHUB_OUTPUT"
           fi
