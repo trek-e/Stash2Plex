@@ -157,7 +157,6 @@ worker = None
 config: Stash2PlexConfig = None
 sync_timestamps: dict = None
 stash_interface = None
-_worker_lock_fd = None  # File descriptor for worker exclusion lock
 
 
 def get_plugin_data_dir():
@@ -510,7 +509,6 @@ def initialize(config_dict: dict = None, resume_orphaned: bool = True):
     queue_manager = QueueManager(data_dir)
     dlq = DeadLetterQueue(data_dir)
 
-    # Start background worker with data_dir for timestamp updates
     worker = SyncWorker(
         queue_manager,
         dlq,
@@ -519,46 +517,9 @@ def initialize(config_dict: dict = None, resume_orphaned: bool = True):
         max_retries=config.max_retries
     )
 
-    # Worker exclusion lock: only one plugin process drains the queue at a time.
-    # During bulk scans, many hook processes fire concurrently. Without this lock,
-    # each process starts its own worker thread competing for the same queue and
-    # Plex API, causing cascading timeouts where no job ever completes.
-    global _worker_lock_fd
-    lock_path = os.path.join(data_dir, 'worker.lock')
-    try:
-        import fcntl
-        _worker_lock_fd = open(lock_path, 'w')
-        fcntl.flock(_worker_lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        try:
-            # Resume any orphaned in-progress items from a prior crashed process.
-            # This replaces auto_resume=True which caused race conditions when
-            # multiple plugin processes started concurrently.
-            # Skipped for hook invocations: an orphaned item stuck in
-            # library.all() (scene not yet scanned by Plex) would monopolize
-            # the 10-second hook window, blocking all newer jobs. Tasks have
-            # longer timeouts and can safely resume orphaned items.
-            if resume_orphaned:
-                from sync_queue.operations import resume_orphaned_items
-                resumed = resume_orphaned_items(queue_manager.queue_path)
-                if resumed == 0:
-                    log_trace("No orphaned items to resume")
-            else:
-                log_trace("Skipping orphaned item resume (hook invocation)")
-
-            worker.start()
-            log_info("Initialization complete (worker started)")
-        except Exception as e:
-            # Worker start failed - release lock before propagating error
-            log_error(f"Failed to start worker: {e}")
-            fcntl.flock(_worker_lock_fd.fileno(), fcntl.LOCK_UN)
-            _worker_lock_fd.close()
-            _worker_lock_fd = None
-            return False
-    except (BlockingIOError, OSError):
-        # Another plugin process already has the lock — just enqueue, don't drain
-        if _worker_lock_fd:
-            _worker_lock_fd.close()
-            _worker_lock_fd = None
+    if worker.try_start_exclusive(resume_orphaned=resume_orphaned):
+        log_info("Initialization complete (worker started)")
+    else:
         log_info("Initialization complete (worker deferred — another process is draining)")
 
     return True
@@ -566,26 +527,13 @@ def initialize(config_dict: dict = None, resume_orphaned: bool = True):
 
 def shutdown():
     """Clean shutdown of worker and queue."""
-    global worker, queue_manager, _worker_lock_fd
+    global worker, queue_manager
 
     if worker:
-        worker.stop()
+        worker.stop()  # stop() also releases the exclusion lock
 
     if queue_manager:
         queue_manager.shutdown()
-
-    # Release worker exclusion lock so next process can drain
-    if _worker_lock_fd:
-        try:
-            import fcntl
-            fcntl.flock(_worker_lock_fd.fileno(), fcntl.LOCK_UN)
-        except OSError:
-            pass
-        try:
-            _worker_lock_fd.close()
-        except OSError:
-            pass
-        _worker_lock_fd = None
 
     log_trace("Shutdown complete")
 
@@ -1729,7 +1677,7 @@ def main():
     if is_hook:
         # Hooks: return immediately after enqueue. Worker drain happens on tasks.
         pass
-    elif worker and queue_manager and task_mode not in management_modes and _worker_lock_fd is not None:
+    elif worker and queue_manager and task_mode not in management_modes and worker._lock_fd is not None:
         import time
         from worker.stats import SyncStats
         from sync_queue.operations import get_stats as get_queue_stats

@@ -116,6 +116,9 @@ class SyncWorker:
             outage_history=self._outage_history
         )
 
+        # Worker exclusion lock file descriptor (set by try_start_exclusive)
+        self._lock_fd = None
+
         # Health check state for active probes during OPEN circuit
         self._last_health_check: float = 0.0
         self._health_check_interval: float = 5.0  # Initial: 5s
@@ -154,6 +157,73 @@ class SyncWorker:
         self.thread = threading.Thread(target=self._worker_loop, daemon=True)
         self.thread.start()
         log_info("Started")
+
+    def try_start_exclusive(self, resume_orphaned: bool = True) -> bool:
+        """
+        Acquire the worker exclusion lock and start the background thread.
+
+        Only one plugin process should drain the queue at a time. During bulk
+        scans many hook processes fire concurrently; without this lock each
+        starts its own worker thread, causing cascading Plex API timeouts.
+
+        Args:
+            resume_orphaned: If True, resume in-progress items left by a prior
+                             crashed process before starting. Pass False for hook
+                             invocations — an orphaned PlexNotFound item stuck in
+                             library.all() would monopolise the 10-second hook
+                             window and block all newer jobs.
+
+        Returns:
+            True  — lock acquired, worker started.
+            False — lock held by another process; caller should enqueue only.
+        """
+        if self.data_dir is None:
+            # No data_dir: can't create lock file, just start unconditionally
+            self.start()
+            return True
+
+        lock_path = os.path.join(self.data_dir, 'worker.lock')
+        try:
+            import fcntl
+            self._lock_fd = open(lock_path, 'w')
+            fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError):
+            # Lock held by another process — just enqueue, don't drain
+            if self._lock_fd:
+                self._lock_fd.close()
+                self._lock_fd = None
+            return False
+
+        try:
+            if resume_orphaned:
+                from sync_queue.operations import resume_orphaned_items
+                resumed = resume_orphaned_items(self.queue_manager.queue_path)
+                if resumed == 0:
+                    log_trace("No orphaned items to resume")
+            else:
+                log_trace("Skipping orphaned item resume (hook invocation)")
+            self.start()
+        except Exception as e:
+            log_error(f"Failed to start worker: {e}")
+            self._release_lock()
+            return False
+
+        return True
+
+    def _release_lock(self):
+        """Release the worker exclusion lock if held."""
+        if self._lock_fd is None:
+            return
+        try:
+            import fcntl
+            fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
+            self._lock_fd.close()
+        except OSError:
+            pass
+        self._lock_fd = None
 
     def _log_dlq_status(self):
         """Log DLQ status if jobs present."""
@@ -202,8 +272,9 @@ class SyncWorker:
             log_warn(f"DLQ contains {total} items: {breakdown}")
 
     def stop(self):
-        """Stop the background worker thread, letting current job finish."""
+        """Stop the background worker thread and release the exclusion lock."""
         if not self.running:
+            self._release_lock()
             return
 
         log_trace("Stopping worker...")
@@ -215,6 +286,7 @@ class SyncWorker:
             if self.thread.is_alive():
                 log_warn("Worker thread did not stop within 10s — current job may be reprocessed")
 
+        self._release_lock()
         log_trace("Worker stopped")
 
     def _prepare_for_retry(self, job: dict, error: Exception) -> dict:
