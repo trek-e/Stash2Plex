@@ -9,7 +9,6 @@ Implements reliable job processing with acknowledgment workflow:
 """
 
 import os
-import sys
 import time
 import threading
 from typing import Optional, TYPE_CHECKING
@@ -538,6 +537,14 @@ class SyncWorker:
                     # Does NOT count against circuit breaker — this is an
                     # item-level issue, not a server outage.
                     _job_elapsed = time.perf_counter() - _job_start
+
+                    # skip_not_found: for users whose Plex library is a deliberate
+                    # subset of Stash, ack and discard immediately instead of retrying.
+                    if self.config and getattr(self.config, 'skip_not_found', False):
+                        ack_job(self.queue, item)
+                        log_info(f"Job {jid} skipped — scene {scene_id} not in Plex (skip_not_found enabled)")
+                        self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=False)
+                        continue
 
                     # Prepare job for retry with backoff metadata
                     job = self._prepare_for_retry(item, e)
