@@ -10,9 +10,5 @@
   date: "2026-05-08 04:06:57"
   path: Stash2Plex.zip
   sha256: 98e6cde49130e67ba7f63c72a3b051b2b2c9ff15a9d7a6573f896b08908fa539
-  version: 1.6.8
-  date: "2026-05-08 04:06:57"
-  path: Stash2Plex.zip
-  sha256: 98e6cde49130e67ba7f63c72a3b051b2b2c9ff15a9d7a6573f896b08908fa539
   requires:
     - PythonDepManager
