@@ -632,50 +632,40 @@ def handle_hook(hook_context: dict, stash=None):
 
     log_trace(f"handle_hook: type={hook_type}, scene_id={scene_id}")
 
-    # Only process Scene.Update.Post with actual user input
-    # Scene.Create.Post is typically from scans - skip those
-    # Empty input means scan-triggered update, not user edit
-    if hook_type == "Scene.Update.Post":
-        if not input_data:
-            log_trace(f"Skipping {hook_type} - no input data (likely scan)")
-            return
+    # Strict mode: only act on identification-complete events.
+    # This avoids any plugin overhead on generic save/edit/scan updates.
+    if hook_type != "Scene.Update.Post" or 'stash_ids' not in input_data:
+        log_trace(f"Skipping hook {hook_type} — only Scene.Update.Post with stash_ids is processed")
+        return
 
-        # Check if this is an identification event (stash_ids added)
-        is_identification = 'stash_ids' in input_data
-        if is_identification and scene_id:
-            log_debug(f"Scene {scene_id} identified via stash-box")
-            # Trigger Plex scan now that the file has real metadata.
-            # The PlexNotFound retry (12× with backoff up to 600s) covers the
-            # race between this scan and the metadata sync job that follows.
-            trigger_plex_scan_for_scene(scene_id, stash)
+    if not scene_id:
+        log_warn(f"{hook_type} identification hook missing scene ID")
+        return
 
-        if scene_id:
-            data_dir = get_plugin_data_dir()
-            try:
-                on_scene_update(
-                    scene_id,
-                    input_data,
-                    queue_manager,
-                    data_dir=data_dir,
-                    sync_timestamps=sync_timestamps,
-                    stash=stash,
-                    is_identification=is_identification,
-                    scan_already_checked=True  # main() already checked at entry
-                )
-                log_trace(f"on_scene_update completed for scene {scene_id}")
-            except Exception as e:
-                log_error(f"on_scene_update exception: {e}")
-                import traceback
-                traceback.print_exc()
-        else:
-            log_warn(f"{hook_type} hook missing scene ID")
-    elif hook_type == "Scene.Create.Post":
-        # Scene.Create.Post fires when a file is scanned — no metadata is available yet.
-        # Plex scan is deferred to identification time (Scene.Update.Post with stash_ids)
-        # so we never scan an empty scene that would waste a Plex roundtrip.
-        log_trace("Scene.Create.Post ignored — Plex scan deferred to identification event")
-    else:
-        log_trace(f"Unhandled hook type: {hook_type}")
+    log_debug(f"Scene {scene_id} identified via stash-box")
+
+    # Trigger Plex scan now that the file has real metadata.
+    # The PlexNotFound retry (12× with backoff up to 600s) covers the
+    # race between this scan and the metadata sync job that follows.
+    trigger_plex_scan_for_scene(scene_id, stash)
+
+    data_dir = get_plugin_data_dir()
+    try:
+        on_scene_update(
+            scene_id,
+            input_data,
+            queue_manager,
+            data_dir=data_dir,
+            sync_timestamps=sync_timestamps,
+            stash=stash,
+            is_identification=True,
+            scan_already_checked=True,
+        )
+        log_trace(f"on_scene_update completed for scene {scene_id}")
+    except Exception as e:
+        log_error(f"on_scene_update exception: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def handle_queue_status():
@@ -929,7 +919,20 @@ def handle_process_queue():
 
         from worker.processor import SyncWorker
         worker_local = SyncWorker(queue_manager, dlq, config, data_dir=data_dir)
-        worker_local.run_batch(progress_callback=log_progress)
+
+        # Optional throughput tuning for large backlog drains.
+        # Env override example: STASH2PLEX_BATCH_JOB_DELAY_SECS=0.03
+        job_delay_secs = 0.15
+        try:
+            env_delay = os.getenv('STASH2PLEX_BATCH_JOB_DELAY_SECS')
+            if env_delay is not None and env_delay.strip() != '':
+                job_delay_secs = max(0.0, float(env_delay))
+        except Exception:
+            log_warn("Invalid STASH2PLEX_BATCH_JOB_DELAY_SECS value, using default 0.15s")
+            job_delay_secs = 0.15
+
+        log_info(f"Process queue batch delay: {job_delay_secs:.3f}s")
+        worker_local.run_batch(progress_callback=log_progress, job_delay_secs=job_delay_secs)
 
     except Exception as e:
         log_error(f"Process queue error: {e}")
@@ -942,14 +945,11 @@ def handle_reconcile(scope: str):
     Run gap detection and enqueue discovered gaps for sync.
 
     Args:
-        scope: "all" (all scenes) or "recent" (last 24 hours)
+        scope: "all" (all scenes), "recent" (last 24 hours), or "recent_7days" (last 7 days)
     """
     try:
         data_dir = get_plugin_data_dir()
 
-        from reconciliation.engine import GapDetectionEngine
-
-        # Need stash and config globals
         if not stash_interface:
             log_error("No Stash connection available for reconciliation")
             return
@@ -957,53 +957,26 @@ def handle_reconcile(scope: str):
             log_error("No config available for reconciliation")
             return
 
-        # Get queue for enqueue mode
-        # Note: SQLiteAckQueue.__bool__ returns False when empty,
         if queue_manager is None:
             log_warn("No queue available - running in detection-only mode")
 
         scope_labels = {
             "all": "all scenes",
             "recent": "scenes added in last 24 hours",
+            "missing_metadata": "scenes with missing Plex metadata (all scenes)",
             "recent_7days": "scenes added in last 7 days",
-            "7days": "scenes added in last 7 days",  # Alias for UI task handler
         }
-        scope_label = scope_labels.get(scope, scope)
-        log_info(f"Starting reconciliation: {scope_label}")
+        log_info(f"Starting reconciliation: {scope_labels.get(scope, scope)}")
 
-        engine = GapDetectionEngine(
-            stash=stash_interface,
-            config=config,
-            data_dir=data_dir,
-            queue_manager=queue_manager
-        )
-        result = engine.run(scope=scope)
+        from reconciliation.runner import ReconciliationRunner
+        runner = ReconciliationRunner(stash_interface, config, data_dir, queue_manager)
+        runner.run(scope=scope)
 
-        # Record run in scheduler state (resets auto-reconcile timer)
-        from reconciliation.scheduler import ReconciliationScheduler
-        scheduler = ReconciliationScheduler(data_dir)
-        scheduler.record_run(result, scope=scope, is_startup=False)
-
-        # Log progress summary (RECON-02: gap counts by type)
-        log_info("=== Reconciliation Summary ===")
-        log_info(f"Scenes checked: {result.scenes_checked}")
-        log_info(f"Gaps found: {result.total_gaps}")
-        log_info(f"  Empty metadata: {result.empty_metadata_count}")
-        log_info(f"  Stale sync: {result.stale_sync_count}")
-        log_info(f"  Missing from Plex: {result.missing_count}")
-        if queue_manager is not None:
-            log_info(f"Enqueued: {result.enqueued_count}")
-            if result.skipped_already_queued:
-                log_info(f"Skipped (already queued): {result.skipped_already_queued}")
-            if result.skipped_no_metadata:
-                log_info(f"Skipped (no Stash metadata yet): {result.skipped_no_metadata}")
-                log_info("  Add studio, performers, tags, date, or details in Stash to allow sync")
-        else:
-            log_info("Detection-only mode (no items enqueued)")
-
-        if result.errors:
-            for err in result.errors:
-                log_warn(f"Error during reconciliation: {err}")
+        # Automation: immediately drain whatever reconciliation enqueued.
+        # This makes reconcile tasks self-contained (detect + fix) so users
+        # don't have to manually run Process Queue afterwards.
+        log_info("Reconciliation complete — auto-draining queue now")
+        handle_process_queue()
 
     except Exception as e:
         log_error(f"Reconciliation failed: {e}")
@@ -1087,10 +1060,14 @@ def maybe_auto_reconcile():
 
         scheduler = ReconciliationScheduler(data_dir)
 
+        from reconciliation.runner import ReconciliationRunner
+
         # Check startup trigger first (AUTO-02)
         if scheduler.is_startup_due():
             log_info("Auto-reconciliation: startup trigger (recent scenes)")
-            _run_auto_reconcile(scheduler, scope="recent", is_startup=True)
+            ReconciliationRunner(stash_interface, config, data_dir, queue_manager).run(
+                scope="recent", is_startup=True
+            )
             return
 
         # Check interval trigger (AUTO-01)
@@ -1099,41 +1076,13 @@ def maybe_auto_reconcile():
             scope_map = {'all': 'all', '24h': 'recent', '7days': 'recent_7days'}
             engine_scope = scope_map.get(config.reconcile_scope, 'recent')
             log_info(f"Auto-reconciliation: interval trigger ({config.reconcile_interval}, scope: {config.reconcile_scope})")
-            _run_auto_reconcile(scheduler, scope=engine_scope, is_startup=False)
+            ReconciliationRunner(stash_interface, config, data_dir, queue_manager).run(
+                scope=engine_scope, is_startup=False
+            )
             return
 
     except Exception as e:
         log_warn(f"Auto-reconciliation check failed: {e}")
-
-
-def _run_auto_reconcile(scheduler, scope: str, is_startup: bool):
-    """Execute auto-reconciliation and record results.
-
-    Args:
-        scheduler: ReconciliationScheduler instance
-        scope: Engine scope ('all', 'recent', or 'recent_7days')
-        is_startup: Whether triggered by startup
-    """
-    try:
-        data_dir = get_plugin_data_dir()
-        from reconciliation.engine import GapDetectionEngine
-
-        engine = GapDetectionEngine(
-            stash=stash_interface,
-            config=config,
-            data_dir=data_dir,
-            queue_manager=queue_manager
-        )
-        result = engine.run(scope=scope)
-
-        # Record the run
-        scope_label = config.reconcile_scope if not is_startup else "recent (startup)"
-        scheduler.record_run(result, scope=scope_label, is_startup=is_startup)
-
-        log_info(f"Auto-reconciliation complete: {result.total_gaps} gaps found, {result.enqueued_count} enqueued")
-
-    except Exception as e:
-        log_warn(f"Auto-reconciliation failed: {e}")
 
 
 def handle_outage_summary():
@@ -1375,6 +1324,7 @@ _MANAGEMENT_HANDLERS = {
     'process_queue': lambda args: handle_process_queue(),
     'reconcile_all': lambda args: handle_reconcile('all'),
     'reconcile_recent': lambda args: handle_reconcile('recent'),
+    'reconcile_missing_metadata': lambda args: handle_reconcile('missing_metadata'),
     'reconcile_7days': lambda args: handle_reconcile('recent_7days'),
     'health_check': lambda args: handle_health_check(),
     'outage_summary': lambda args: handle_outage_summary(),
@@ -1545,24 +1495,21 @@ def main():
     # HTTPS connections (e.g. stashdb.org scraping), which can cause TLS timeout.
     temp_stash = None
 
-    # For hooks: create minimal stash connection to check for scans
-    # Exception: Scene.Create.Post may need to trigger Plex scan even during Stash scan
+    # Hooks must be near-zero overhead unless this is the explicit
+    # identification-complete event (Scene.Update.Post with stash_ids).
+    # Any other hook exits immediately before init/network work.
     if is_hook:
         hook_context = args.get("hookContext", {})
         hook_type = hook_context.get("type", "")
-        temp_stash = get_stash_interface(input_data)
-
-        # Allow Scene.Create.Post through - it triggers Plex scan for new files
-        # Allow identification events through - stash_ids in input means user identified a scene
-        # Only skip during file scans/generates (not Auto Tag or Identify —
-        # those add real metadata that should sync to Plex)
         hook_input = hook_context.get("input") or {}
-        is_identification = 'stash_ids' in hook_input
-        if hook_type != "Scene.Create.Post" and not is_identification and is_scan_job_running(temp_stash):
-            # Scan running - exit immediately without initialization
-            # No lock acquired yet, safe to exit
+        is_identification = hook_type == "Scene.Update.Post" and 'stash_ids' in hook_input
+
+        if not is_identification:
             print(json.dumps({"output": "ok"}))
             return
+
+        # Identification event: create stash interface for downstream work.
+        temp_stash = get_stash_interface(input_data)
 
     # Initialize on first call
     global queue_manager, config
@@ -1613,7 +1560,7 @@ def main():
     # task invocation or via 'Process Queue'.
     # Skip for management tasks that don't enqueue work
     # Skip if worker lock was not acquired (another process is draining)
-    management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status', 'process_queue', 'reconcile_all', 'reconcile_recent', 'reconcile_7days', 'health_check', 'outage_summary', 'recover_outage_jobs'}
+    management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status', 'process_queue', 'reconcile_all', 'reconcile_recent', 'reconcile_missing_metadata', 'reconcile_7days', 'health_check', 'outage_summary', 'recover_outage_jobs'}
     task_mode = args.get("mode", "") if not is_hook else ""
     if is_hook:
         # Hooks: return immediately after enqueue. Worker drain happens on tasks.

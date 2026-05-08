@@ -172,6 +172,10 @@ class Stash2PlexConfig(BaseModel):
         le=1000,
         description="Batch size for reconciliation Plex matching (lower = less memory, higher = faster)"
     )
+    plex_unmatched_path_map: Optional[str] = Field(
+        default=None,
+        description="Optional path prefix mappings for Plex unmatched pre-filter. Format: '/plex/prefix=>/stash/prefix; /plex2=>/stash2'"
+    )
 
     # Stash connection (for fetching images)
     stash_url: Optional[str] = Field(

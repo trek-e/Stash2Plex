@@ -6,6 +6,21 @@ from typing import Any
 from validation.quality import has_meaningful_metadata
 
 
+def _plex_has_meaningful_metadata_for_gap_check(data: dict[str, Any]) -> bool:
+    """Plex-side metadata sufficiency for missing-metadata detection.
+
+    Intentionally stricter than the generic quality gate:
+    - studio / performers / tags / details count as meaningful
+    - date alone does NOT count (year-only items looked "empty" in UI)
+    """
+    return any([
+        data.get('studio'),
+        data.get('performers'),
+        data.get('tags'),
+        data.get('details'),
+    ])
+
+
 @dataclass
 class GapResult:
     """Result of a gap detection operation.
@@ -82,8 +97,8 @@ class GapDetector:
             except (ValueError, TypeError):
                 continue
 
-            # Check if Plex lacks meaningful metadata
-            if not has_meaningful_metadata(plex_metadata):
+            # Check if Plex lacks meaningful metadata (strict Plex-side rule)
+            if not _plex_has_meaningful_metadata_for_gap_check(plex_metadata):
                 gaps.append(GapResult(
                     scene_id=scene_id_int,
                     gap_type='empty_metadata',

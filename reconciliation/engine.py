@@ -8,9 +8,13 @@ and enqueue discovered gaps.
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+import os
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
 from typing import Any, Optional, TYPE_CHECKING
 
-from reconciliation.detector import GapDetector, has_meaningful_metadata
+from reconciliation.detector import GapDetector, GapResult, has_meaningful_metadata
 
 if TYPE_CHECKING:
     from stashapi.stashapp import StashInterface
@@ -83,6 +87,7 @@ class GapDetectionEngine:
                 - "all": All scenes in library
                 - "recent": Scenes added in last 24 hours (by created_at)
                 - "recent_7days": Scenes added in last 7 days (by created_at)
+                - "missing_metadata": Empty-metadata gaps only (all scenes)
 
         Returns:
             GapDetectionResult with counts and any errors encountered
@@ -101,6 +106,33 @@ class GapDetectionEngine:
         # Step 1: Fetch Stash scenes
         try:
             scenes = self._fetch_stash_scenes(scope)
+
+            # Optional Plex unmatched pre-filter for missing-metadata scope.
+            # Uses Plex API unmatched=1 to avoid scanning the full Stash set.
+            if scope == "missing_metadata":
+                use_unmatched = os.getenv("STASH2PLEX_RECONCILE_USE_PLEX_UNMATCHED", "1").lower() not in ("0", "false", "no")
+                if use_unmatched:
+                    try:
+                        unmatched_paths = self._fetch_plex_unmatched_paths()
+                        if unmatched_paths:
+                            before = len(scenes)
+                            scenes = [
+                                s for s in scenes
+                                if (s.get('files') and s['files'][0].get('path') in unmatched_paths)
+                            ]
+                            log_info(
+                                f"Scope 'missing_metadata': filtered by Plex unmatched paths "
+                                f"{before} -> {len(scenes)}"
+                            )
+                    except Exception as e:
+                        log_warn(f"Plex unmatched pre-filter failed, continuing full set: {e}")
+
+                # Optional cap after pre-filter (0 disables cap).
+                cap = int(os.getenv("STASH2PLEX_RECONCILE_MAX_SCENES", "0") or "0")
+                if cap > 0 and len(scenes) > cap:
+                    log_info(f"Scope 'missing_metadata': limiting to newest {cap} scenes (of {len(scenes)})")
+                    scenes = scenes[:cap]
+
             result.scenes_checked = len(scenes)
             if not scenes:
                 log_info("No scenes found to check")
@@ -116,29 +148,74 @@ class GapDetectionEngine:
         sync_timestamps = load_sync_timestamps(self.data_dir)
         log_debug(f"Loaded {len(sync_timestamps)} sync timestamps")
 
-        # Step 3 & 4: Build Plex metadata and matched paths
-        try:
-            plex_items_metadata, matched_paths = self._build_plex_data(scenes, sync_timestamps)
-            log_debug(f"Built metadata for {len(plex_items_metadata)} Plex items, {len(matched_paths)} matched paths")
-        except Exception as e:
-            # PlexServerDown or other critical errors
-            result.errors.append(f"Failed to build Plex data: {e}")
-            log_error(f"Failed to build Plex data: {e}")
-            return result
+        plex_items_metadata: dict[str, dict[str, Any]] = {}
 
-        # Step 5: Run detectors
-        empty_gaps = self.detector.detect_empty_metadata(scenes, plex_items_metadata)
-        stale_gaps = self.detector.detect_stale_syncs(scenes, sync_timestamps)
-        if getattr(self.config, 'reconcile_missing', True):
-            missing_gaps = self.detector.detect_missing(scenes, sync_timestamps, matched_paths)
-        else:
+        # Special path: missing_metadata mode is now driven directly by Plex
+        # unmatched list (source of truth), not matcher/cache confidence.
+        if scope == "missing_metadata":
+            try:
+                unmatched_paths = self._fetch_plex_unmatched_paths()
+            except Exception as e:
+                result.errors.append(f"Failed to fetch Plex unmatched paths: {e}")
+                log_error(f"Failed to fetch Plex unmatched paths: {e}")
+                return result
+
+            filtered_scenes = [
+                s for s in scenes
+                if (s.get('files') and s['files'][0].get('path') in unmatched_paths)
+            ]
+            log_info(
+                f"Scope 'missing_metadata': unmatched-driven candidate set "
+                f"{len(scenes)} -> {len(filtered_scenes)}"
+            )
+
+            # Build gap list directly from unmatched candidates that have
+            # meaningful Stash metadata to push.
+            empty_gaps = []
+            for scene in filtered_scenes:
+                if not has_meaningful_metadata(scene):
+                    continue
+                try:
+                    sid = int(scene.get('id'))
+                except (TypeError, ValueError):
+                    continue
+                empty_gaps.append(GapResult(
+                    scene_id=sid,
+                    gap_type='empty_metadata',
+                    scene_data=scene,
+                    reason='Plex reports item as unmatched; Stash has meaningful metadata',
+                ))
+
+            stale_gaps = []
             missing_gaps = []
-            log_debug("Skipping 'missing from Plex' detection (reconcile_missing=false)")
+            scenes = filtered_scenes
+        else:
+            # Step 3 & 4: Build Plex metadata and matched paths
+            try:
+                plex_items_metadata, matched_paths = self._build_plex_data(scenes, sync_timestamps)
+                log_debug(f"Built metadata for {len(plex_items_metadata)} Plex items, {len(matched_paths)} matched paths")
+            except Exception as e:
+                # PlexServerDown or other critical errors
+                result.errors.append(f"Failed to build Plex data: {e}")
+                log_error(f"Failed to build Plex data: {e}")
+                return result
+
+            # Step 5: Run detectors
+            empty_gaps = self.detector.detect_empty_metadata(scenes, plex_items_metadata)
+            stale_gaps = self.detector.detect_stale_syncs(scenes, sync_timestamps)
+            if getattr(self.config, 'reconcile_missing', True):
+                missing_gaps = self.detector.detect_missing(scenes, sync_timestamps, matched_paths)
+            else:
+                missing_gaps = []
+                log_debug("Skipping 'missing from Plex' detection (reconcile_missing=false)")
 
         result.empty_metadata_count = len(empty_gaps)
         result.stale_sync_count = len(stale_gaps)
         result.missing_count = len(missing_gaps)
         result.total_gaps = result.empty_metadata_count + result.stale_sync_count + result.missing_count
+
+        if scope == "missing_metadata":
+            self._log_missing_metadata_diagnostics(scenes, plex_items_metadata, empty_gaps)
 
         log_info(f"Gaps detected: {result.empty_metadata_count} empty metadata, "
                  f"{result.stale_sync_count} stale, {result.missing_count} missing")
@@ -177,6 +254,7 @@ class GapDetectionEngine:
             title
             details
             date
+            created_at
             rating100
             updated_at
             files { path }
@@ -205,7 +283,18 @@ class GapDetectionEngine:
             log_debug("Fetching all scenes")
             scenes = self.stash.find_scenes(fragment=fragment)
 
-        return scenes or []
+        scenes = scenes or []
+
+        # Newest-first processing so reconciliation prioritizes recently added files.
+        # Primary key: created_at (date added to Stash). Fallback: metadata date.
+        def _scene_sort_key(scene: dict[str, Any]) -> tuple[int, str, str]:
+            created = scene.get("created_at") or ""
+            date_val = scene.get("date") or ""
+            scene_id = str(scene.get("id") or "")
+            return (1 if created else 0, created, date_val or scene_id)
+
+        scenes.sort(key=_scene_sort_key, reverse=True)
+        return scenes
 
     def _connect_to_plex(self):
         """Connect to Plex server with error translation.
@@ -272,6 +361,71 @@ class GapDetectionEngine:
         if not sections:
             raise Exception("No Plex libraries available")
         return sections
+
+    def _parse_unmatched_path_mappings(self) -> list[tuple[str, str]]:
+        """Parse plex_unmatched_path_map config into prefix pairs.
+
+        Format: '/plex/prefix=>/stash/prefix; /plex2=>/stash2'
+        """
+        raw = (getattr(self.config, 'plex_unmatched_path_map', None) or '').strip()
+        if not raw:
+            return []
+
+        pairs: list[tuple[str, str]] = []
+        for item in [x.strip() for x in raw.split(';') if x.strip()]:
+            if '=>' not in item:
+                log_warn(f"Invalid plex_unmatched_path_map entry (missing '=>'): {item}")
+                continue
+            src, dst = item.split('=>', 1)
+            src = src.strip().rstrip('/')
+            dst = dst.strip().rstrip('/')
+            if not src or not dst:
+                continue
+            pairs.append((src, dst))
+        return pairs
+
+    def _map_unmatched_path_to_stash(self, plex_path: str, mappings: list[tuple[str, str]]) -> str:
+        """Apply configured prefix mapping from Plex path to Stash path."""
+        normalized = plex_path.replace('\\\\', '/')
+        for src, dst in mappings:
+            if normalized.startswith(src + '/') or normalized == src:
+                return dst + normalized[len(src):]
+        return normalized
+
+    def _fetch_plex_unmatched_paths(self) -> set[str]:
+        """Fetch file paths from Plex sections where unmatched=1.
+
+        Returns:
+            Set of (optionally mapped) file paths for Stash-side comparison.
+        """
+        plex = self._connect_to_plex()
+        sections = self._get_library_sections(plex)
+        mappings = self._parse_unmatched_path_mappings()
+
+        out: set[str] = set()
+        for _, section in sections.items():
+            section_key = getattr(section, 'key', None)
+            if not section_key:
+                continue
+
+            params = {
+                'unmatched': '1',
+                'X-Plex-Token': self.config.plex_token,
+            }
+            url = f"{self.config.plex_url.rstrip('/')}/library/sections/{section_key}/all?{urllib.parse.urlencode(params)}"
+            with urllib.request.urlopen(url, timeout=30) as resp:
+                xml_data = resp.read()
+
+            root = ET.fromstring(xml_data)
+            for part in root.findall('.//Part'):
+                p = part.attrib.get('file')
+                if p:
+                    out.add(self._map_unmatched_path_to_stash(p, mappings))
+
+        log_info(f"Plex unmatched pre-filter discovered {len(out)} file path(s)")
+        if mappings:
+            log_info(f"Applied {len(mappings)} unmatched path mapping rule(s)")
+        return out
 
     def _build_plex_data(
         self,
@@ -461,6 +615,75 @@ class GapDetectionEngine:
                 pass
 
         return metadata
+
+    def _log_missing_metadata_diagnostics(
+        self,
+        scenes: list[dict[str, Any]],
+        plex_items_metadata: dict[str, dict[str, Any]],
+        empty_gaps: list,
+    ) -> None:
+        """Emit evidence for why scenes were/weren't classified as empty metadata gaps."""
+        try:
+            gap_ids = {g.scene_id for g in empty_gaps}
+            stats = {
+                'total_scenes': len(scenes),
+                'with_plex_match': 0,
+                'stash_has_meaningful': 0,
+                'plex_has_core_fields': 0,
+                'classified_empty_gap': len(empty_gaps),
+            }
+            examples = []
+
+            for scene in scenes:
+                files = scene.get('files') or []
+                if not files:
+                    continue
+                file_path = files[0].get('path')
+                if not file_path:
+                    continue
+
+                plex_meta = plex_items_metadata.get(file_path)
+                if not plex_meta:
+                    continue
+
+                stats['with_plex_match'] += 1
+                stash_meaningful = has_meaningful_metadata(scene)
+                if stash_meaningful:
+                    stats['stash_has_meaningful'] += 1
+
+                plex_has_core = any([
+                    bool(plex_meta.get('studio')),
+                    bool(plex_meta.get('performers')),
+                    bool(plex_meta.get('tags')),
+                    bool(plex_meta.get('details')),
+                ])
+                if plex_has_core:
+                    stats['plex_has_core_fields'] += 1
+
+                try:
+                    sid = int(scene.get('id'))
+                except Exception:
+                    sid = None
+
+                if len(examples) < 20:
+                    examples.append({
+                        'scene_id': sid,
+                        'in_empty_gap': bool(sid in gap_ids) if sid is not None else False,
+                        'stash_meaningful': stash_meaningful,
+                        'plex_flags': {
+                            'studio': bool(plex_meta.get('studio')),
+                            'performers': bool(plex_meta.get('performers')),
+                            'tags': bool(plex_meta.get('tags')),
+                            'details': bool(plex_meta.get('details')),
+                            'date': bool(plex_meta.get('date')),
+                        },
+                    })
+
+            log_info(f"Missing-metadata diagnostics: {stats}")
+            for ex in examples:
+                log_info(f"Missing-metadata sample: {ex}")
+        except Exception as e:
+            log_warn(f"Missing-metadata diagnostics failed: {e}")
 
     def _enqueue_gaps(
         self,

@@ -5,6 +5,16 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.7] - 2026-05-07
+
+### Fixed
+
+- **Identify-Only Hook Execution**: Hook path now returns immediately for non-identification events. Plugin work is restricted to `Scene.Update.Post` with `stash_ids`, preventing global Stash save/identify slowdown from unrelated hook traffic.
+- **Reconcile Missing Metadata Auto-Drain**: Reconcile tasks now automatically run queue processing after enqueue (`detect + fix` in one task run), removing the manual second-step requirement.
+- **Plex Unmatched Path Mapping**: Added configurable `plex_unmatched_path_map` setting so Plex unmatched file paths can be mapped to Stash/container paths before filtering.
+- **Missing-Metadata Candidate Selection**: `reconcile_missing_metadata` now uses Plex unmatched candidates directly as source-of-truth, avoiding false negatives caused by matcher cache/confidence paths.
+- **Missing-Metadata Runtime Stability**: Fixed missing module deployment and runtime variable initialization issues encountered in reconciliation flow.
+
 ## [1.5.7] - 2026-02-17
 
 ### Fixed

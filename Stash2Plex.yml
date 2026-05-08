@@ -1,7 +1,7 @@
 # requires: PythonDepManager
 name: Stash2Plex
 description: Sync metadata from Stash to Plex with queue-based reliability
-version: 1.6.6
+version: 1.6.7
 url: https://github.com/trek-e/Stash2Plex
 
 exec:
@@ -71,6 +71,10 @@ tasks:
     description: Detect and queue metadata gaps for scenes updated in the last 24 hours
     defaultArgs:
       mode: reconcile_recent
+  - name: Reconcile Missing Metadata Only
+    description: Detect and queue only scenes where Plex metadata is empty/missing (all scenes)
+    defaultArgs:
+      mode: reconcile_missing_metadata
   - name: Reconcile Library (Last 7 Days)
     description: Detect and queue metadata gaps for scenes updated in the last 7 days
     defaultArgs:
@@ -190,3 +194,7 @@ settings:
     displayName: "Detect Missing from Plex"
     description: "Include 'missing from Plex' detection in reconciliation — scenes in Stash with no Plex match (default: true)"
     type: BOOLEAN
+  plex_unmatched_path_map:
+    displayName: "Plex Unmatched Path Map"
+    description: "Optional path prefix mapping for Plex unmatched pre-filter. Format: '/plex/prefix=>/stash/prefix; /plex2=>/stash2'"
+    type: STRING
