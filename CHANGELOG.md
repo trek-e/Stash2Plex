@@ -5,6 +5,13 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.9] - 2026-05-08
+
+### Fixed
+
+- **Identify Hook Auto-Drain**: Identify-complete hook now triggers asynchronous queue processing (fire-and-forget) after enqueue, so deferred sync jobs do not sit idle waiting for manual `process_queue`.
+- **Identify Hook Visibility**: Added explicit identify-hook outcome logs for enqueued vs skipped events.
+
 ## [1.6.8] - 2026-05-07
 
 ### Fixed
