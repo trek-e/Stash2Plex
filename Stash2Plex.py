@@ -389,7 +389,7 @@ def extract_config_from_input(input_data: dict, existing_stash=None) -> dict:
         port = server_conn.get('Port', server_conn.get('port', 9999))
         config_dict['stash_url'] = f"{scheme}://{host}:{port}"
 
-        # Get session cookie for authentication
+        # Get session cookie/API key for authentication
         session_cookie = server_conn.get('SessionCookie', {})
         if session_cookie:
             if isinstance(session_cookie, dict):
@@ -398,6 +398,10 @@ def extract_config_from_input(input_data: dict, existing_stash=None) -> dict:
                 config_dict['stash_session_cookie'] = f"{cookie_name}={cookie_value}"
             else:
                 config_dict['stash_session_cookie'] = str(session_cookie)
+
+        api_key = server_conn.get('ApiKey', server_conn.get('apiKey', ''))
+        if api_key:
+            config_dict['stash_api_key'] = api_key
 
     # Primary path: direct urllib GraphQL call (stdlib only, immune to stashapi install issues).
     if server_conn:
@@ -434,7 +438,7 @@ def extract_config_from_input(input_data: dict, existing_stash=None) -> dict:
     return config_dict
 
 
-def initialize(config_dict: dict = None, resume_orphaned: bool = True):
+def initialize(config_dict: dict = None, resume_orphaned: bool = True, start_worker: bool = True):
     """
     Initialize queue, DLQ, and worker with validated configuration.
 
@@ -517,10 +521,13 @@ def initialize(config_dict: dict = None, resume_orphaned: bool = True):
         max_retries=config.max_retries
     )
 
-    if worker.try_start_exclusive(resume_orphaned=resume_orphaned):
-        log_info("Initialization complete (worker started)")
+    if start_worker:
+        if worker.try_start_exclusive(resume_orphaned=resume_orphaned):
+            log_info("Initialization complete (worker started)")
+        else:
+            log_info("Initialization complete (worker deferred — another process is draining)")
     else:
-        log_info("Initialization complete (worker deferred — another process is draining)")
+        log_trace("Initialization complete (hook mode, worker not started)")
 
     return True
 
@@ -644,11 +651,8 @@ def handle_hook(hook_context: dict, stash=None):
 
     log_debug(f"Scene {scene_id} identified via stash-box")
 
-    # Trigger Plex scan now that the file has real metadata.
-    # The PlexNotFound retry (12× with backoff up to 600s) covers the
-    # race between this scan and the metadata sync job that follows.
-    trigger_plex_scan_for_scene(scene_id, stash)
-
+    # Identification hook must stay non-blocking: no Plex scan and no scene fetch.
+    # We enqueue a deferred job; hydration + sync run later in task/worker paths.
     data_dir = get_plugin_data_dir()
     try:
         on_scene_update(
@@ -660,6 +664,7 @@ def handle_hook(hook_context: dict, stash=None):
             stash=stash,
             is_identification=True,
             scan_already_checked=True,
+            defer_scene_fetch=True,
         )
         log_trace(f"on_scene_update completed for scene {scene_id}")
     except Exception as e:
@@ -1517,7 +1522,7 @@ def main():
         # Pass temp_stash (if created above) to reuse the existing connection and
         # avoid creating a second StashInterface with its own 2 GQL calls to Stash.
         config_dict = extract_config_from_input(input_data, existing_stash=temp_stash)
-        init_success = initialize(config_dict, resume_orphaned=not is_hook)
+        init_success = initialize(config_dict, resume_orphaned=not is_hook, start_worker=not is_hook)
         if not init_success:
             # Initialization failed (config validation error)
             # Lock was never acquired or was released, safe to exit

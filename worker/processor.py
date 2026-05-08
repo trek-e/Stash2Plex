@@ -908,6 +908,75 @@ class SyncWorker:
                 hit_rate = stats['hits'] / total * 100
                 log_info(f"Match cache: {hit_rate:.1f}% hit rate ({stats['hits']} hits, {stats['misses']} misses)")
 
+    def _hydrate_job_from_stash(self, scene_id: int) -> dict:
+        """Fetch full scene metadata/path from Stash GraphQL for deferred hook jobs."""
+        import json
+        import urllib.request
+
+        stash_url = getattr(self.config, 'stash_url', None)
+        if not stash_url:
+            raise PermanentError(f"Job {scene_id} missing file path and stash_url is not configured")
+
+        query = """
+        query FindScene($id: ID!) {
+            findScene(id: $id) {
+                title
+                details
+                date
+                rating100
+                files { path }
+                studio { name }
+                performers { name }
+                tags { name }
+            }
+        }
+        """
+        payload = {
+            'query': query,
+            'variables': {'id': str(scene_id)},
+        }
+
+        req = urllib.request.Request(
+            f"{stash_url.rstrip('/')}/graphql",
+            data=json.dumps(payload).encode(),
+            headers={'Content-Type': 'application/json'},
+        )
+
+        api_key = getattr(self.config, 'stash_api_key', None)
+        if api_key:
+            req.add_header('ApiKey', api_key)
+        session_cookie = getattr(self.config, 'stash_session_cookie', None)
+        if session_cookie:
+            req.add_header('Cookie', session_cookie)
+
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read().decode())
+
+        scene = (result.get('data') or {}).get('findScene')
+        if not scene:
+            raise PermanentError(f"Scene {scene_id} not found in Stash during deferred hydration")
+
+        files = scene.get('files') or []
+        path = files[0].get('path') if files and isinstance(files[0], dict) else None
+        if not path:
+            raise PermanentError(f"Scene {scene_id} has no file path during deferred hydration")
+
+        studio = scene.get('studio') or {}
+        performers = [p.get('name') for p in (scene.get('performers') or []) if isinstance(p, dict) and p.get('name')]
+        tags = [t.get('name') for t in (scene.get('tags') or []) if isinstance(t, dict) and t.get('name')]
+
+        hydrated = {
+            'path': path,
+            'title': scene.get('title'),
+            'details': scene.get('details'),
+            'date': scene.get('date'),
+            'rating100': scene.get('rating100'),
+            'studio': studio.get('name') if isinstance(studio, dict) else None,
+            'performers': performers,
+            'tags': tags,
+        }
+        return hydrated
+
     def _process_job(self, job: dict) -> Optional[str]:
         """
         Process a sync job by updating Plex metadata.
@@ -930,6 +999,10 @@ class SyncWorker:
         """
         import time as _time
         _start_time = _time.perf_counter()
+        _timings: dict[str, float] = {}
+
+        def _mark(stage: str, started_at: float):
+            _timings[stage] = _time.perf_counter() - started_at
 
         from plex.exceptions import PlexTemporaryError, PlexPermanentError, PlexNotFound, translate_plex_exception
         from plex.matcher import find_plex_items_with_confidence
@@ -942,6 +1015,16 @@ class SyncWorker:
         data = job.get('data', {})
         file_path = data.get('path')
 
+        if not file_path and scene_id is not None:
+            try:
+                hydrated = self._hydrate_job_from_stash(int(scene_id))
+                data = {**hydrated, **data}
+                job['data'] = data
+                file_path = data.get('path')
+                log_trace(f"Deferred hydration succeeded for scene {scene_id}")
+            except Exception as e:
+                raise PermanentError(f"Job {scene_id} missing file path and hydration failed: {e}")
+
         if not file_path:
             raise PermanentError(f"Job {scene_id} missing file path")
 
@@ -949,9 +1032,12 @@ class SyncWorker:
             log_info(f"[DEBUG] Processing scene {scene_id}, path: {obfuscate_path(file_path)}")
 
         try:
+            _t = _time.perf_counter()
             client = self._get_plex_client()
+            _mark('get_plex_client', _t)
 
             # Get library section(s) to search
+            _t = _time.perf_counter()
             configured_libs = self.config.plex_libraries  # parsed comma-separated list
             if configured_libs:
                 # Search only the configured libraries
@@ -974,11 +1060,15 @@ class SyncWorker:
 
             if _dbg:
                 log_info(f"[DEBUG] Searching {len(sections)} section(s): {[s.title for s in sections]}")
+            _mark('resolve_sections', _t)
 
             # Get caches for optimized matching
+            _t = _time.perf_counter()
             library_cache, match_cache = self._get_caches()
+            _mark('get_caches', _t)
 
             # Search library sections, collect ALL candidates
+            _t = _time.perf_counter()
             all_candidates = []
             # Track which library section each candidate belongs to, so we can
             # write the confirmed match to match_cache after metadata update succeeds.
@@ -1002,6 +1092,8 @@ class SyncWorker:
                         log_info(f"[DEBUG] Section '{section.title}': no match")
                     continue  # No match in this section, try next
 
+            _mark('find_candidates', _t)
+
             # Deduplicate candidates (same item might be in multiple sections)
             seen_keys = set()
             unique_candidates = []
@@ -1023,7 +1115,9 @@ class SyncWorker:
                 plex_item = unique_candidates[0]
                 if _dbg:
                     log_info(f"[DEBUG] HIGH confidence match: {plex_item.title}")
+                _t = _time.perf_counter()
                 self._update_metadata(plex_item, data)
+                _mark('update_metadata', _t)
                 # Write to match_cache AFTER metadata update succeeds.
                 # This ensures the cache only records items that have been
                 # fully synced. Writing before the update (as was previously
@@ -1057,16 +1151,24 @@ class SyncWorker:
                         f"Chosen: {obfuscated_paths[0]} "
                         f"Other candidates: {obfuscated_paths[1:]}"
                     )
+                    _t = _time.perf_counter()
                     self._update_metadata(plex_item, data)
+                    _mark('update_metadata', _t)
 
             # Update sync timestamp after successful sync
             if self.data_dir is not None:
+                _t = _time.perf_counter()
                 save_sync_timestamp(self.data_dir, scene_id, time.time())
+                _mark('save_sync_timestamp', _t)
 
-            # Log job processing time
+            # Log job processing time with stage breakdown
             _elapsed = _time.perf_counter() - _start_time
             if _elapsed >= 1.0:
-                log_info(f"_process_job took {_elapsed:.3f}s")
+                if _timings:
+                    _parts = ", ".join(f"{k}={v:.3f}s" for k, v in sorted(_timings.items(), key=lambda x: x[1], reverse=True))
+                    log_info(f"_process_job took {_elapsed:.3f}s [{_parts}]")
+                else:
+                    log_info(f"_process_job took {_elapsed:.3f}s")
             else:
                 log_trace(f"_process_job took {_elapsed:.3f}s")
 

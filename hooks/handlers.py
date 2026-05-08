@@ -145,7 +145,8 @@ def on_scene_update(
     sync_timestamps: Optional[dict[int, float]] = None,
     stash=None,
     is_identification: bool = False,
-    scan_already_checked: bool = False
+    scan_already_checked: bool = False,
+    defer_scene_fetch: bool = False,
 ) -> bool:
     """
     Handle scene update event with fast enqueue.
@@ -195,6 +196,20 @@ def on_scene_update(
         if last_synced and stash_updated_at <= last_synced:
             log_trace(f"Scene {scene_id} already synced (Stash: {stash_updated_at} <= Last: {last_synced})")
             return False
+
+    # Fast identification path: enqueue only scene id + minimal context.
+    # Worker hydrates path/metadata later during queue processing.
+    if defer_scene_fetch:
+        result = queue_manager.try_enqueue(scene_id, "metadata", {
+            'identified': True,
+            'updated_at': update_data.get('updated_at'),
+        })
+        if not result.enqueued:
+            log_trace(f"Scene {scene_id} already in queue, skipping duplicate ({result.reason})")
+            return False
+        elapsed_ms = (time.time() - start) * 1000
+        log_debug(f"Enqueued deferred sync job for scene {scene_id} in {elapsed_ms:.1f}ms")
+        return True
 
     # Fetch full scene data from Stash - needed for file path and complete metadata
     file_path = None

@@ -5,6 +5,14 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.8] - 2026-05-07
+
+### Fixed
+
+- **Identify Hook Non-Blocking Path**: Identification hook no longer triggers immediate Plex scan or heavy scene fetch. It now enqueues deferred jobs only, reducing interference with active Stash identify runs.
+- **Hook Worker Start Suppression**: Hook invocations no longer start queue-draining worker threads during initialization, avoiding per-hook startup overhead during identify bursts.
+- **Deferred Job Hydration in Worker**: Jobs enqueued from identify hook can now be hydrated later in worker/task path (path + metadata fetched from Stash at processing time), preserving sync behavior while keeping hook execution lightweight.
+
 ## [1.6.7] - 2026-05-07
 
 ### Fixed
