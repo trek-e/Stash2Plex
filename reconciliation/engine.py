@@ -719,6 +719,7 @@ class GapDetectionEngine:
         enqueued_count = 0
         skipped_count = 0
         skipped_no_metadata_count = 0
+        seen_scene_ids: set[int] = set()
 
         # Combine all gaps
         all_gaps = list(empty_gaps) + list(stale_gaps) + list(missing_gaps)
@@ -726,6 +727,14 @@ class GapDetectionEngine:
         for gap in all_gaps:
             scene_id = gap.scene_id
             scene_data = gap.scene_data
+
+            # Dedup within this reconciliation run independent of queue state.
+            # A background worker may drain a just-enqueued row before this loop
+            # sees the same scene through another gap type.
+            if scene_id in seen_scene_ids:
+                skipped_count += 1
+                continue
+            seen_scene_ids.add(scene_id)
 
             # Persistent already-synced guard: skip if sync_timestamp >= updated_at.
             # This prevents re-enqueue of scenes processed in sessions older than the
@@ -765,10 +774,15 @@ class GapDetectionEngine:
                 skipped_no_metadata_count += 1
                 continue
 
-            # Enqueue via queue_manager — handles both in-memory and cross-session dedup.
-            # The in-memory _pending_scene_ids set provides cross-gap-type dedup within
-            # this run (same scene can appear in empty, stale, and missing lists).
-            result = self.queue_manager.try_enqueue(scene_id, "metadata", job_data)
+            # Enqueue via queue_manager. Reconciliation has already proven the
+            # gap still exists, so completed queue history must not block a new
+            # attempt. Pending/in-progress rows still block duplicates.
+            result = self.queue_manager.try_enqueue(
+                scene_id,
+                "metadata",
+                job_data,
+                dedup_recently_completed=False,
+            )
             if result.enqueued:
                 enqueued_count += 1
             else:

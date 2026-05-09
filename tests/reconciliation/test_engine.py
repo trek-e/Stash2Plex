@@ -229,6 +229,39 @@ def test_run_deduplicates_against_existing_queue(mock_stash, mock_config, tmp_da
         mock_queue_manager.try_enqueue.assert_called_once()
 
 
+def test_run_requeues_empty_gap_when_previous_row_completed(mock_stash, mock_config, tmp_data_dir, sample_scenes, mock_plex_client, real_queue_manager):
+    """Empty metadata gaps should not be blocked by completed queue history."""
+    mock_stash.find_scenes.return_value = [sample_scenes[0]]
+
+    first = real_queue_manager.try_enqueue(1, "metadata", {"path": "/media/scene1.mp4", "studio": "old"})
+    assert first.enqueued is True
+    item = real_queue_manager.get_pending()
+    real_queue_manager.ack(item)
+
+    mock_plex_item = MagicMock()
+    mock_plex_item.studio = None
+    mock_plex_item.actors = []
+    mock_plex_item.genres = []
+    mock_plex_item.summary = None
+    mock_plex_item.year = None
+    mock_plex_item.originallyAvailableAt = None
+
+    with patch('plex.client.PlexClient', return_value=mock_plex_client), \
+         patch('plex.cache.PlexCache'), \
+         patch('plex.cache.MatchCache'), \
+         patch('plex.matcher.find_plex_items_with_confidence') as mock_matcher:
+
+        from plex.matcher import MatchConfidence
+        mock_matcher.return_value = (MatchConfidence.HIGH, mock_plex_item, [mock_plex_item])
+
+        engine = GapDetectionEngine(mock_stash, mock_config, tmp_data_dir, queue_manager=real_queue_manager)
+        result = engine.run(scope="all")
+
+        assert result.empty_metadata_count == 1
+        assert result.enqueued_count == 1
+        assert result.skipped_already_queued == 0
+
+
 def test_run_deduplicates_across_gap_types(mock_stash, mock_config, tmp_data_dir, sample_scenes, mock_queue, mock_plex_client, real_queue_manager):
     """Test that engine enqueues each scene only once when it appears in multiple gap lists."""
     # Setup: Scene appears as both empty_metadata AND stale_sync gap
