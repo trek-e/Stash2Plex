@@ -177,8 +177,10 @@ def on_scene_update(
         log_trace(f"Scene {scene_id} skipped - scan job active")
         return False
 
-    # Filter non-sync events before enqueueing
-    if not requires_plex_sync(update_data):
+    # Filter non-sync events before enqueueing. Identification hooks are
+    # sync-worthy by themselves: stash_ids means metadata is now available in
+    # Stash, and the worker will hydrate the full scene later.
+    if not is_identification and not requires_plex_sync(update_data):
         log_trace(f"Scene {scene_id} update filtered (no metadata changes)")
         return False
 

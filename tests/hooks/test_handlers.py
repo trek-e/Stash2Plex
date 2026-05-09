@@ -269,6 +269,26 @@ class TestOnSceneUpdate:
 
         assert result is True
 
+    def test_identification_stash_ids_enqueue_deferred_job(self, mock_queue_manager, mocker):
+        """Identification with stash_ids alone should enqueue a deferred job."""
+        mocker.patch('hooks.handlers.is_scan_running', return_value=True)
+
+        result = on_scene_update(
+            scene_id=123,
+            update_data={"stash_ids": [{"stash_id": "abc"}]},
+            queue_manager=mock_queue_manager,
+            stash=None,
+            is_identification=True,
+            defer_scene_fetch=True,
+        )
+
+        assert result is True
+        mock_queue_manager.try_enqueue.assert_called_once_with(
+            123,
+            "metadata",
+            {'identified': True, 'updated_at': None},
+        )
+
     def test_filters_already_pending(self, mock_queue_manager, mocker, mock_stash_gql):
         """Scene already pending should return False."""
         mocker.patch('hooks.handlers.is_scan_running', return_value=False)

@@ -618,42 +618,23 @@ def trigger_plex_scan_for_scene(scene_id: int, stash) -> bool:
 
 def _trigger_async_queue_drain(server_connection: dict | None = None):
     """Fire-and-forget queue drain for deferred identify-hook jobs."""
-    if os.getenv('STASH2PLEX_HOOK_AUTODRAIN', '1').strip().lower() in {'0', 'false', 'no', 'off'}:
-        return
-
     try:
-        data_dir = get_plugin_data_dir()
-        marker = os.path.join(data_dir, 'hook_autodrain.last')
-        now = time.time()
-        cooldown = float(os.getenv('STASH2PLEX_HOOK_AUTODRAIN_COOLDOWN_SECS', '8') or 8)
-        try:
-            last = float(open(marker, 'r').read().strip())
-        except Exception:
-            last = 0.0
-        if now - last < cooldown:
-            return
-        with open(marker, 'w') as f:
-            f.write(str(now))
+        from sync_queue.drain_trigger import QueueDrainTrigger
 
-        payload = {
-            'server_connection': server_connection or {},
-            'args': {'mode': 'process_queue'}
-        }
-        import subprocess
-        proc = subprocess.Popen(
-            [sys.executable, os.path.join(PLUGIN_DIR, 'Stash2Plex.py')],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-            text=True,
+        trigger = QueueDrainTrigger(
+            plugin_dir=PLUGIN_DIR,
+            data_dir=get_plugin_data_dir(),
+            python_executable=sys.executable,
         )
-        if proc.stdin:
-            proc.stdin.write(json.dumps(payload))
-            proc.stdin.close()
-        log_trace('Triggered async process_queue drain from identify hook')
+        result = trigger.trigger(server_connection)
+        if result.triggered:
+            log_trace(f"Triggered async process_queue drain from identify hook (pid={result.pid})")
+        else:
+            log_trace(f"Async process_queue drain not started ({result.reason})")
+        return result
     except Exception as e:
         log_debug(f'Async queue drain trigger failed: {e}')
+        return None
 
 
 def handle_hook(hook_context: dict, stash=None, server_connection=None):
@@ -706,8 +687,11 @@ def handle_hook(hook_context: dict, stash=None, server_connection=None):
             scan_already_checked=True,
             defer_scene_fetch=True,
         )
+        # Identification hooks are the signal that queue work may be waiting.
+        # Trigger even when enqueue returned False, because False can mean
+        # "already_pending"; that still needs a drainer if none is active.
+        _trigger_async_queue_drain(server_connection)
         if enqueued:
-            _trigger_async_queue_drain(server_connection)
             log_info(f"Identify hook deferred+enqueued for scene {scene_id}")
         else:
             log_info(f"Identify hook skipped enqueue for scene {scene_id}")

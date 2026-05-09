@@ -5,6 +5,13 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.10] - 2026-05-09
+
+### Fixed
+
+- **Identification Metadata Queue Drain**: Identification hooks now enqueue deferred metadata sync jobs even when the hook payload only contains `stash_ids`, and they trigger queue processing whenever queued work may exist, including already-pending jobs.
+- **Queue Drain Trigger Seam**: Moved hook auto-drain process kickoff behind a dedicated queue drain trigger module with cooldown handling and focused tests.
+
 ## [1.6.9] - 2026-05-08
 
 ### Fixed
