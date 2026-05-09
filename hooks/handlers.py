@@ -205,9 +205,9 @@ def on_scene_update(
         result = queue_manager.try_enqueue(scene_id, "metadata", {
             'identified': True,
             'updated_at': update_data.get('updated_at'),
-        })
+        }, dedup_recently_completed=False)
         if not result.enqueued:
-            log_trace(f"Scene {scene_id} already in queue, skipping duplicate ({result.reason})")
+            log_info(f"Deferred sync job for scene {scene_id} not enqueued ({result.reason})")
             return False
         elapsed_ms = (time.time() - start) * 1000
         log_debug(f"Enqueued deferred sync job for scene {scene_id} in {elapsed_ms:.1f}ms")

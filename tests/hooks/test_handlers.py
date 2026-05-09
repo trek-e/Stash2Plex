@@ -287,6 +287,7 @@ class TestOnSceneUpdate:
             123,
             "metadata",
             {'identified': True, 'updated_at': None},
+            dedup_recently_completed=False,
         )
 
     def test_filters_already_pending(self, mock_queue_manager, mocker, mock_stash_gql):

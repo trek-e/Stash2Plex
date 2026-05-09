@@ -96,6 +96,31 @@ class TestQueueManager:
         queue.ack(retrieved)
         manager.shutdown()
 
+    def test_try_enqueue_can_ignore_recently_completed_rows(self, tmp_path):
+        """Fresh identify hooks can requeue scenes completed in an earlier run."""
+        from sync_queue.manager import QueueManager
+
+        manager = QueueManager(data_dir=str(tmp_path))
+        first = manager.try_enqueue(123, "metadata", {"identified": True})
+        assert first.enqueued is True
+
+        item = manager.get_pending()
+        manager.ack(item)
+
+        duplicate = manager.try_enqueue(123, "metadata", {"identified": True})
+        assert duplicate.enqueued is False
+        assert duplicate.reason == "recently_completed"
+
+        fresh_identify = manager.try_enqueue(
+            123,
+            "metadata",
+            {"identified": True},
+            dedup_recently_completed=False,
+        )
+        assert fresh_identify.enqueued is True
+
+        manager.shutdown()
+
     def test_raises_import_error_when_persistqueue_missing(self, tmp_path):
         """QueueManager raises ImportError when persistqueue not installed."""
         import sync_queue.manager as manager_module

@@ -5,6 +5,14 @@ All notable changes to Stash2Plex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.11] - 2026-05-09
+
+### Fixed
+
+- **Repeated Identification Sync**: Fresh `stash_ids` identification hooks now enqueue deferred metadata sync jobs even when the scene completed a previous sync within the recent-completed dedup window. Pending and in-progress queue rows still block duplicates.
+- **Deferred Hook Visibility**: Deferred identification enqueue skips now log the queue-manager reason at INFO level, making `already_pending` distinct from other filtered paths in Stash logs.
+- **Release Workflow Runtime**: Updated release actions to Node 24-compatible majors (`actions/checkout@v6`, `softprops/action-gh-release@v3`).
+
 ## [1.6.10] - 2026-05-09
 
 ### Fixed

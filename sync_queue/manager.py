@@ -101,7 +101,13 @@ class QueueManager:
     # Public interface
     # ------------------------------------------------------------------
 
-    def try_enqueue(self, scene_id: int, update_type: str, data: dict) -> EnqueueResult:
+    def try_enqueue(
+        self,
+        scene_id: int,
+        update_type: str,
+        data: dict,
+        dedup_recently_completed: bool = True,
+    ) -> EnqueueResult:
         """
         Enqueue a sync job, skipping duplicates already pending or recently completed.
 
@@ -113,6 +119,9 @@ class QueueManager:
             scene_id: Stash scene ID
             update_type: Job type (e.g. "metadata")
             data: Payload to sync to Plex
+            dedup_recently_completed: If True, recently completed rows block
+                enqueue. Set False for fresh identification events, where a
+                new stash_ids hook means Stash metadata may have changed again.
 
         Returns:
             EnqueueResult with enqueued=True and the job dict, or
@@ -130,9 +139,10 @@ class QueueManager:
         if scene_id in pending_only:
             return EnqueueResult(enqueued=False, job=None, reason="already_pending")
 
-        recently_completed = get_queued_scene_ids(self.queue_path, completed_window=604800.0)
-        if scene_id in recently_completed:
-            return EnqueueResult(enqueued=False, job=None, reason="recently_completed")
+        if dedup_recently_completed:
+            recently_completed = get_queued_scene_ids(self.queue_path, completed_window=604800.0)
+            if scene_id in recently_completed:
+                return EnqueueResult(enqueued=False, job=None, reason="recently_completed")
 
         job = {
             'job_id': next(_job_counter),
