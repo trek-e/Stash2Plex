@@ -157,6 +157,7 @@ worker = None
 config: Stash2PlexConfig = None
 sync_timestamps: dict = None
 stash_interface = None
+_process_guard = None  # ProcessGuard slot — held for lifetime of this process
 
 
 def get_plugin_data_dir():
@@ -1545,6 +1546,31 @@ def main():
         # Identification event: create stash interface for downstream work.
         temp_stash = get_stash_interface(input_data)
 
+    # Concurrency cap: acquire a process slot before any expensive init.
+    # This bounds the number of concurrent Stash2Plex.py processes to
+    # STASH2PLEX_MAX_CONCURRENT_PROCESSES (default 5). Hook processes that
+    # arrive while all slots are taken exit immediately (<5 ms) without
+    # loading Python modules, fetching config from Stash, or touching Plex.
+    # Slots are backed by fcntl lockfiles and are automatically released on
+    # process exit (including crash / OOM-kill), so no cleanup is needed.
+    global _process_guard
+    try:
+        from sync_queue.process_guard import ProcessGuard
+        _data_dir_for_guard = get_plugin_data_dir()
+        _process_guard = ProcessGuard(_data_dir_for_guard)
+        if not _process_guard.acquire():
+            log_trace(
+                f"Process concurrency cap reached ({_process_guard.max_processes}) — "
+                "exiting; existing process(es) will drain the queue"
+            )
+            print(json.dumps({"output": "ok"}))
+            return
+        log_trace(f"Process slot {_process_guard._held_slot} acquired (pid={os.getpid()})")
+    except Exception as _guard_err:
+        # Guard failures are non-fatal: log and continue without the cap.
+        log_debug(f"ProcessGuard init failed ({_guard_err}), proceeding without concurrency cap")
+        _process_guard = None
+
     # Initialize on first call
     global queue_manager, config
     if queue_manager is None:
@@ -1671,6 +1697,8 @@ def main():
     # Graceful shutdown: stop worker so in-flight items are acked/nacked
     # (prevents auto_resume from re-processing them in next invocation)
     shutdown()
+    if _process_guard is not None:
+        _process_guard.release()
 
     # Return empty response (success)
     print(json.dumps({"output": "ok"}))

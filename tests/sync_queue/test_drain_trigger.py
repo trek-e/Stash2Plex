@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import subprocess
+
 from sync_queue.drain_trigger import QueueDrainTrigger
 
 
@@ -41,11 +43,17 @@ def test_queue_drain_trigger_starts_process_queue(tmp_path):
     assert result.pid == 4321
     popen.assert_called_once()
     args = popen.call_args[0][0]
+    kwargs = popen.call_args[1]
     assert args == ['/python', '/plugin/Stash2Plex.py']
+    assert kwargs['stdout'].name == str(tmp_path / 'hook_autodrain.log')
+    assert kwargs['stderr'] == subprocess.STDOUT
     assert '"mode": "process_queue"' in process.stdin.writes[0]
     assert '"Host": "stash"' in process.stdin.writes[0]
     assert process.stdin.closed is True
     assert (tmp_path / 'hook_autodrain.last').exists()
+    log_text = (tmp_path / 'hook_autodrain.log').read_text()
+    assert 'starting process_queue hook autodrain' in log_text
+    assert 'started process_queue hook autodrain pid=4321' in log_text
 
 
 def test_queue_drain_trigger_honors_cooldown(tmp_path):
@@ -100,3 +108,23 @@ def test_queue_drain_trigger_kills_process_when_payload_write_fails(tmp_path):
 
     assert process.killed is True
     assert not (tmp_path / 'hook_autodrain.last').exists()
+
+
+def test_queue_drain_trigger_rotates_large_log(tmp_path, monkeypatch):
+    process = _FakeProcess()
+    log_path = tmp_path / 'hook_autodrain.log'
+    log_path.write_text('x' * 20)
+    monkeypatch.setenv('STASH2PLEX_HOOK_AUTODRAIN_LOG_MAX_BYTES', '10')
+
+    with patch('sync_queue.drain_trigger.subprocess.Popen', return_value=process):
+        result = QueueDrainTrigger(
+            plugin_dir='/plugin',
+            data_dir=str(tmp_path),
+            python_executable='/python',
+            cooldown_secs=8,
+            enabled=True,
+        ).trigger()
+
+    assert result.triggered is True
+    assert (tmp_path / 'hook_autodrain.log.1').read_text() == 'x' * 20
+    assert 'started process_queue hook autodrain pid=4321' in log_path.read_text()
