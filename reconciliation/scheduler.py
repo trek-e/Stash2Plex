@@ -146,6 +146,83 @@ class ReconciliationScheduler:
         elapsed = now - state.last_run_time
         return elapsed >= 3600  # At least 1 hour since last run
 
+    def claim_if_due(self, interval: str, is_startup: bool = False,
+                     now: Optional[float] = None) -> bool:
+        """Atomically claim the reconciliation slot if it is due.
+
+        Acquires LOCK_EX on the state file, re-reads last_run_time, and if the
+        run is still due, writes a claim timestamp immediately (before any scan
+        starts) so concurrent callers see the updated time and skip.
+
+        This eliminates the TOCTOU race in maybe_auto_reconcile() where N
+        concurrent callers all read the old timestamp under LOCK_SH, all
+        decide the interval has elapsed, and all launch full scans in parallel.
+
+        Args:
+            interval: Interval string (used for ``is_due`` check) OR ignored
+                      when ``is_startup=True`` (startup uses the 1-hour rule).
+            is_startup: When True, apply the startup-due rule (last_run_time==0
+                        or elapsed>=3600) instead of the interval rule.
+            now: Current time (default: time.time()). For testing.
+
+        Returns:
+            True  — slot claimed; caller must proceed with the scan.
+            False — another process already claimed (or interval not elapsed).
+        """
+        if now is None:
+            now = time.time()
+
+        # Fast-path: skip lock if the plain check already says "not due"
+        # (avoids lock contention on the common no-op path).
+        if is_startup:
+            if not self.is_startup_due(now=now):
+                return False
+        else:
+            if not self.is_due(interval, now=now):
+                return False
+
+        tmp_path = self.state_path + '.tmp'
+        lock_path = self.state_path + '.lock'
+        try:
+            with open(lock_path, 'w') as lock_file:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                try:
+                    # Re-read under exclusive lock (another process may have
+                    # claimed the slot between our fast-path check and here).
+                    try:
+                        if os.path.exists(self.state_path):
+                            with open(self.state_path, 'r') as f:
+                                data = json.load(f)
+                                state = ReconciliationState(**data)
+                        else:
+                            state = ReconciliationState()
+                    except (json.JSONDecodeError, TypeError, KeyError, OSError):
+                        state = ReconciliationState()
+
+                    # Re-check under the exclusive lock
+                    if is_startup:
+                        if state.last_run_time != 0.0 and (now - state.last_run_time) < 3600:
+                            return False  # Another process claimed it
+                    else:
+                        interval_secs = INTERVAL_SECONDS.get(interval, 0)
+                        if interval_secs == 0:
+                            return False
+                        if (now - state.last_run_time) < interval_secs:
+                            return False  # Another process claimed it
+
+                    # Still due — write claim timestamp NOW, before the scan
+                    state.last_run_time = now
+                    with open(tmp_path, 'w') as f:
+                        import dataclasses
+                        json.dump(dataclasses.asdict(state), f, indent=2)
+                    os.replace(tmp_path, self.state_path)
+                    return True
+                finally:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        except OSError as e:
+            log_debug(f"claim_if_due: lock/write failed, proceeding conservatively: {e}")
+            return False
+
     def record_run(self, result, scope: str, is_startup: bool = False) -> None:
         """Record a completed reconciliation run.
 

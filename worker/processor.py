@@ -158,28 +158,28 @@ class SyncWorker:
         self.thread.start()
         log_info("Started")
 
-    def try_start_exclusive(self, resume_orphaned: bool = True) -> bool:
+    def try_acquire_drain_lock(self, resume_orphaned: bool = True) -> bool:
         """
-        Acquire the worker exclusion lock and start the background thread.
+        Acquire the worker exclusion lock WITHOUT starting a background thread.
 
-        Only one plugin process should drain the queue at a time. During bulk
-        scans many hook processes fire concurrently; without this lock each
-        starts its own worker thread, causing cascading Plex API timeouts.
+        This is the shared ownership primitive used by both:
+        - ``try_start_exclusive()`` — acquires lock then starts the daemon thread.
+        - ``handle_process_queue()`` — acquires lock then calls ``run_batch()``
+          directly (foreground synchronous drain).
+
+        Only one process may hold the drain lock at a time regardless of whether
+        it is running in background-thread or foreground-batch mode.
 
         Args:
             resume_orphaned: If True, resume in-progress items left by a prior
-                             crashed process before starting. Pass False for hook
-                             invocations — an orphaned PlexNotFound item stuck in
-                             library.all() would monopolise the 10-second hook
-                             window and block all newer jobs.
+                             crashed process. Pass False for hook invocations.
 
         Returns:
-            True  — lock acquired, worker started.
-            False — lock held by another process; caller should enqueue only.
+            True  — lock acquired; caller must call ``_release_lock()`` when done.
+            False — lock held by another process; caller should exit.
         """
         if self.data_dir is None:
-            # No data_dir: can't create lock file, just start unconditionally
-            self.start()
+            # No data_dir: can't create lock file, proceed unconditionally
             return True
 
         lock_path = os.path.join(self.data_dir, 'worker.lock')
@@ -188,7 +188,7 @@ class SyncWorker:
             self._lock_fd = open(lock_path, 'w')
             fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except (BlockingIOError, OSError):
-            # Lock held by another process — just enqueue, don't drain
+            # Lock held by another process
             if self._lock_fd:
                 self._lock_fd.close()
                 self._lock_fd = None
@@ -202,6 +202,40 @@ class SyncWorker:
                     log_trace("No orphaned items to resume")
             else:
                 log_trace("Skipping orphaned item resume (hook invocation)")
+        except Exception as e:
+            log_error(f"Failed during orphan resume: {e}")
+            self._release_lock()
+            return False
+
+        return True
+
+    def try_start_exclusive(self, resume_orphaned: bool = True) -> bool:
+        """
+        Acquire the worker exclusion lock and start the background thread.
+
+        Only one plugin process should drain the queue at a time. During bulk
+        scans many hook processes fire concurrently; without this lock each
+        starts its own worker thread, causing cascading Plex API timeouts.
+
+        Delegates lock acquisition to ``try_acquire_drain_lock()`` then starts
+        the background worker thread. Use ``try_acquire_drain_lock()`` directly
+        when you need the lock for a foreground ``run_batch()`` call instead.
+
+        Args:
+            resume_orphaned: If True, resume in-progress items left by a prior
+                             crashed process before starting. Pass False for hook
+                             invocations — an orphaned PlexNotFound item stuck in
+                             library.all() would monopolise the 10-second hook
+                             window and block all newer jobs.
+
+        Returns:
+            True  — lock acquired, worker started.
+            False — lock held by another process; caller should enqueue only.
+        """
+        if not self.try_acquire_drain_lock(resume_orphaned=resume_orphaned):
+            return False
+
+        try:
             self.start()
         except Exception as e:
             log_error(f"Failed to start worker: {e}")

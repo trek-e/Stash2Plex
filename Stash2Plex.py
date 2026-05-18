@@ -955,6 +955,15 @@ def handle_process_queue():
         from worker.processor import SyncWorker
         worker_local = SyncWorker(queue_manager, dlq, config, data_dir=data_dir)
 
+        # Acquire the worker exclusion lock before draining.
+        # try_acquire_drain_lock() uses fcntl LOCK_EX | LOCK_NB so exactly one
+        # process at a time may run run_batch(). Concurrent callers (e.g. N
+        # process_queue spawns from drain_trigger) exit cleanly without touching
+        # the queue — the single winner drains everything.
+        if not worker_local.try_acquire_drain_lock(resume_orphaned=True):
+            log_info("Queue already being drained by another process — skipping")
+            return
+
         # Optional throughput tuning for large backlog drains.
         # Env override example: STASH2PLEX_BATCH_JOB_DELAY_SECS=0.03
         job_delay_secs = 0.15
@@ -967,7 +976,10 @@ def handle_process_queue():
             job_delay_secs = 0.15
 
         log_info(f"Process queue batch delay: {job_delay_secs:.3f}s")
-        worker_local.run_batch(progress_callback=log_progress, job_delay_secs=job_delay_secs)
+        try:
+            worker_local.run_batch(progress_callback=log_progress, job_delay_secs=job_delay_secs)
+        finally:
+            worker_local._release_lock()
 
     except Exception as e:
         log_error(f"Process queue error: {e}")
@@ -1097,8 +1109,11 @@ def maybe_auto_reconcile():
 
         from reconciliation.runner import ReconciliationRunner
 
-        # Check startup trigger first (AUTO-02)
-        if scheduler.is_startup_due():
+        # Check startup trigger first (AUTO-02).
+        # claim_if_due() acquires LOCK_EX, re-reads last_run_time, and writes the
+        # claim timestamp before returning True — so concurrent callers that race
+        # here see the updated timestamp and return False, preventing N parallel scans.
+        if scheduler.claim_if_due('never', is_startup=True):
             log_info("Auto-reconciliation: startup trigger (recent scenes)")
             ReconciliationRunner(stash_interface, config, data_dir, queue_manager).run(
                 scope="recent", is_startup=True
@@ -1106,7 +1121,7 @@ def maybe_auto_reconcile():
             return
 
         # Check interval trigger (AUTO-01)
-        if scheduler.is_due(config.reconcile_interval):
+        if scheduler.claim_if_due(config.reconcile_interval, is_startup=False):
             # Map config scope to engine scope (AUTO-03)
             scope_map = {'all': 'all', '24h': 'recent', '7days': 'recent_7days'}
             engine_scope = scope_map.get(config.reconcile_scope, 'recent')

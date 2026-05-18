@@ -1,283 +1,221 @@
 """Integration tests for auto-reconciliation wiring in Stash2Plex.py."""
 
-from unittest.mock import Mock, MagicMock, patch, call
-import pytest
+from unittest.mock import Mock, MagicMock, patch
+
+
+def _make_result(**kwargs):
+    """Build a mock GapDetectionResult with sensible defaults."""
+    result = Mock()
+    result.total_gaps = kwargs.get("total_gaps", 0)
+    result.enqueued_count = kwargs.get("enqueued_count", 0)
+    result.empty_metadata_count = kwargs.get("empty_metadata_count", 0)
+    result.stale_sync_count = kwargs.get("stale_sync_count", 0)
+    result.missing_count = kwargs.get("missing_count", 0)
+    result.scenes_checked = kwargs.get("scenes_checked", 0)
+    result.skipped_already_queued = kwargs.get("skipped_already_queued", 0)
+    result.skipped_no_metadata = kwargs.get("skipped_no_metadata", 0)
+    result.errors = kwargs.get("errors", [])
+    return result
 
 
 # =============================================================================
 # maybe_auto_reconcile() Tests
 # =============================================================================
 
+
 def test_auto_reconcile_disabled_when_never():
     """config.reconcile_interval='never' -> no engine call."""
     mock_config = MagicMock()
-    mock_config.reconcile_interval = 'never'
+    mock_config.reconcile_interval = "never"
 
-    with patch('Stash2Plex.config', mock_config), \
-         patch('Stash2Plex.stash_interface', MagicMock()), \
-         patch('Stash2Plex.queue_manager', MagicMock()), \
-         patch('Stash2Plex.get_plugin_data_dir', return_value='/tmp/data'), \
-         patch('reconciliation.engine.GapDetectionEngine') as mock_engine:
+    with patch("Stash2Plex.config", mock_config), \
+         patch("Stash2Plex.stash_interface", MagicMock()), \
+         patch("Stash2Plex.queue_manager", MagicMock()), \
+         patch("Stash2Plex.get_plugin_data_dir", return_value="/tmp/data"), \
+         patch("reconciliation.runner.GapDetectionEngine") as mock_engine:
 
         from Stash2Plex import maybe_auto_reconcile
         maybe_auto_reconcile()
 
-        # Engine should not be instantiated
         mock_engine.assert_not_called()
 
 
 def test_auto_reconcile_disabled_when_no_config():
     """config=None -> returns without error."""
-    with patch('Stash2Plex.config', None), \
-         patch('Stash2Plex.stash_interface', MagicMock()), \
-         patch('Stash2Plex.queue_manager', MagicMock()), \
-         patch('reconciliation.engine.GapDetectionEngine') as mock_engine:
+    with patch("Stash2Plex.config", None), \
+         patch("Stash2Plex.stash_interface", MagicMock()), \
+         patch("Stash2Plex.queue_manager", MagicMock()), \
+         patch("reconciliation.runner.GapDetectionEngine") as mock_engine:
 
         from Stash2Plex import maybe_auto_reconcile
         maybe_auto_reconcile()
 
-        # Engine should not be called
         mock_engine.assert_not_called()
 
 
 def test_auto_reconcile_disabled_when_no_stash():
     """stash_interface=None -> returns without error."""
     mock_config = MagicMock()
-    mock_config.reconcile_interval = 'hourly'
+    mock_config.reconcile_interval = "hourly"
 
-    with patch('Stash2Plex.config', mock_config), \
-         patch('Stash2Plex.stash_interface', None), \
-         patch('Stash2Plex.queue_manager', MagicMock()), \
-         patch('reconciliation.engine.GapDetectionEngine') as mock_engine:
+    with patch("Stash2Plex.config", mock_config), \
+         patch("Stash2Plex.stash_interface", None), \
+         patch("Stash2Plex.queue_manager", MagicMock()), \
+         patch("reconciliation.runner.GapDetectionEngine") as mock_engine:
 
         from Stash2Plex import maybe_auto_reconcile
         maybe_auto_reconcile()
 
-        # Engine should not be called
         mock_engine.assert_not_called()
 
 
 def test_auto_reconcile_startup_trigger():
     """First run triggers startup reconciliation (recent scope)."""
     mock_config = MagicMock()
-    mock_config.reconcile_interval = 'daily'
-    mock_config.reconcile_scope = '24h'
+    mock_config.reconcile_interval = "daily"
+    mock_config.reconcile_scope = "24h"
 
     mock_scheduler = MagicMock()
-    mock_scheduler.is_startup_due.return_value = True
-    mock_scheduler.is_due.return_value = False
+    # claim_if_due(is_startup=True) wins the slot → startup run proceeds
+    mock_scheduler.claim_if_due.side_effect = lambda interval, is_startup=False: is_startup
 
-    mock_result = Mock()
-    mock_result.total_gaps = 5
-    mock_result.enqueued_count = 3
-    mock_result.empty_metadata_count = 2
-    mock_result.stale_sync_count = 1
-    mock_result.missing_count = 2
-    mock_result.scenes_checked = 50
-
+    mock_result = _make_result(
+        total_gaps=5,
+        enqueued_count=3,
+        empty_metadata_count=2,
+        stale_sync_count=1,
+        missing_count=2,
+        scenes_checked=50,
+    )
     mock_engine = MagicMock()
     mock_engine.run.return_value = mock_result
 
-    with patch('Stash2Plex.config', mock_config), \
-         patch('Stash2Plex.stash_interface', MagicMock()), \
-         patch('Stash2Plex.queue_manager') as mock_qm, \
-         patch('Stash2Plex.get_plugin_data_dir', return_value='/tmp/data'), \
-         patch('reconciliation.scheduler.ReconciliationScheduler', return_value=mock_scheduler), \
-         patch('reconciliation.engine.GapDetectionEngine', return_value=mock_engine):
-
-        mock_qm.get_queue.return_value = MagicMock()
+    with patch("Stash2Plex.config", mock_config), \
+         patch("Stash2Plex.stash_interface", MagicMock()), \
+         patch("Stash2Plex.queue_manager", MagicMock()), \
+         patch("Stash2Plex.get_plugin_data_dir", return_value="/tmp/data"), \
+         patch("reconciliation.scheduler.ReconciliationScheduler", return_value=mock_scheduler), \
+         patch("reconciliation.runner.GapDetectionEngine", return_value=mock_engine), \
+         patch("reconciliation.runner.ReconciliationScheduler", return_value=mock_scheduler):
 
         from Stash2Plex import maybe_auto_reconcile
         maybe_auto_reconcile()
 
-        # Verify startup check was called
-        mock_scheduler.is_startup_due.assert_called_once()
+        # Startup claim was attempted
+        mock_scheduler.claim_if_due.assert_any_call("never", is_startup=True)
 
-        # Verify engine was called with 'recent' scope (startup uses recent)
-        mock_engine.run.assert_called_once_with(scope='recent')
+        # Engine called with 'recent' scope (startup always uses recent)
+        mock_engine.run.assert_called_once_with(scope="recent")
 
-        # Verify result was recorded
+        # Scheduler recorded the run with is_startup=True
         mock_scheduler.record_run.assert_called_once()
-        call_args = mock_scheduler.record_run.call_args
-        assert call_args[0][0] == mock_result  # result
-        assert call_args[1]['is_startup'] is True
+        args, kwargs = mock_scheduler.record_run.call_args
+        assert args[0] is mock_result
+        assert kwargs["is_startup"] is True
 
 
 def test_auto_reconcile_interval_trigger():
     """Interval elapsed triggers reconciliation with configured scope."""
     mock_config = MagicMock()
-    mock_config.reconcile_interval = 'hourly'
-    mock_config.reconcile_scope = '7days'
+    mock_config.reconcile_interval = "hourly"
+    mock_config.reconcile_scope = "7days"
 
     mock_scheduler = MagicMock()
-    mock_scheduler.is_startup_due.return_value = False
-    mock_scheduler.is_due.return_value = True
+    # Startup claim fails (not due); interval claim succeeds
+    mock_scheduler.claim_if_due.side_effect = lambda interval, is_startup=False: not is_startup
 
-    mock_result = Mock()
-    mock_result.total_gaps = 10
-    mock_result.enqueued_count = 8
-    mock_result.empty_metadata_count = 3
-    mock_result.stale_sync_count = 2
-    mock_result.missing_count = 5
-    mock_result.scenes_checked = 100
-
+    mock_result = _make_result(
+        total_gaps=10,
+        enqueued_count=8,
+        empty_metadata_count=3,
+        stale_sync_count=2,
+        missing_count=5,
+        scenes_checked=100,
+    )
     mock_engine = MagicMock()
     mock_engine.run.return_value = mock_result
 
-    with patch('Stash2Plex.config', mock_config), \
-         patch('Stash2Plex.stash_interface', MagicMock()), \
-         patch('Stash2Plex.queue_manager') as mock_qm, \
-         patch('Stash2Plex.get_plugin_data_dir', return_value='/tmp/data'), \
-         patch('reconciliation.scheduler.ReconciliationScheduler', return_value=mock_scheduler), \
-         patch('reconciliation.engine.GapDetectionEngine', return_value=mock_engine):
-
-        mock_qm.get_queue.return_value = MagicMock()
+    with patch("Stash2Plex.config", mock_config), \
+         patch("Stash2Plex.stash_interface", MagicMock()), \
+         patch("Stash2Plex.queue_manager", MagicMock()), \
+         patch("Stash2Plex.get_plugin_data_dir", return_value="/tmp/data"), \
+         patch("reconciliation.scheduler.ReconciliationScheduler", return_value=mock_scheduler), \
+         patch("reconciliation.runner.GapDetectionEngine", return_value=mock_engine), \
+         patch("reconciliation.runner.ReconciliationScheduler", return_value=mock_scheduler):
 
         from Stash2Plex import maybe_auto_reconcile
         maybe_auto_reconcile()
 
-        # Verify interval check was called with config value
-        mock_scheduler.is_due.assert_called_once_with('hourly')
+        # Interval claim was attempted with the configured interval
+        mock_scheduler.claim_if_due.assert_any_call("hourly", is_startup=False)
 
-        # Verify engine was called with mapped scope (7days -> recent_7days)
-        mock_engine.run.assert_called_once_with(scope='recent_7days')
+        # 7days config scope maps to 'recent_7days' engine scope
+        mock_engine.run.assert_called_once_with(scope="recent_7days")
 
-        # Verify result was recorded
+        # Scheduler recorded the run with is_startup=False
         mock_scheduler.record_run.assert_called_once()
-        call_args = mock_scheduler.record_run.call_args
-        assert call_args[0][0] == mock_result  # result
-        assert call_args[1]['is_startup'] is False
+        args, kwargs = mock_scheduler.record_run.call_args
+        assert args[0] is mock_result
+        assert kwargs["is_startup"] is False
 
 
 def test_auto_reconcile_not_due():
     """Neither startup nor interval due -> no engine call."""
     mock_config = MagicMock()
-    mock_config.reconcile_interval = 'daily'
-    mock_config.reconcile_scope = '24h'
+    mock_config.reconcile_interval = "daily"
+    mock_config.reconcile_scope = "24h"
 
     mock_scheduler = MagicMock()
-    mock_scheduler.is_startup_due.return_value = False
-    mock_scheduler.is_due.return_value = False
+    # Both claim attempts fail → neither run fires
+    mock_scheduler.claim_if_due.return_value = False
 
-    with patch('Stash2Plex.config', mock_config), \
-         patch('Stash2Plex.stash_interface', MagicMock()), \
-         patch('Stash2Plex.queue_manager', MagicMock()), \
-         patch('Stash2Plex.get_plugin_data_dir', return_value='/tmp/data'), \
-         patch('reconciliation.scheduler.ReconciliationScheduler', return_value=mock_scheduler), \
-         patch('reconciliation.engine.GapDetectionEngine') as mock_engine:
+    with patch("Stash2Plex.config", mock_config), \
+         patch("Stash2Plex.stash_interface", MagicMock()), \
+         patch("Stash2Plex.queue_manager", MagicMock()), \
+         patch("Stash2Plex.get_plugin_data_dir", return_value="/tmp/data"), \
+         patch("reconciliation.scheduler.ReconciliationScheduler", return_value=mock_scheduler), \
+         patch("reconciliation.runner.GapDetectionEngine") as mock_engine:
 
         from Stash2Plex import maybe_auto_reconcile
         maybe_auto_reconcile()
 
-        # Engine should not be instantiated (neither trigger fired)
         mock_engine.assert_not_called()
 
 
 def test_auto_reconcile_exception_handling(capfd):
     """Engine error is caught and logged, not raised."""
     mock_config = MagicMock()
-    mock_config.reconcile_interval = 'hourly'
-    mock_config.reconcile_scope = '24h'
+    mock_config.reconcile_interval = "hourly"
+    mock_config.reconcile_scope = "24h"
 
     mock_scheduler = MagicMock()
-    mock_scheduler.is_startup_due.return_value = True
-    mock_scheduler.is_due.return_value = False
+    # Startup claim succeeds → engine is called → engine raises
+    mock_scheduler.claim_if_due.side_effect = lambda interval, is_startup=False: is_startup
 
     mock_engine = MagicMock()
     mock_engine.run.side_effect = Exception("Engine failed")
 
-    with patch('Stash2Plex.config', mock_config), \
-         patch('Stash2Plex.stash_interface', MagicMock()), \
-         patch('Stash2Plex.queue_manager') as mock_qm, \
-         patch('Stash2Plex.get_plugin_data_dir', return_value='/tmp/data'), \
-         patch('reconciliation.scheduler.ReconciliationScheduler', return_value=mock_scheduler), \
-         patch('reconciliation.engine.GapDetectionEngine', return_value=mock_engine):
-
-        mock_qm.get_queue.return_value = MagicMock()
+    with patch("Stash2Plex.config", mock_config), \
+         patch("Stash2Plex.stash_interface", MagicMock()), \
+         patch("Stash2Plex.queue_manager", MagicMock()), \
+         patch("Stash2Plex.get_plugin_data_dir", return_value="/tmp/data"), \
+         patch("reconciliation.scheduler.ReconciliationScheduler", return_value=mock_scheduler), \
+         patch("reconciliation.runner.GapDetectionEngine", return_value=mock_engine), \
+         patch("reconciliation.runner.ReconciliationScheduler", return_value=mock_scheduler):
 
         from Stash2Plex import maybe_auto_reconcile
 
-        # Should not raise, error should be caught
+        # Should not raise — caught by maybe_auto_reconcile
         maybe_auto_reconcile()
 
-        # Verify error was logged
         captured = capfd.readouterr()
-        assert 'Auto-reconciliation failed: Engine failed' in captured.err
-
-
-# =============================================================================
-# _run_auto_reconcile() Tests
-# =============================================================================
-
-def test_run_auto_reconcile_records_state():
-    """After successful run, scheduler state is updated."""
-    mock_config = MagicMock()
-    mock_config.reconcile_scope = '24h'
-    mock_scheduler = MagicMock()
-
-    mock_result = Mock()
-    mock_result.total_gaps = 5
-    mock_result.enqueued_count = 3
-    mock_result.empty_metadata_count = 2
-    mock_result.stale_sync_count = 1
-    mock_result.missing_count = 2
-    mock_result.scenes_checked = 50
-
-    mock_engine = MagicMock()
-    mock_engine.run.return_value = mock_result
-
-    with patch('Stash2Plex.config', mock_config), \
-         patch('Stash2Plex.stash_interface', MagicMock()), \
-         patch('Stash2Plex.queue_manager') as mock_qm, \
-         patch('Stash2Plex.get_plugin_data_dir', return_value='/tmp/data'), \
-         patch('reconciliation.engine.GapDetectionEngine', return_value=mock_engine):
-
-        mock_qm.get_queue.return_value = MagicMock()
-
-        from Stash2Plex import _run_auto_reconcile
-        _run_auto_reconcile(mock_scheduler, scope='recent', is_startup=True)
-
-        # Verify scheduler.record_run was called
-        mock_scheduler.record_run.assert_called_once()
-        # Check the actual call signature: record_run(result, scope=scope_label, is_startup=is_startup)
-        args, kwargs = mock_scheduler.record_run.call_args
-        assert args[0] == mock_result
-        assert kwargs['scope'] == "recent (startup)"
-        assert kwargs['is_startup'] is True
-
-
-def test_run_auto_reconcile_engine_error(capfd):
-    """Engine exception is caught and logged."""
-    mock_config = MagicMock()
-    mock_scheduler = MagicMock()
-
-    mock_engine = MagicMock()
-    mock_engine.run.side_effect = Exception("Engine crashed")
-
-    with patch('Stash2Plex.config', mock_config), \
-         patch('Stash2Plex.stash_interface', MagicMock()), \
-         patch('Stash2Plex.queue_manager') as mock_qm, \
-         patch('Stash2Plex.get_plugin_data_dir', return_value='/tmp/data'), \
-         patch('reconciliation.engine.GapDetectionEngine', return_value=mock_engine):
-
-        mock_qm.get_queue.return_value = MagicMock()
-
-        from Stash2Plex import _run_auto_reconcile
-
-        # Should not raise
-        _run_auto_reconcile(mock_scheduler, scope='all', is_startup=False)
-
-        # Verify error was logged
-        captured = capfd.readouterr()
-        assert 'Auto-reconciliation failed: Engine crashed' in captured.err
-
-        # Verify scheduler.record_run was NOT called (run didn't complete)
-        mock_scheduler.record_run.assert_not_called()
+        assert "Auto-reconciliation check failed: Engine failed" in captured.err
 
 
 # =============================================================================
 # handle_queue_status() Enhanced Output Tests
 # =============================================================================
+
 
 def test_queue_status_shows_reconciliation_info(capfd):
     """When state exists, reconciliation info is logged."""
@@ -287,9 +225,9 @@ def test_queue_status_shows_reconciliation_info(capfd):
     mock_state.last_scenes_checked = 100
     mock_state.last_gaps_found = 10
     mock_state.last_gaps_by_type = {
-        'empty_metadata': 3,
-        'stale_sync': 2,
-        'missing': 5
+        "empty_metadata": 3,
+        "stale_sync": 2,
+        "missing": 5,
     }
     mock_state.last_enqueued = 8
     mock_state.is_startup_run = True
@@ -298,44 +236,35 @@ def test_queue_status_shows_reconciliation_info(capfd):
     mock_scheduler = MagicMock()
     mock_scheduler.load_state.return_value = mock_state
 
-    mock_stats = {
-        'pending': 10,
-        'in_progress': 2,
-        'completed': 100,
-        'failed': 3
-    }
+    mock_stats = {"pending": 10, "in_progress": 2, "completed": 100, "failed": 3}
 
     mock_dlq = MagicMock()
     mock_dlq.get_count.return_value = 5
     mock_dlq.get_error_summary.return_value = {}
 
-    with patch('Stash2Plex.get_plugin_data_dir', return_value='/tmp/data'), \
-         patch('sync_queue.operations.get_stats', return_value=mock_stats), \
-         patch('sync_queue.dlq.DeadLetterQueue', return_value=mock_dlq), \
-         patch('reconciliation.scheduler.ReconciliationScheduler', return_value=mock_scheduler):
+    with patch("Stash2Plex.get_plugin_data_dir", return_value="/tmp/data"), \
+         patch("sync_queue.operations.get_stats", return_value=mock_stats), \
+         patch("sync_queue.dlq.DeadLetterQueue", return_value=mock_dlq), \
+         patch("reconciliation.scheduler.ReconciliationScheduler", return_value=mock_scheduler):
 
         from Stash2Plex import handle_queue_status
         handle_queue_status()
 
-        captured = capfd.readouterr()
-        stderr = captured.err
+        stderr = capfd.readouterr().err
 
-        # Verify queue stats are shown
-        assert 'Queue Status' in stderr
-        assert 'Pending: 10' in stderr
-
-        # Verify reconciliation status section exists
-        assert 'Reconciliation Status' in stderr
-        assert 'Last run: 2009-02-13' in stderr  # timestamp conversion
-        assert 'Scope: recent' in stderr
-        assert 'Scenes checked: 100' in stderr
-        assert 'Gaps found: 10' in stderr
-        assert 'Empty metadata: 3' in stderr
-        assert 'Stale sync: 2' in stderr
-        assert 'Missing from Plex: 5' in stderr
-        assert 'Enqueued: 8' in stderr
-        assert 'Triggered by startup' in stderr
-        assert 'Total reconciliation runs: 5' in stderr
+        assert "Queue Status" in stderr
+        assert "Pending: 10" in stderr
+        assert "Reconciliation Status" in stderr
+        assert "Last run: 2009-02-13" in stderr
+        assert "Scope: recent" in stderr
+        assert "Scenes checked: 100" in stderr
+        assert "Gaps found: 10" in stderr
+        assert "Empty metadata: 3" in stderr
+        assert "Stale sync: 2" in stderr
+        assert "Missing from Plex: 5" in stderr
+        assert "Enqueued: 8" in stderr
+        assert "Triggered by startup" in stderr
+        assert "Total reconciliation runs: 5" in stderr
 
 
 def test_queue_status_no_reconciliation_runs(capfd):
@@ -346,62 +275,47 @@ def test_queue_status_no_reconciliation_runs(capfd):
     mock_scheduler = MagicMock()
     mock_scheduler.load_state.return_value = mock_state
 
-    mock_stats = {
-        'pending': 0,
-        'in_progress': 0,
-        'completed': 0,
-        'failed': 0
-    }
+    mock_stats = {"pending": 0, "in_progress": 0, "completed": 0, "failed": 0}
 
     mock_dlq = MagicMock()
     mock_dlq.get_count.return_value = 0
     mock_dlq.get_error_summary.return_value = {}
 
-    with patch('Stash2Plex.get_plugin_data_dir', return_value='/tmp/data'), \
-         patch('sync_queue.operations.get_stats', return_value=mock_stats), \
-         patch('sync_queue.dlq.DeadLetterQueue', return_value=mock_dlq), \
-         patch('reconciliation.scheduler.ReconciliationScheduler', return_value=mock_scheduler):
+    with patch("Stash2Plex.get_plugin_data_dir", return_value="/tmp/data"), \
+         patch("sync_queue.operations.get_stats", return_value=mock_stats), \
+         patch("sync_queue.dlq.DeadLetterQueue", return_value=mock_dlq), \
+         patch("reconciliation.scheduler.ReconciliationScheduler", return_value=mock_scheduler):
 
         from Stash2Plex import handle_queue_status
         handle_queue_status()
 
-        captured = capfd.readouterr()
-        stderr = captured.err
+        stderr = capfd.readouterr().err
 
-        # Verify "no runs yet" message
-        assert 'Reconciliation Status' in stderr
-        assert 'No reconciliation runs yet' in stderr
+        assert "Reconciliation Status" in stderr
+        assert "No reconciliation runs yet" in stderr
 
 
 # =============================================================================
 # Scope Mapping Tests
 # =============================================================================
 
+
 def test_reconcile_7days_mode_dispatch():
     """mode='reconcile_7days' calls handle_reconcile('recent_7days')."""
-    mock_result = Mock()
-    mock_result.scenes_checked = 100
-    mock_result.total_gaps = 5
-    mock_result.empty_metadata_count = 2
-    mock_result.stale_sync_count = 1
-    mock_result.missing_count = 2
-    mock_result.enqueued_count = 4
-    mock_result.skipped_already_queued = 0
-    mock_result.errors = []
-
+    mock_result = _make_result(scenes_checked=100, total_gaps=5,
+                               empty_metadata_count=2, stale_sync_count=1,
+                               missing_count=2, enqueued_count=4)
     mock_engine = MagicMock()
     mock_engine.run.return_value = mock_result
 
-    with patch('Stash2Plex.stash_interface', MagicMock()), \
-         patch('Stash2Plex.config', MagicMock()), \
-         patch('Stash2Plex.queue_manager') as mock_qm, \
-         patch('Stash2Plex.get_plugin_data_dir', return_value='/tmp/data'), \
-         patch('reconciliation.engine.GapDetectionEngine', return_value=mock_engine):
-
-        mock_qm.get_queue.return_value = MagicMock()
+    with patch("Stash2Plex.stash_interface", MagicMock()), \
+         patch("Stash2Plex.config", MagicMock()), \
+         patch("Stash2Plex.queue_manager", MagicMock()), \
+         patch("Stash2Plex.get_plugin_data_dir", return_value="/tmp/data"), \
+         patch("reconciliation.runner.GapDetectionEngine", return_value=mock_engine), \
+         patch("reconciliation.runner.ReconciliationScheduler"):
 
         from Stash2Plex import handle_task
-        handle_task({'mode': 'reconcile_7days'}, stash=None)
+        handle_task({"mode": "reconcile_7days"}, stash=None)
 
-        # Verify engine was called with 'recent_7days' scope
-        mock_engine.run.assert_called_once_with(scope='recent_7days')
+        mock_engine.run.assert_called_once_with(scope="recent_7days")
