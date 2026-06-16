@@ -184,9 +184,12 @@ class SyncWorker:
 
         lock_path = os.path.join(self.data_dir, 'worker.lock')
         try:
-            import fcntl
+            from shared.file_lock import lock_exclusive
             self._lock_fd = open(lock_path, 'w')
-            fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if not lock_exclusive(self._lock_fd, blocking=False):
+                self._lock_fd.close()
+                self._lock_fd = None
+                return False
         except (BlockingIOError, OSError):
             # Lock held by another process
             if self._lock_fd:
@@ -249,8 +252,8 @@ class SyncWorker:
         if self._lock_fd is None:
             return
         try:
-            import fcntl
-            fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_UN)
+            from shared.file_lock import unlock
+            unlock(self._lock_fd)
         except OSError:
             pass
         try:

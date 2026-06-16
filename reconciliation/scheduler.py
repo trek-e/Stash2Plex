@@ -9,10 +9,10 @@ is due based on persisted state in reconciliation_state.json.
 import json
 import os
 import time
-import fcntl
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
+from shared.file_lock import lock_exclusive, lock_shared, unlock
 from shared.log import create_logger
 _, log_debug, log_info, _, _ = create_logger("Scheduler")
 
@@ -61,18 +61,18 @@ class ReconciliationScheduler:
     def load_state(self) -> ReconciliationState:
         """Load reconciliation state from disk with file locking.
 
-        Uses fcntl.flock() to prevent concurrent access races.
+        Uses platform file locking to prevent concurrent access races.
         """
         try:
             if os.path.exists(self.state_path):
                 with open(self.state_path, 'r') as f:
                     # Acquire shared lock for reading
-                    fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+                    lock_shared(f)
                     try:
                         data = json.load(f)
                         return ReconciliationState(**data)
                     finally:
-                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                        unlock(f)
         except (json.JSONDecodeError, TypeError, KeyError, OSError) as e:
             log_debug(f"Failed to load reconciliation state, using defaults: {e}")
         return ReconciliationState()
@@ -89,13 +89,13 @@ class ReconciliationScheduler:
             # Use dedicated lock file to coordinate writes
             with open(lock_path, 'w') as lock_file:
                 # Acquire exclusive lock for writing
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                lock_exclusive(lock_file)
                 try:
                     with open(tmp_path, 'w') as f:
                         json.dump(asdict(state), f, indent=2)
                     os.replace(tmp_path, self.state_path)
                 finally:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                    unlock(lock_file)
         except OSError as e:
             log_debug(f"Failed to save reconciliation state: {e}")
 
@@ -185,7 +185,7 @@ class ReconciliationScheduler:
         lock_path = self.state_path + '.lock'
         try:
             with open(lock_path, 'w') as lock_file:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                lock_exclusive(lock_file)
                 try:
                     # Re-read under exclusive lock (another process may have
                     # claimed the slot between our fast-path check and here).
@@ -218,7 +218,7 @@ class ReconciliationScheduler:
                     os.replace(tmp_path, self.state_path)
                     return True
                 finally:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                    unlock(lock_file)
         except OSError as e:
             log_debug(f"claim_if_due: lock/write failed, proceeding conservatively: {e}")
             return False

@@ -1,8 +1,8 @@
 """Process concurrency guard for Stash2Plex.
 
 Bounds the number of concurrent Stash2Plex.py processes to prevent spawn
-storms during bulk imports. Uses a directory of per-slot fcntl lockfiles so
-slots are automatically reclaimed on process exit or crash with no cleanup.
+storms during bulk imports. Uses a directory of per-slot lockfiles so slots
+are automatically reclaimed on process exit or crash with no cleanup.
 
 Usage (entry point):
 
@@ -30,9 +30,10 @@ Environment variables:
     STASH2PLEX_MAX_CONCURRENT_PROCESSES  integer, default 5
 """
 
-import fcntl
 import os
 from typing import Optional
+
+from shared.file_lock import lock_exclusive, unlock
 
 
 _DEFAULT_MAX = 5
@@ -51,7 +52,7 @@ def _max_processes_from_env() -> int:
 
 
 class ProcessGuard:
-    """Slot-based process concurrency limiter backed by fcntl lockfiles.
+    """Slot-based process concurrency limiter backed by file locks.
 
     Each slot is a file ``<slots_dir>/proc_slot.<N>`` (N = 0 .. max-1).
     Acquiring a slot takes an exclusive non-blocking flock on one of these
@@ -93,7 +94,9 @@ class ProcessGuard:
             path = self._slot_path(n)
             try:
                 fd = open(path, 'w')
-                fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if not lock_exclusive(fd, blocking=False):
+                    fd.close()
+                    continue
                 # Write PID for observability (best-effort)
                 try:
                     fd.write(str(os.getpid()))
@@ -117,7 +120,7 @@ class ProcessGuard:
         if self._held_fd is None:
             return
         try:
-            fcntl.flock(self._held_fd.fileno(), fcntl.LOCK_UN)
+            unlock(self._held_fd)
         except OSError:
             pass
         try:
@@ -144,11 +147,10 @@ class ProcessGuard:
             path = self._slot_path(n)
             try:
                 with open(path, 'r') as fd:
-                    try:
-                        fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    if lock_exclusive(fd, blocking=False):
                         # Got the lock — slot is free
-                        fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
-                    except (BlockingIOError, OSError):
+                        unlock(fd)
+                    else:
                         # Could not lock — slot is held by another process
                         count += 1
             except FileNotFoundError:

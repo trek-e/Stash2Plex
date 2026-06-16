@@ -13,9 +13,9 @@ States:
 import time
 import json
 import os
-import fcntl
 from enum import Enum
 from typing import Optional
+from shared.file_lock import lock_exclusive, unlock
 from shared.log import create_logger
 
 log_trace, log_debug, log_info, log_warn, log_error = create_logger("CircuitBreaker")
@@ -144,13 +144,13 @@ class CircuitBreaker:
             # Open lock file and acquire exclusive lock
             with open(lock_path, 'w') as lock_file:
                 try:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    self._save_state()
-                except BlockingIOError:
-                    log_trace("Circuit breaker state save skipped (locked)")
+                    if lock_exclusive(lock_file, blocking=False):
+                        self._save_state()
+                    else:
+                        log_trace("Circuit breaker state save skipped (locked)")
                 finally:
                     try:
-                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                        unlock(lock_file)
                     except OSError:
                         pass
         except OSError as e:
