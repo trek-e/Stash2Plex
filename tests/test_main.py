@@ -582,8 +582,7 @@ class TestWorkerLock:
         mock_fd.fileno.return_value = 3
         worker._lock_fd = mock_fd
 
-        with patch('fcntl.flock'):
-            worker.stop()
+        worker.stop()
 
         mock_fd.close.assert_called_once()
         assert worker._lock_fd is None

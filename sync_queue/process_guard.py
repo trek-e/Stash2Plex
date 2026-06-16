@@ -135,7 +135,7 @@ class ProcessGuard:
 
         Uses non-blocking trylock on each slot file. A slot is live if its
         file is locked by another process. This is cheap (no subprocess) and
-        accurate because the kernel tracks fcntl locks per-process.
+        accurate because the OS tracks file locks per process.
         """
         try:
             self._ensure_dir()

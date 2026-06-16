@@ -956,7 +956,7 @@ def handle_process_queue():
         worker_local = SyncWorker(queue_manager, dlq, config, data_dir=data_dir)
 
         # Acquire the worker exclusion lock before draining.
-        # try_acquire_drain_lock() uses fcntl LOCK_EX | LOCK_NB so exactly one
+        # try_acquire_drain_lock() uses a platform file lock so exactly one
         # process at a time may run run_batch(). Concurrent callers (e.g. N
         # process_queue spawns from drain_trigger) exit cleanly without touching
         # the queue — the single winner drains everything.
@@ -1566,7 +1566,7 @@ def main():
     # STASH2PLEX_MAX_CONCURRENT_PROCESSES (default 5). Hook processes that
     # arrive while all slots are taken exit immediately (<5 ms) without
     # loading Python modules, fetching config from Stash, or touching Plex.
-    # Slots are backed by fcntl lockfiles and are automatically released on
+    # Slots are backed by platform lockfiles and are automatically released on
     # process exit (including crash / OOM-kill), so no cleanup is needed.
     global _process_guard
     try:

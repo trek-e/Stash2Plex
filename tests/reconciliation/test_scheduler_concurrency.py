@@ -1,7 +1,7 @@
 """
 Concurrency tests for ReconciliationScheduler.claim_if_due().
 
-Uses real fcntl locks (not mocks) with multiprocessing so the OS-level
+Uses real platform file locks (not mocks) with multiprocessing so the OS-level
 mutual exclusion is actually exercised.
 """
 import json

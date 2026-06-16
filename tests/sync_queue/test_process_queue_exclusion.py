@@ -1,7 +1,7 @@
 """
 Tests for handle_process_queue() exclusion lock and try_acquire_drain_lock().
 
-Uses real fcntl locks (not mocks) with tempfile directories so the OS-level
+Uses real platform file locks (not mocks) with tempfile directories so the OS-level
 mutual exclusion is actually exercised. Multiprocessing is used where we need
 to verify true cross-process exclusion.
 """
@@ -11,6 +11,7 @@ import time
 from unittest.mock import MagicMock, patch
 
 
+from shared.file_lock import lock_exclusive, unlock
 from worker.processor import SyncWorker
 
 
@@ -80,14 +81,14 @@ def test_try_acquire_drain_lock_reacquirable_after_release(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Cross-process exclusion (real fcntl semantics)
+# Cross-process exclusion (real file-lock semantics)
 # ---------------------------------------------------------------------------
 
 
 def test_try_acquire_drain_lock_cross_process_exclusion(tmp_path):
     """
     Two separate processes racing try_acquire_drain_lock: exactly ONE wins.
-    Verifies actual OS-level fcntl exclusion, not just in-process logic.
+    Verifies actual OS-level file-lock exclusion, not just in-process logic.
     """
     data_dir = str(tmp_path)
     result_queue = multiprocessing.Queue()
@@ -166,14 +167,12 @@ def test_handle_process_queue_skips_when_lock_held(tmp_path):
     handle_process_queue() should exit without calling run_batch() when
     another process already holds the drain lock.
     """
-    import fcntl
-
     data_dir = str(tmp_path)
     lock_path = os.path.join(data_dir, "worker.lock")
 
     # Hold the lock externally to simulate another process draining
     lock_fd = open(lock_path, "w")
-    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    assert lock_exclusive(lock_fd, blocking=False) is True
 
     run_batch_called = []
 
@@ -202,7 +201,7 @@ def test_handle_process_queue_skips_when_lock_held(tmp_path):
             from Stash2Plex import handle_process_queue
             handle_process_queue()
     finally:
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+        unlock(lock_fd)
         lock_fd.close()
 
     assert run_batch_called == [], "run_batch must NOT be called when lock is held"

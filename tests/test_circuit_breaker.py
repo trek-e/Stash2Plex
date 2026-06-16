@@ -7,10 +7,10 @@ transitions correctly based on success/failure/timeout.
 
 import pytest
 import json
-import fcntl
 from pathlib import Path
 from unittest.mock import patch, mock_open
 
+from shared.file_lock import lock_exclusive
 from worker.circuit_breaker import CircuitBreaker, CircuitState
 
 
@@ -500,7 +500,7 @@ class TestCircuitBreakerFileLocking:
 
         # Acquire exclusive lock manually
         with open(lock_file, 'w') as lf:
-            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            lock_exclusive(lf)
 
             # Create breaker and trigger transition while lock is held
             breaker = CircuitBreaker(failure_threshold=2, state_file=state_file)
@@ -512,7 +512,7 @@ class TestCircuitBreakerFileLocking:
             # Breaker should still work in-memory
             assert breaker.state == CircuitState.OPEN
 
-            # fcntl.flock releases on file close
+            # file lock releases on file close
 
     def test_save_works_after_lock_released(self, tmp_path):
         """Save works correctly after lock is released."""
@@ -521,7 +521,7 @@ class TestCircuitBreakerFileLocking:
 
         # Acquire and release lock
         with open(lock_file, 'w') as lf:
-            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            lock_exclusive(lf)
         # Lock released here
 
         # Create breaker and trigger transition
