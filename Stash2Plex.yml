@@ -63,7 +63,7 @@ tasks:
     defaultArgs:
       mode: recover_outage_jobs
   - name: Retry Not-Found Entries
-    description: Re-queue DLQ entries that failed because the scene wasn't yet in Plex (PlexNotFound), regardless of outage history — safe once Plex has re-scanned (requires Plex to be healthy)
+    description: Re-queue DLQ entries that failed because the scene wasn't yet in Plex (PlexNotFound), regardless of outage history, and DLQ entries dead-lettered on an auth/network/timeout failure during hydration — safe once Plex has re-scanned or the auth/network issue has cleared (requires Plex to be healthy)
     defaultArgs:
       mode: retry_not_found
   - name: Reconcile Library (All)

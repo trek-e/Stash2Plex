@@ -12,6 +12,7 @@ Three components:
 """
 
 import pickle
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from typing import List, TYPE_CHECKING
@@ -28,9 +29,11 @@ __all__ = [
     "SAFE_RETRY_ERROR_TYPES",
     "OPTIONAL_RETRY_ERROR_TYPES",
     "PERMANENT_ERROR_TYPES",
+    "RECOVERABLE_HYDRATION_ERROR_TYPE",
     "get_error_types_for_recovery",
     "get_outage_dlq_entries",
     "get_dlq_entries_by_error_types",
+    "is_recoverable_hydration_failure",
     "recover_outage_jobs",
     "RecoveryResult",
 ]
@@ -50,6 +53,79 @@ OPTIONAL_RETRY_ERROR_TYPES = ["PlexTemporaryError", "PlexNotFound"]
 # Permanent errors - never retry these
 # Auth failures, permission errors, permanent API errors
 PERMANENT_ERROR_TYPES = ["PlexPermanentError", "PlexAuthError", "PlexPermissionError"]
+
+# error_type recorded by worker/processor.py's own PermanentError exception
+# (distinct from the PERMANENT_ERROR_TYPES above, which are plex/exceptions.py
+# classes). Only entries with this recorded error_type are ever considered by
+# is_recoverable_hydration_failure() below — kept as its own constant rather
+# than folded into PERMANENT_ERROR_TYPES so it can't silently widen the
+# outage-recovery task's behaviour.
+RECOVERABLE_HYDRATION_ERROR_TYPE = "PermanentError"
+
+# HTTP status codes that are always a transient/recoverable condition when
+# they surface as the cause of a dead-lettered hydration failure (auth
+# hiccups, rate limiting, momentary timeouts). 5xx is handled separately
+# below since it's a contiguous range rather than a fixed set.
+_RECOVERABLE_HYDRATION_HTTP_CODES = {401, 403, 408, 429}
+
+# Matches the "HTTP Error <code>: <reason>" shape produced by
+# urllib.error.HTTPError's __str__ — this is the exact shape already sitting
+# in users' DLQs from the legacy (pre-fix) hydration error handling, e.g.
+# "Job 123 missing file path and hydration failed: HTTP Error 401: Unauthorized".
+_HTTP_ERROR_CODE_RE = re.compile(r'HTTP Error (\d{3})')
+
+# Network/timeout phrasing that legacy hydration error handling could have
+# wrapped into a PermanentError message (urllib.error.URLError's __str__ is
+# "<urlopen error ...>"; socket.timeout/TimeoutError/ConnectionError variants
+# read as "timed out", "Connection refused", "Connection reset", etc.).
+_RECOVERABLE_NETWORK_SIGNATURE_RE = re.compile(
+    r'urlopen error|urlerror|url error|timed out|timeout|'
+    r'connection refused|connection reset|connectionerror|'
+    r'network is unreachable|name or service not known|'
+    r'temporary failure in name resolution',
+    re.IGNORECASE,
+)
+
+
+def is_recoverable_hydration_failure(entry: dict) -> bool:
+    """
+    Narrowly match DLQ entries whose recorded failure was an auth, rate-limit,
+    or network/timeout condition encountered during deferred hydration
+    (worker.processor.SyncWorker._hydrate_job_from_stash), rather than a
+    genuinely permanent condition (bad data, missing file path with no HTTP
+    cause, scene deleted from Stash, unrecognized 4xx like 404/400).
+
+    Deliberately conservative: only entries recorded with error_type
+    "PermanentError" (the class worker/processor.py raises for hydration
+    failures) are considered at all, and the message must contain an
+    explicit "HTTP Error <code>" signature (401/403/408/429/5xx) or an
+    explicit network/timeout phrase. Any message we can't confidently
+    classify is treated as NOT recoverable — false negatives (a recoverable
+    entry staying in the DLQ) are the safe failure mode here, not false
+    positives.
+
+    Args:
+        entry: DLQ entry dict as returned by get_dlq_entries_by_error_types()
+               (must have 'error_type' and 'error_message' keys).
+
+    Returns:
+        True if this entry is safe to re-queue as a recovered hydration
+        failure, False otherwise.
+    """
+    if entry.get('error_type') != RECOVERABLE_HYDRATION_ERROR_TYPE:
+        return False
+
+    message = entry.get('error_message') or ''
+    if not message:
+        return False
+
+    http_match = _HTTP_ERROR_CODE_RE.search(message)
+    if http_match:
+        code = int(http_match.group(1))
+        if code in _RECOVERABLE_HYDRATION_HTTP_CODES or 500 <= code < 600:
+            return True
+
+    return bool(_RECOVERABLE_NETWORK_SIGNATURE_RE.search(message))
 
 
 def get_error_types_for_recovery(include_optional: bool = False) -> List[str]:

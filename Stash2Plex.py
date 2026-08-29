@@ -1415,6 +1415,14 @@ def handle_recover_outage_jobs():
 def handle_retry_not_found_jobs():
     """Re-queue DLQ jobs that failed with PlexNotFound, regardless of outage history.
 
+    Also re-queues PermanentError entries whose recorded failure was an
+    auth/rate-limit/network/timeout condition during deferred hydration
+    (see is_recoverable_hydration_failure()) — these were dead-lettered on
+    their first attempt by the pre-fix hydration error classification and
+    are otherwise stuck forever, since neither this task's PlexNotFound
+    filter nor handle_recover_outage_jobs()'s PlexServerDown filter covers
+    them.
+
     PlexNotFound isn't tied to a Plex-down outage the way PlexServerDown is —
     it means the scene simply wasn't in Plex's library yet when we looked.
     By the time a user runs this task, Plex has very likely indexed it on a
@@ -1427,21 +1435,40 @@ def handle_retry_not_found_jobs():
 
         from sync_queue.dlq_recovery import (
             get_dlq_entries_by_error_types,
+            is_recoverable_hydration_failure,
             recover_outage_jobs,
+            RECOVERABLE_HYDRATION_ERROR_TYPE,
         )
         from sync_queue.dlq import DeadLetterQueue
 
-        error_types = ["PlexNotFound"]
-        log_info(f"Retry filter: {', '.join(error_types)}")
+        log_info(
+            "Retry filter: PlexNotFound, "
+            f"{RECOVERABLE_HYDRATION_ERROR_TYPE} (auth/hydration failures only)"
+        )
 
         dlq = DeadLetterQueue(data_dir)
-        entries = get_dlq_entries_by_error_types(dlq, error_types)
+        not_found_entries = get_dlq_entries_by_error_types(dlq, ["PlexNotFound"])
+        permanent_entries = get_dlq_entries_by_error_types(
+            dlq, [RECOVERABLE_HYDRATION_ERROR_TYPE]
+        )
+        hydration_entries = [
+            e for e in permanent_entries if is_recoverable_hydration_failure(e)
+        ]
+
+        entries = not_found_entries + hydration_entries
 
         if not entries:
-            log_info("No PlexNotFound DLQ entries found")
+            log_info(
+                "No PlexNotFound DLQ entries found and no recoverable "
+                "auth/hydration failures found"
+            )
             return
 
-        log_info(f"Found {len(entries)} DLQ entries to evaluate")
+        log_info(
+            f"Found {len(not_found_entries)} PlexNotFound and "
+            f"{len(hydration_entries)} recoverable auth/hydration failure "
+            f"DLQ entries to evaluate"
+        )
 
         if not queue_manager:
             log_error("Queue manager not initialized")
@@ -1476,8 +1503,21 @@ def handle_retry_not_found_jobs():
             data_dir
         )
 
+        # Report the two categories separately so the operator can see what
+        # kind of recovery happened. recovered_scene_ids doesn't retain which
+        # source list an entry came from, so cross-reference by scene_id.
+        not_found_scene_ids = {e['scene_id'] for e in not_found_entries}
+        hydration_scene_ids = {e['scene_id'] for e in hydration_entries}
+        recovered_not_found = sum(
+            1 for sid in result.recovered_scene_ids if sid in not_found_scene_ids
+        )
+        recovered_hydration = sum(
+            1 for sid in result.recovered_scene_ids if sid in hydration_scene_ids
+        )
+
         log_info(
-            f"Retry complete: {result.recovered} recovered, "
+            f"Retry complete: {result.recovered} recovered "
+            f"({recovered_not_found} not-found, {recovered_hydration} auth/hydration), "
             f"{result.skipped_already_queued} already queued, "
             f"{result.skipped_plex_down} skipped (Plex down), "
             f"{result.skipped_scene_missing} skipped (scene missing), "
