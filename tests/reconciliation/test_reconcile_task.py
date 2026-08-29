@@ -29,7 +29,7 @@ def test_handle_reconcile_all_scope():
          patch('Stash2Plex.config', MagicMock()), \
          patch('Stash2Plex.queue_manager') as mock_qm, \
          patch('Stash2Plex.get_plugin_data_dir', return_value='/tmp/data'), \
-         patch('reconciliation.engine.GapDetectionEngine', return_value=mock_engine):
+         patch('reconciliation.runner.GapDetectionEngine', return_value=mock_engine):
 
         mock_qm.get_queue.return_value = MagicMock()
 
@@ -59,7 +59,7 @@ def test_handle_reconcile_recent_scope():
          patch('Stash2Plex.config', MagicMock()), \
          patch('Stash2Plex.queue_manager') as mock_qm, \
          patch('Stash2Plex.get_plugin_data_dir', return_value='/tmp/data'), \
-         patch('reconciliation.engine.GapDetectionEngine', return_value=mock_engine):
+         patch('reconciliation.runner.GapDetectionEngine', return_value=mock_engine):
 
         mock_qm.get_queue.return_value = MagicMock()
 
@@ -89,7 +89,7 @@ def test_handle_reconcile_logs_summary(capfd):
          patch('Stash2Plex.config', MagicMock()), \
          patch('Stash2Plex.queue_manager') as mock_qm, \
          patch('Stash2Plex.get_plugin_data_dir', return_value='/tmp/data'), \
-         patch('reconciliation.engine.GapDetectionEngine', return_value=mock_engine):
+         patch('reconciliation.runner.GapDetectionEngine', return_value=mock_engine):
 
         mock_qm.get_queue.return_value = MagicMock()
 
@@ -159,7 +159,7 @@ def test_handle_reconcile_no_queue(capfd):
          patch('Stash2Plex.config', MagicMock()), \
          patch('Stash2Plex.queue_manager', None), \
          patch('Stash2Plex.get_plugin_data_dir', return_value='/tmp/data'), \
-         patch('reconciliation.engine.GapDetectionEngine', return_value=mock_engine):
+         patch('reconciliation.runner.GapDetectionEngine', return_value=mock_engine):
 
         from Stash2Plex import handle_reconcile
         handle_reconcile('all')
@@ -189,7 +189,7 @@ def test_handle_reconcile_engine_errors(capfd):
          patch('Stash2Plex.config', MagicMock()), \
          patch('Stash2Plex.queue_manager') as mock_qm, \
          patch('Stash2Plex.get_plugin_data_dir', return_value='/tmp/data'), \
-         patch('reconciliation.engine.GapDetectionEngine', return_value=mock_engine):
+         patch('reconciliation.runner.GapDetectionEngine', return_value=mock_engine):
 
         mock_qm.get_queue.return_value = MagicMock()
 
@@ -221,7 +221,7 @@ def test_handle_task_dispatches_reconcile_all():
          patch('Stash2Plex.config', MagicMock()), \
          patch('Stash2Plex.queue_manager') as mock_qm, \
          patch('Stash2Plex.get_plugin_data_dir', return_value='/tmp/data'), \
-         patch('reconciliation.engine.GapDetectionEngine', return_value=mock_engine):
+         patch('reconciliation.runner.GapDetectionEngine', return_value=mock_engine):
 
         mock_qm.get_queue.return_value = MagicMock()
 
@@ -251,7 +251,7 @@ def test_handle_task_dispatches_reconcile_recent():
          patch('Stash2Plex.config', MagicMock()), \
          patch('Stash2Plex.queue_manager') as mock_qm, \
          patch('Stash2Plex.get_plugin_data_dir', return_value='/tmp/data'), \
-         patch('reconciliation.engine.GapDetectionEngine', return_value=mock_engine):
+         patch('reconciliation.runner.GapDetectionEngine', return_value=mock_engine):
 
         mock_qm.get_queue.return_value = MagicMock()
 
@@ -288,7 +288,7 @@ def test_reconcile_modes_in_management_modes():
          patch('Stash2Plex.config', MagicMock()), \
          patch('Stash2Plex.queue_manager') as mock_qm, \
          patch('Stash2Plex.get_plugin_data_dir', return_value='/tmp/data'), \
-         patch('reconciliation.engine.GapDetectionEngine', return_value=mock_engine):
+         patch('reconciliation.runner.GapDetectionEngine', return_value=mock_engine):
 
         mock_qm.get_queue.return_value = MagicMock()
 
