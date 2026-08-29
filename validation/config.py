@@ -5,11 +5,17 @@ Provides pydantic v2 models for validating plugin configuration
 with fail-fast behavior and sensible defaults.
 """
 
-from pydantic import BaseModel, Field, field_validator, ValidationError
+from pydantic import BaseModel, Field, field_validator, ValidationError, AliasChoices
 from typing import Optional
 
 from shared.log import create_logger
 _, log_debug, log_info, log_warn, _ = create_logger("Config")
+
+# Bounds for the Plex request timeouts. Values arriving from the Stash UI are
+# clamped to this range rather than rejected: the setting is a free-form number
+# box, and refusing to start is a worse outcome than a sane ceiling.
+CONNECT_TIMEOUT_MIN, CONNECT_TIMEOUT_MAX = 1.0, 30.0
+READ_TIMEOUT_MIN, READ_TIMEOUT_MAX = 5.0, 120.0
 
 
 class Stash2PlexConfig(BaseModel):
@@ -25,8 +31,10 @@ class Stash2PlexConfig(BaseModel):
         max_retries: Retry attempts before DLQ (default: 5, range: 1-20)
         poll_interval: Worker poll interval in seconds (default: 1.0, range: 0.1-60.0)
         strict_mode: If True, reject invalid metadata; if False, sanitize and continue (default: False)
-        plex_connect_timeout: Connection timeout in seconds (default: 5.0, range: 1.0-30.0)
-        plex_read_timeout: Read timeout in seconds (default: 30.0, range: 5.0-120.0)
+        plex_connect_timeout: Connection timeout in seconds (default: 5.0, range: 1.0-30.0).
+            Accepts the `connect_timeout` name Stash2Plex.yml exposes in the Stash UI.
+        plex_read_timeout: Read timeout in seconds (default: 30.0, range: 5.0-120.0).
+            Accepts the `read_timeout` name Stash2Plex.yml exposes in the Stash UI.
         dlq_retention_days: Days to retain failed jobs in DLQ (default: 30, range: 1-365)
     """
 
@@ -40,9 +48,21 @@ class Stash2PlexConfig(BaseModel):
     poll_interval: float = Field(default=1.0, ge=0.1, le=60.0)
     strict_mode: bool = False
 
-    # Plex connection timeouts (in seconds)
-    plex_connect_timeout: float = Field(default=5.0, ge=1.0, le=30.0)
-    plex_read_timeout: float = Field(default=30.0, ge=5.0, le=120.0)
+    # Plex connection timeouts (in seconds).
+    # `connect_timeout`/`read_timeout` are the names declared in Stash2Plex.yml,
+    # i.e. the names Stash persists and hands back to the plugin.
+    plex_connect_timeout: float = Field(
+        default=5.0,
+        ge=CONNECT_TIMEOUT_MIN,
+        le=CONNECT_TIMEOUT_MAX,
+        validation_alias=AliasChoices('plex_connect_timeout', 'connect_timeout'),
+    )
+    plex_read_timeout: float = Field(
+        default=30.0,
+        ge=READ_TIMEOUT_MIN,
+        le=READ_TIMEOUT_MAX,
+        validation_alias=AliasChoices('plex_read_timeout', 'read_timeout'),
+    )
 
     # DLQ settings
     dlq_retention_days: int = Field(default=30, ge=1, le=365)
@@ -211,6 +231,29 @@ class Stash2PlexConfig(BaseModel):
             raise ValueError('plex_token appears invalid (too short)')
         return v
 
+    @field_validator('plex_connect_timeout', 'plex_read_timeout', mode='before')
+    @classmethod
+    def _clamp_timeout(cls, value, info):
+        if value is None:
+            return value
+        bounds = {
+            'plex_connect_timeout': (CONNECT_TIMEOUT_MIN, CONNECT_TIMEOUT_MAX, 5.0),
+            'plex_read_timeout': (READ_TIMEOUT_MIN, READ_TIMEOUT_MAX, 30.0),
+        }
+        low, high, default = bounds[info.field_name]
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            log_warn(f"{info.field_name}: {value!r} is not a number, using {default}s")
+            return default
+        clamped = min(max(number, low), high)
+        if clamped != number:
+            log_warn(
+                f"{info.field_name}: {number}s is outside the supported "
+                f"{low}-{high}s range, using {clamped}s"
+            )
+        return clamped
+
     @field_validator('reconcile_interval', mode='before')
     @classmethod
     def validate_reconcile_interval(cls, v):
@@ -294,6 +337,26 @@ class Stash2PlexConfig(BaseModel):
             log_info("Field sync: all fields enabled")
 
 
+def accepted_setting_names() -> set[str]:
+    """
+    Every key name Stash2PlexConfig will accept as input.
+
+    This is the plugin's configuration contract: field names plus any aliases
+    declared for the names Stash2Plex.yml exposes to the user.
+    """
+    names: set[str] = set()
+    for field_name, field in Stash2PlexConfig.model_fields.items():
+        names.add(field_name)
+        alias = field.validation_alias
+        if isinstance(alias, AliasChoices):
+            names.update(c for c in alias.choices if isinstance(c, str))
+        elif isinstance(alias, str):
+            names.add(alias)
+        if isinstance(field.alias, str):
+            names.add(field.alias)
+    return names
+
+
 def validate_config(config_dict: dict) -> tuple[Optional[Stash2PlexConfig], Optional[str]]:
     """
     Validate configuration dictionary and return Stash2PlexConfig or error message.
@@ -305,6 +368,12 @@ def validate_config(config_dict: dict) -> tuple[Optional[Stash2PlexConfig], Opti
         Tuple of (Stash2PlexConfig, None) on success,
         or (None, error_message) on validation failure
     """
+    unknown = sorted(set(config_dict) - accepted_setting_names())
+    if unknown:
+        log_warn(
+            f"Ignoring unrecognised setting(s): {', '.join(unknown)} — "
+            f"these have no effect"
+        )
     try:
         config = Stash2PlexConfig(**config_dict)
         return (config, None)
@@ -320,4 +389,4 @@ def validate_config(config_dict: dict) -> tuple[Optional[Stash2PlexConfig], Opti
 
 
 # Re-export ValidationError for external use
-__all__ = ['Stash2PlexConfig', 'validate_config', 'ValidationError']
+__all__ = ['Stash2PlexConfig', 'validate_config', 'ValidationError', 'accepted_setting_names']

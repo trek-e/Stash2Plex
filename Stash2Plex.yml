@@ -115,11 +115,11 @@ settings:
     type: BOOLEAN
   connect_timeout:
     displayName: Connect Timeout
-    description: "Plex connection timeout in seconds (default: 5)"
+    description: "Plex connection timeout in seconds (default: 5, range: 1-30)"
     type: NUMBER
   read_timeout:
     displayName: Read Timeout
-    description: "Plex read timeout in seconds (default: 30)"
+    description: "Plex read timeout in seconds (default: 30, range: 5-120)"
     type: NUMBER
   max_tags:
     displayName: "Max Tags"

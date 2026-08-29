@@ -164,47 +164,43 @@ class TestStash2PlexConfig:
         else:
             assert "poll_interval" in error
 
-    @pytest.mark.parametrize("timeout,valid", [
-        (1.0, True),
-        (15.0, True),
-        (30.0, True),
-        (0.5, False),
-        (31.0, False),
+    @pytest.mark.parametrize("timeout,expected", [
+        (1.0, 1.0),
+        (15.0, 15.0),
+        (30.0, 30.0),
+        (0.5, 1.0),      # below minimum — clamped up
+        (31.0, 30.0),    # above maximum — clamped down
     ])
-    def test_plex_connect_timeout_range(self, timeout, valid):
-        """plex_connect_timeout must be 1.0-30.0."""
+    def test_plex_connect_timeout_range(self, timeout, expected):
+        """plex_connect_timeout is clamped into 1.0-30.0 rather than rejected."""
         config_dict = {
             "plex_url": "http://localhost:32400",
             "plex_token": "valid-token-here",
             "plex_connect_timeout": timeout
         }
         config, error = validate_config(config_dict)
-        assert (config is not None) == valid
-        if valid:
-            assert config.plex_connect_timeout == timeout
-        else:
-            assert "plex_connect_timeout" in error
+        assert config is not None
+        assert error is None
+        assert config.plex_connect_timeout == expected
 
-    @pytest.mark.parametrize("timeout,valid", [
-        (5.0, True),
-        (60.0, True),
-        (120.0, True),
-        (4.0, False),
-        (121.0, False),
+    @pytest.mark.parametrize("timeout,expected", [
+        (5.0, 5.0),
+        (60.0, 60.0),
+        (120.0, 120.0),
+        (4.0, 5.0),      # below minimum — clamped up
+        (121.0, 120.0),  # above maximum — clamped down
     ])
-    def test_plex_read_timeout_range(self, timeout, valid):
-        """plex_read_timeout must be 5.0-120.0."""
+    def test_plex_read_timeout_range(self, timeout, expected):
+        """plex_read_timeout is clamped into 5.0-120.0 rather than rejected."""
         config_dict = {
             "plex_url": "http://localhost:32400",
             "plex_token": "valid-token-here",
             "plex_read_timeout": timeout
         }
         config, error = validate_config(config_dict)
-        assert (config is not None) == valid
-        if valid:
-            assert config.plex_read_timeout == timeout
-        else:
-            assert "plex_read_timeout" in error
+        assert config is not None
+        assert error is None
+        assert config.plex_read_timeout == expected
 
     @pytest.mark.parametrize("days,valid", [
         (1, True),
