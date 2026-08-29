@@ -58,11 +58,14 @@ jobs:
 
           echo "::error::Packaged source has diverged between main and v1.x.x."
           echo ""
-          echo "The release workflow builds Stash2Plex.zip from v1.x.x, then mirrors only"
-          echo "index.yml, Stash2Plex.yml and Stash2Plex.zip to main. Users install from"
-          echo "main's index.yml, so main is publishing an artifact whose source main does"
-          echo "not contain. A fix targeting only one of these branches will NOT reach"
-          echo "users of the other branch's published artifact."
+          echo "main is expected to be an exact mirror of v1.x.x: the release workflow"
+          echo "builds Stash2Plex.zip from v1.x.x, then mirrors index.yml, Stash2Plex.yml"
+          echo "and Stash2Plex.zip onto main. Users install from main's index.yml, so this"
+          echo "drift means either the mirror step failed to run/complete, or someone"
+          echo "committed source changes directly to main instead of v1.x.x."
+          echo ""
+          echo "Note: v2.x.x is a separate, unreleased development line and is"
+          echo "intentionally NOT compared here."
           echo ""
           echo "Files that differ between origin/main and origin/v1.x.x (capped at 40):"
           echo "$DIFF" | head -n 40
@@ -71,6 +74,7 @@ jobs:
             echo "... ($((LINE_COUNT - 40)) more file(s) not shown)"
           fi
           echo ""
-          echo "Reconciling the two branches is a maintainer decision. See CONTRIBUTING.md"
-          echo "for which branch to target when fixing a bug."
+          echo "Re-run the mirror step or push the missing commits to main so it matches"
+          echo "v1.x.x again. See CONTRIBUTING.md for which branch to target when fixing"
+          echo "a bug."
           exit 1

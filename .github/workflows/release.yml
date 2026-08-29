@@ -3,6 +3,8 @@ name: Release
 on:
   push:
     tags:
+      # Only v1.5.x/v1.6.x tags trigger a release. v2.x.x work is not tagged in
+      # this range, so it cannot accidentally trigger a release from here.
       - 'v1.5.*'
       - 'v1.6.*'
 
@@ -23,6 +25,11 @@ jobs:
       - name: Determine release branch
         id: branch
         run: |
+          # v1.x.x is the release line and main is expected to be an exact
+          # mirror of it, so tagged commits normally resolve to v1.x.x here.
+          # The `main` fallback is a safety net for the case where the tagged
+          # commit only exists on main (e.g. a mirror commit was tagged, or
+          # someone committed directly to main) rather than an expected path.
           git fetch origin v1.x.x main
           if git branch -r --contains HEAD | grep -q 'origin/v1\.x\.x'; then
             echo "name=v1.x.x" >> "$GITHUB_OUTPUT"
