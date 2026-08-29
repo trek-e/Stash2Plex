@@ -932,6 +932,14 @@ class TestPartialSyncFailure:
         mock_plex_item.genres = []
         mock_plex_item.collections = []
 
+        def reload_side_effect():
+            # Simulate the write actually taking effect once Plex reloads, so
+            # the post-write verification (added for #10) confirms success
+            # instead of finding the field still empty.
+            mock_plex_item.actors = [MagicMock(tag='Actor 1')]
+            mock_plex_item.genres = [MagicMock(tag='Tag 1')]
+        mock_plex_item.reload.side_effect = reload_side_effect
+
         # Mock _fetch_stash_image to return valid image data
         partial_worker._fetch_stash_image = MagicMock(return_value=b'fake image data')
 
