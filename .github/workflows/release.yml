@@ -49,10 +49,59 @@ jobs:
           tag: ${GITHUB_REF_NAME}
           build_time_utc: $(date -u +"%Y-%m-%d %H:%M:%S")
           EOF
+          rm -f Stash2Plex.zip
           zip -r Stash2Plex.zip \
             Stash2Plex.py Stash2Plex.yml requirements.txt BUILD_INFO.txt \
             worker/ sync_queue/ plex/ validation/ shared/ shared_lib/ hooks/ reconciliation/ \
             -x '*/test*' '*/__pycache__/*' '*.pyc' '*/.pytest*'
+
+      - name: Verify plugin zip matches manifest
+        run: |
+          ALLOWED="BUILD_INFO.txt Stash2Plex.py Stash2Plex.yml requirements.txt worker sync_queue plex validation shared shared_lib hooks reconciliation"
+
+          TOP_LEVEL=$(unzip -Z1 Stash2Plex.zip | awk -F/ '{print $1}' | sort -u)
+
+          UNEXPECTED=""
+          for entry in $TOP_LEVEL; do
+            found=0
+            for allowed in $ALLOWED; do
+              if [ "$entry" = "$allowed" ]; then
+                found=1
+                break
+              fi
+            done
+            if [ "$found" -eq 0 ]; then
+              UNEXPECTED="$UNEXPECTED $entry"
+            fi
+          done
+
+          MISSING=""
+          for allowed in $ALLOWED; do
+            found=0
+            for entry in $TOP_LEVEL; do
+              if [ "$entry" = "$allowed" ]; then
+                found=1
+                break
+              fi
+            done
+            if [ "$found" -eq 0 ]; then
+              MISSING="$MISSING $allowed"
+            fi
+          done
+
+          if [ -n "$UNEXPECTED" ]; then
+            echo "::error::Stash2Plex.zip contains entries not in the manifest:$UNEXPECTED"
+          fi
+          if [ -n "$MISSING" ]; then
+            echo "::error::Stash2Plex.zip is missing expected manifest entries:$MISSING"
+          fi
+          if [ -n "$UNEXPECTED" ] || [ -n "$MISSING" ]; then
+            exit 1
+          fi
+
+          COUNT=$(unzip -Z1 Stash2Plex.zip | wc -l | tr -d ' ')
+          SIZE=$(du -h Stash2Plex.zip | cut -f1)
+          echo "Stash2Plex.zip OK: $COUNT entries, $SIZE"
 
       - name: Update index.yml
         run: |

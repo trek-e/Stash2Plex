@@ -191,3 +191,54 @@ def test_release_zip_manifest_ships_every_first_party_import():
                 f"entry list in {RELEASE_YML.relative_to(REPO_ROOT)}."
             )
         pytest.fail("\n".join(lines))
+
+
+def test_release_build_step_removes_stale_zip_before_building():
+    """The "Build plugin zip" step must delete any pre-existing
+    Stash2Plex.zip before invoking `zip -r`.
+
+    Regression guard: v1.6.16 shipped a stale `provider/` tree (not in the
+    manifest at all) because Stash2Plex.zip is committed to the repo, so it
+    already exists in the CI checkout when the build step runs. `zip -r`
+    updates an existing archive in place rather than creating a new one, so
+    every release silently inherited whatever was left over in the previous
+    release's artifact. Without an explicit `rm -f Stash2Plex.zip` (or
+    equivalent) immediately before the `zip -r` call, a file removed from the
+    repo in some later version would keep shipping in the zip forever.
+    """
+    text = RELEASE_YML.read_text()
+
+    build_step_match = re.search(
+        r"- name:\s*Build plugin zip\s*\n\s*run:\s*\|(.*?)(?=\n\s*- name:)",
+        text,
+        re.DOTALL,
+    )
+    assert build_step_match is not None, (
+        f"Could not find the 'Build plugin zip' step in {RELEASE_YML}. "
+        "The release workflow may have been restructured; update the "
+        "parsing regex in test_release_build_step_removes_stale_zip_before_building()."
+    )
+    build_step = build_step_match.group(1)
+
+    rm_match = re.search(r"rm\s+-f\s+Stash2Plex\.zip", build_step)
+    zip_match = re.search(r"zip\s+-r\s+Stash2Plex\.zip", build_step)
+
+    assert zip_match is not None, (
+        f"Could not find `zip -r Stash2Plex.zip ...` inside the 'Build plugin zip' "
+        f"step in {RELEASE_YML}."
+    )
+    assert rm_match is not None, (
+        "The 'Build plugin zip' step in "
+        f"{RELEASE_YML.relative_to(REPO_ROOT)} does not remove any "
+        "pre-existing Stash2Plex.zip before running `zip -r`. Because "
+        "Stash2Plex.zip is committed to the repo, `zip -r` will update the "
+        "checked-out copy in place and silently carry forward stale entries "
+        "from the previous release (this is exactly how v1.6.16 shipped a "
+        "stray provider/ tree). Add `rm -f Stash2Plex.zip` before the "
+        "`zip -r` invocation."
+    )
+    assert rm_match.start() < zip_match.start(), (
+        "`rm -f Stash2Plex.zip` must run BEFORE `zip -r Stash2Plex.zip ...` "
+        f"in the 'Build plugin zip' step of {RELEASE_YML.relative_to(REPO_ROOT)}, "
+        "otherwise the fresh archive gets deleted immediately after being built."
+    )
