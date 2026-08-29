@@ -1,0 +1,53 @@
+name: Mirror main to v1.x.x
+
+# main is the branch users install from (raw.githubusercontent.com/.../main/index.yml)
+# and is expected to be an exact mirror of v1.x.x. This workflow keeps it that
+# way continuously, rather than only at release time, by fast-forwarding main
+# to whatever commit was just pushed to v1.x.x.
+#
+# It is a fast-forward only: if main has diverged (e.g. someone committed
+# directly to main), this fails loudly instead of force-pushing over history.
+
+on:
+  push:
+    branches:
+      - v1.x.x
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fast-forward main to v1.x.x
+        run: |
+          git fetch origin main v1.x.x
+
+          MAIN_SHA=$(git rev-parse origin/main)
+          V1_SHA=$(git rev-parse origin/v1.x.x)
+
+          if [ "$MAIN_SHA" = "$V1_SHA" ]; then
+            echo "main is already at v1.x.x (${V1_SHA}). Nothing to do."
+            exit 0
+          fi
+
+          if ! git merge-base --is-ancestor origin/main origin/v1.x.x; then
+            echo "::error::main has diverged from v1.x.x and cannot be fast-forwarded."
+            echo "main (${MAIN_SHA}) is not an ancestor of v1.x.x (${V1_SHA}), which"
+            echo "means a commit exists on main that does not exist on v1.x.x (e.g."
+            echo "someone committed directly to main). main must be reconciled with"
+            echo "v1.x.x manually (cherry-pick the divergent commit(s) onto v1.x.x,"
+            echo "or reset main to the correct history) before it can be mirrored"
+            echo "automatically again. Refusing to force-push."
+            exit 1
+          fi
+
+          echo "Fast-forwarding main from ${MAIN_SHA} to ${V1_SHA}."
+          git push origin "${V1_SHA}:refs/heads/main"
