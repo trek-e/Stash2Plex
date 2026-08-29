@@ -2256,3 +2256,197 @@ class TestLogDlqStatus:
         processor_worker._log_dlq_status()
 
         processor_worker.dlq.get_recent.assert_not_called()
+
+
+class TestRunBatchDefersNotReadyJobs:
+    """
+    Regression tests for the batch-drain busy-wait.
+
+    run_batch() used to dequeue a not-yet-due retry job and nack it, which
+    resets the row's status in place without moving it — persist-queue's
+    get() always returns the lowest-id ready row — so the *same* job was
+    immediately re-dequeued, sleeping between attempts and logging "returned
+    to queue for retry" on every iteration. Because the job never actually
+    left the ready pool, the batch never saw an empty queue and spun for the
+    entire backoff window (up to ~24h for the PlexNotFound long tail).
+
+    run_batch() must now defer a not-ready job by leaving it held (unack)
+    instead of nacking or reenqueueing it. persist-queue's get() only
+    returns rows with status < 2 (ready), so a held row is skipped by every
+    subsequent get_pending() call this run, letting ready jobs behind it get
+    a turn with zero new queue rows written. The batch terminates once
+    get_pending() returns None (nothing left ready), and every held item is
+    nacked back to ready in a `finally` block so it is never lost. The
+    background worker loop remains responsible for waiting out backoffs.
+    """
+
+    def _not_ready_job(self, job_id, scene_id, remaining=500.0):
+        import time
+        return {
+            'job_id': job_id,
+            'scene_id': scene_id,
+            'update_type': 'metadata',
+            'data': {'path': f'/movies/scene{scene_id}.mp4'},
+            'enqueued_at': time.time(),
+            'job_key': f'scene_{scene_id}',
+            'retry_count': 1,
+            'next_retry_at': time.time() + remaining,
+        }
+
+    def _ready_job(self, job_id, scene_id):
+        return {
+            'job_id': job_id,
+            'scene_id': scene_id,
+            'update_type': 'metadata',
+            'data': {'path': f'/movies/scene{scene_id}.mp4'},
+            'enqueued_at': 0.0,
+            'job_key': f'scene_{scene_id}',
+            'retry_count': 0,
+            'next_retry_at': 0.0,
+        }
+
+    def test_only_not_ready_job_terminates_promptly_and_reports_deferred(self, processor_worker, capsys):
+        """A batch whose only queued job is not yet due must finish instead
+        of spinning, and must report the job as deferred.
+
+        Because the job is held (unack) rather than nacked/reenqueued, the
+        *next* get_pending() call correctly returns None (nothing else ready)
+        instead of the same job again.
+        """
+        job = self._not_ready_job(job_id=10, scene_id=10)
+        processor_worker.queue_manager.get_pending.side_effect = [job, None]
+
+        with patch('sync_queue.operations.get_stats', return_value={'pending': 1, 'in_progress': 0}):
+            result = processor_worker.run_batch()
+
+        assert result == {'processed': 0, 'failed': 0, 'skipped': 0}
+        # Exactly two poll attempts — no busy-wait spin.
+        assert processor_worker.queue_manager.get_pending.call_count == 2
+        # No mid-loop nack/reenqueue — the job is held and released exactly
+        # once, in the finally block, once the batch decides to stop.
+        processor_worker.queue_manager.reenqueue.assert_not_called()
+        processor_worker.queue_manager.nack.assert_called_once_with(job)
+
+        captured = capsys.readouterr()
+        assert "Queue drained: 0 processed, 1 deferred" in captured.err
+
+    def test_ready_job_is_processed_normally(self, processor_worker):
+        """A job whose backoff has elapsed is still processed like before."""
+        job = self._ready_job(job_id=1, scene_id=1)
+        processor_worker.queue_manager.get_pending.side_effect = [job, None]
+
+        with patch.object(processor_worker, '_handle_job', return_value='success') as mock_handle:
+            with patch('sync_queue.operations.get_stats', return_value={'pending': 1, 'in_progress': 0}):
+                result = processor_worker.run_batch(job_delay_secs=0)
+
+        assert result == {'processed': 1, 'failed': 0, 'skipped': 0}
+        mock_handle.assert_called_once()
+        processor_worker.queue_manager.reenqueue.assert_not_called()
+        processor_worker.queue_manager.nack.assert_not_called()
+
+    def test_mixed_ready_and_not_ready_processes_ready_and_defers_other(self, processor_worker, capsys):
+        """A not-ready job at the head must not block a ready job behind it."""
+        not_ready = self._not_ready_job(job_id=10, scene_id=10)
+        ready = self._ready_job(job_id=11, scene_id=11)
+        processor_worker.queue_manager.get_pending.side_effect = [not_ready, ready, None]
+
+        with patch.object(processor_worker, '_handle_job', return_value='success') as mock_handle:
+            with patch('sync_queue.operations.get_stats', return_value={'pending': 2, 'in_progress': 0}):
+                result = processor_worker.run_batch(job_delay_secs=0)
+
+        assert result == {'processed': 1, 'failed': 0, 'skipped': 0}
+        mock_handle.assert_called_once_with(ready, set(), {})
+        processor_worker.queue_manager.reenqueue.assert_not_called()
+        processor_worker.queue_manager.nack.assert_called_once_with(not_ready)
+
+        captured = capsys.readouterr()
+        assert "Queue drained: 1 processed, 1 deferred" in captured.err
+
+    def test_per_job_nack_not_logged_once_per_poll_iteration(self, processor_worker):
+        """Regression: nack (and its 'returned to queue for retry' log) must
+        not be called once per poll iteration while jobs are in backoff.
+
+        Three distinct not-ready jobs are each held (not nacked) as they're
+        seen, then get_pending() returns None. That's 4 poll iterations, but
+        nack must fire only 3 times total — once per held job in the final
+        cleanup — never once per iteration, and never for the same job twice.
+        """
+        job1 = self._not_ready_job(job_id=1, scene_id=1)
+        job2 = self._not_ready_job(job_id=2, scene_id=2)
+        job3 = self._not_ready_job(job_id=3, scene_id=3)
+        processor_worker.queue_manager.get_pending.side_effect = [job1, job2, job3, None]
+
+        with patch('sync_queue.operations.get_stats', return_value={'pending': 3, 'in_progress': 0}):
+            result = processor_worker.run_batch()
+
+        assert result == {'processed': 0, 'failed': 0, 'skipped': 0}
+        assert processor_worker.queue_manager.get_pending.call_count == 4
+        processor_worker.queue_manager.reenqueue.assert_not_called()
+        assert processor_worker.queue_manager.nack.call_count == 3
+        processor_worker.queue_manager.nack.assert_any_call(job1)
+        processor_worker.queue_manager.nack.assert_any_call(job2)
+        processor_worker.queue_manager.nack.assert_any_call(job3)
+
+
+class TestRunBatchDeferredRowCountRegression:
+    """
+    The specific regression the coordinator flagged: an earlier version of
+    this fix deferred not-ready jobs via ack+reenqueue (a fresh queue row per
+    deferred job per drain). On an instance with a documented queue-balloon
+    problem, and drains that now exit promptly and respawn on every hook,
+    that would have measurably accelerated row growth.
+
+    Uses a real QueueManager (real SQLiteAckQueue) instead of mocks so the
+    row count is genuine, not assumed from mock call counts.
+    """
+
+    def test_deferred_jobs_do_not_grow_row_count(self, tmp_path, mock_dlq, mock_config):
+        import time
+        from sync_queue.manager import QueueManager
+        from sync_queue.operations import get_stats
+        from worker.processor import SyncWorker
+
+        mock_config.plex_connect_timeout = 10.0
+        mock_config.plex_read_timeout = 30.0
+        mock_config.preserve_plex_edits = False
+        mock_config.strict_matching = False
+        mock_config.dlq_retention_days = 30
+        mock_config.skip_not_found = False
+
+        data_dir = str(tmp_path)
+        queue_manager = QueueManager(data_dir=data_dir)
+        raw_queue = queue_manager.get_queue()
+
+        not_due = time.time() + 3600  # all jobs deep in backoff, none ready
+        for i in range(5):
+            raw_queue.put({
+                'job_id': i,
+                'scene_id': i,
+                'update_type': 'metadata',
+                'data': {'path': f'/movies/scene{i}.mp4'},
+                'enqueued_at': time.time(),
+                'job_key': f'scene_{i}',
+                'retry_count': 1,
+                'next_retry_at': not_due,
+            })
+
+        def _total_rows():
+            stats = get_stats(queue_manager.queue_path)
+            return sum(stats.values())
+
+        rows_before = _total_rows()
+        assert rows_before == 5
+
+        worker = SyncWorker(
+            queue_manager=queue_manager,
+            dlq=mock_dlq,
+            config=mock_config,
+            data_dir=data_dir,
+        )
+        result = worker.run_batch()
+
+        assert result == {'processed': 0, 'failed': 0, 'skipped': 0}
+        assert _total_rows() == rows_before, (
+            "run_batch() must not create new queue rows while deferring "
+            "not-ready jobs"
+        )

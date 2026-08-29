@@ -900,70 +900,85 @@ class SyncWorker:
         start_time = time.time()
         last_progress_time = start_time
 
-        _consecutive_not_ready = 0
-        _earliest_retry_at = float('inf')
+        # A batch drain should process what is ready and then finish — it must
+        # not sit spinning on a job whose retry is scheduled far in the future
+        # (the background worker loop is what waits out long backoffs).
+        #
+        # A not-ready job is left held (unack) instead of nacked or reenqueued:
+        # persist-queue's get() only ever returns rows with status < 2 (ready),
+        # so an unacked row is skipped by every subsequent get_pending() call
+        # this run — the next call naturally returns a different row, letting
+        # ready jobs behind it get a turn, with zero new queue rows written.
+        # Held jobs are nacked back to ready in the `finally` below so they're
+        # never lost, however the loop exits (including exceptions/crashes —
+        # and if the process dies before that finally runs, the next drain's
+        # try_acquire_drain_lock(resume_orphaned=True) resets orphaned unack
+        # rows back to ready as a second-layer safety net).
+        deferred_items: list = []
+        deferred_count = 0
+        earliest_deferred_retry = float('inf')
+        MAX_DEFERRED = 500
 
-        while True:
-            if not self.circuit_breaker.can_execute():
-                log_warn("Circuit breaker OPEN — Plex may be unavailable")
-                log_info(f"Processed {processed} items before circuit break")
-                break
+        try:
+            while True:
+                if not self.circuit_breaker.can_execute():
+                    log_warn("Circuit breaker OPEN — Plex may be unavailable")
+                    log_info(f"Processed {processed} items before circuit break")
+                    break
 
-            item = self.queue_manager.get_pending(timeout=1)
-            if item is None:
-                break  # Queue empty
+                item = self.queue_manager.get_pending(timeout=1)
+                if item is None:
+                    break  # Nothing left ready (held items are requeued below)
 
-            if not self._is_ready_for_retry(item):
-                next_retry = item.get('next_retry_at', 0)
-                _earliest_retry_at = min(_earliest_retry_at, next_retry)
-                _consecutive_not_ready += 1
-                self.queue_manager.nack(item)
+                if not self._is_ready_for_retry(item):
+                    next_retry = item.get('next_retry_at', 0)
+                    jid = item.get('job_id') or item.get('scene_id')
 
-                queue_size = max(self.queue_manager.get_queue().size, 50)
-                if _consecutive_not_ready >= queue_size:
-                    # All items waiting — sleep until earliest retry, cap at 5s
-                    # (shorter than background worker's 30s to keep progress bar alive)
-                    sleep_secs = max(1.0, min(5.0, _earliest_retry_at - time.time()))
-                    log_debug(f"All {_consecutive_not_ready} items in backoff, sleeping {sleep_secs:.1f}s")
-                    time.sleep(sleep_secs)
-                    _consecutive_not_ready = 0
-                    _earliest_retry_at = float('inf')
-                else:
-                    time.sleep(0.1)
-                continue
+                    deferred_items.append(item)
+                    deferred_count += 1
+                    earliest_deferred_retry = min(earliest_deferred_retry, next_retry)
+                    delay = next_retry - time.time()
+                    log_trace(f"Job {jid} not ready for retry ({delay:.1f}s remaining), deferring to background worker")
 
-            _consecutive_not_ready = 0
-            _earliest_retry_at = float('inf')
+                    if len(deferred_items) >= MAX_DEFERRED:
+                        log_warn(f"Batch drain hit the {MAX_DEFERRED}-item deferred cap; stopping early")
+                        break
+                    continue
 
-            outcome = self._handle_job(item, recently_synced, sync_timestamps)
+                outcome = self._handle_job(item, recently_synced, sync_timestamps)
 
-            if outcome == 'success':
-                processed += 1
-                if job_delay_secs > 0:
-                    time.sleep(job_delay_secs)
-            elif outcome == 'skipped':
-                skipped += 1
-            elif outcome == 'failed':
-                failed += 1
-            elif outcome == 'server_down':
-                log_info(f"Processed {processed} items before Plex went down")
-                break
-            # 'retrying' — job requeued with backoff, continue loop
+                if outcome == 'success':
+                    processed += 1
+                    if job_delay_secs > 0:
+                        time.sleep(job_delay_secs)
+                elif outcome == 'skipped':
+                    skipped += 1
+                elif outcome == 'failed':
+                    failed += 1
+                elif outcome == 'server_down':
+                    log_info(f"Processed {processed} items before Plex went down")
+                    break
+                # 'retrying' — job requeued with backoff, continue loop
 
-            now = time.time()
-            if progress_callback and (
-                processed % 5 == 0 or (now - last_progress_time) >= 10
-            ):
-                progress = min((processed / total) * 100, 100) if total > 0 else 100
-                progress_callback(progress)
-                remaining = self.queue_manager.get_queue().size
-                elapsed = now - start_time
-                rate = processed / elapsed if elapsed > 0 else 0
-                log_info(
-                    f"Progress: {processed}/{total} ({progress:.0f}%), "
-                    f"{remaining} remaining, {rate:.1f} items/sec"
-                )
-                last_progress_time = now
+                now = time.time()
+                if progress_callback and (
+                    processed % 5 == 0 or (now - last_progress_time) >= 10
+                ):
+                    progress = min((processed / total) * 100, 100) if total > 0 else 100
+                    progress_callback(progress)
+                    remaining = self.queue_manager.get_queue().size
+                    elapsed = now - start_time
+                    rate = processed / elapsed if elapsed > 0 else 0
+                    log_info(
+                        f"Progress: {processed}/{total} ({progress:.0f}%), "
+                        f"{remaining} remaining, {rate:.1f} items/sec"
+                    )
+                    last_progress_time = now
+        finally:
+            # Always release held (unack) items back to ready, regardless of
+            # how the loop exited, so a not-ready job is never stranded.
+            for held in deferred_items:
+                self.queue_manager.nack(held)
 
         elapsed = time.time() - start_time
         if progress_callback:
@@ -974,6 +989,14 @@ class SyncWorker:
             summary += f", {skipped} duplicates skipped"
         summary += f" in {elapsed:.1f}s"
         log_info(summary)
+
+        if deferred_count > 0:
+            remaining = max(0.0, earliest_deferred_retry - time.time())
+            mins, secs = divmod(int(remaining), 60)
+            log_info(
+                f"Queue drained: {processed} processed, {deferred_count} deferred "
+                f"(earliest retry in {mins}m {secs}s)"
+            )
 
         if failed > 0:
             dlq_count = self.dlq.get_count()
