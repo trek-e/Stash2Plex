@@ -54,28 +54,28 @@ The project enforces **80% code coverage** (configured in `pytest.ini`). Tests a
 
 ### Which branch to target
 
-This repository has two branches that matter for releases:
+This repository has three branches:
 
-- **`v1.x.x` is the release line.** The published `Stash2Plex.zip` is built from
-  `v1.x.x` by `.github/workflows/release.yml`. **If you are fixing behaviour in a
-  released version, branch from and target `v1.x.x`** — that is the only way your
-  fix reaches users.
-- **`main` receives the built artifact, not the source.** The release workflow's
-  mirror step copies `index.yml`, `Stash2Plex.yml` and `Stash2Plex.zip` from
-  `v1.x.x` onto `main` after each release. `main` hosts the index URL
+- **`v1.x.x` is the release line.** This is where v1 bug fixes and improvements
+  go. The published `Stash2Plex.zip` is built from `v1.x.x` by
+  `.github/workflows/release.yml`. **If you are fixing behaviour in a released
+  version, branch from and target `v1.x.x`** — that is the only way your fix
+  reaches users.
+- **`main` mirrors `v1.x.x`.** After each release, the release workflow copies
+  `index.yml`, `Stash2Plex.yml` and `Stash2Plex.zip` from `v1.x.x` onto `main`.
+  `main` hosts the index URL
   (`https://raw.githubusercontent.com/trek-e/Stash2Plex/main/index.yml`) that
-  users add as a plugin source, but its own source tree is not what the zip was
-  built from.
-- **These two branches currently diverge**, and nothing enforces otherwise. A fix
-  made only against `main` will not appear in the published zip; a fix made only
-  against `v1.x.x` will not show up if you go looking in `main`.
-  `.github/workflows/release-drift.yml` checks for this divergence on every push
-  to `main` or `v1.x.x` and fails when the packaged source differs between them.
+  users add as a plugin source. **Do not target `main` directly with fixes** —
+  it is a mirror, not a place to develop against, and changes made only there
+  will not appear in the published zip. `.github/workflows/release-drift.yml`
+  checks on every push to `main` or `v1.x.x` that the two remain identical.
+- **`v2.x.x` is the v2 development line.** It holds ongoing refactor work and is
+  not released from; nothing here reaches users until it is promoted to a
+  release line.
 
 1. Fork the repository
-2. Create a feature branch from **`v1.x.x`** if you are fixing released behaviour,
-   or from `main` for changes that only need to reach the published index/zip
-   metadata:
+2. Create a feature branch from **`v1.x.x`** if you are fixing released
+   behaviour, or from `v2.x.x` if you are contributing to the v2 refactor:
    ```bash
    git checkout -b feature/your-feature v1.x.x
    ```
@@ -87,7 +87,7 @@ This repository has two branches that matter for releases:
 5. Commit with a descriptive message
 6. Push to your fork
 7. Open a pull request against the branch you branched from (`v1.x.x` for bug
-   fixes against released behaviour)
+   fixes against released behaviour, `v2.x.x` for v2 work)
 
 ### PR Guidelines
 
