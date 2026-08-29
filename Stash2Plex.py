@@ -177,6 +177,47 @@ def get_plugin_data_dir():
     return data_dir
 
 
+# Wildcard bind addresses are valid to listen on but not to connect to.
+# Stash reports its own bind address in server_connection; when that is a
+# wildcard (Stash started with --host 0.0.0.0), connecting back to it fails —
+# on Windows with WinError 10049. Map wildcards to the matching loopback.
+_WILDCARD_HOSTS = {
+    '0.0.0.0': '127.0.0.1',
+    '::': '::1',
+    '[::]': '::1',
+    '0:0:0:0:0:0:0:0': '::1',
+}
+
+
+def normalize_stash_host(host) -> str:
+    """
+    Return a host that is safe to connect to.
+
+    Wildcard bind addresses (0.0.0.0, ::) and empty/missing hosts are mapped to
+    the corresponding loopback address. Routable hosts pass through unchanged.
+    """
+    if not host:
+        return '127.0.0.1'
+    return _WILDCARD_HOSTS.get(str(host).strip(), str(host).strip())
+
+
+def build_stash_base_url(server_conn: dict) -> str:
+    """
+    Build the base URL for calling back into the Stash API.
+
+    Reads Scheme/Host/Port from a Stash `server_connection` payload (accepting
+    either capitalised or lowercase keys), normalises wildcard bind addresses
+    to loopback, and brackets bare IPv6 literals.
+    """
+    server_conn = server_conn or {}
+    scheme = server_conn.get('Scheme', server_conn.get('scheme', 'http'))
+    host = normalize_stash_host(server_conn.get('Host', server_conn.get('host')))
+    port = server_conn.get('Port', server_conn.get('port', 9999))
+    if ':' in host and not host.startswith('['):
+        host = f"[{host}]"
+    return f"{scheme}://{host}:{port}"
+
+
 class DirectStashInterface:
     """
     Stdlib-only drop-in replacement for stashapi.StashInterface.
@@ -187,10 +228,7 @@ class DirectStashInterface:
     """
 
     def __init__(self, server_conn: dict):
-        scheme = server_conn.get('Scheme', server_conn.get('scheme', 'http'))
-        host = server_conn.get('Host', server_conn.get('host', '127.0.0.1'))
-        port = server_conn.get('Port', server_conn.get('port', 9999))
-        self._url = f"{scheme}://{host}:{port}/graphql"
+        self._url = build_stash_base_url(server_conn) + "/graphql"
         self._headers = {'Content-Type': 'application/json'}
         session_cookie = server_conn.get('SessionCookie', {})
         if isinstance(session_cookie, dict) and session_cookie.get('Value'):
@@ -309,10 +347,7 @@ def fetch_plugin_settings_direct(server_conn: dict) -> dict:
     import urllib.request
     import urllib.error
 
-    scheme = server_conn.get('Scheme', server_conn.get('scheme', 'http'))
-    host = server_conn.get('Host', server_conn.get('host', '127.0.0.1'))
-    port = server_conn.get('Port', server_conn.get('port', 9999))
-    url = f"{scheme}://{host}:{port}/graphql"
+    url = build_stash_base_url(server_conn) + "/graphql"
 
     query = '{"query":"{ configuration { plugins } }"}'
     req = urllib.request.Request(
@@ -336,7 +371,7 @@ def fetch_plugin_settings_direct(server_conn: dict) -> dict:
         plugins = data.get('data', {}).get('configuration', {}).get('plugins', {})
         return plugins.get('Stash2Plex', {})
     except Exception as e:
-        log_warn(f" Direct config fetch failed: {e}")
+        log_warn(f" Direct config fetch failed for {url}: {e}")
         return {}
 
 
@@ -385,10 +420,7 @@ def extract_config_from_input(input_data: dict, existing_stash=None) -> dict:
     # Extract Stash connection info for image fetching
     server_conn = input_data.get('server_connection', {})
     if server_conn:
-        scheme = server_conn.get('Scheme', server_conn.get('scheme', 'http'))
-        host = server_conn.get('Host', server_conn.get('host', '127.0.0.1'))
-        port = server_conn.get('Port', server_conn.get('port', 9999))
-        config_dict['stash_url'] = f"{scheme}://{host}:{port}"
+        config_dict['stash_url'] = build_stash_base_url(server_conn)
 
         # Get session cookie for authentication
         session_cookie = server_conn.get('SessionCookie', {})
