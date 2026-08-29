@@ -31,6 +31,82 @@ if TYPE_CHECKING:
     from plex.cache import PlexCache, MatchCache
 
 
+_CREDENTIAL_QUERY_PARAMS = {'apikey', 'api_key', 'token'}
+
+
+def resolve_stash_asset_url(asset_url: str, stash_url: Optional[str]) -> str:
+    """
+    Re-point a Stash-reported asset URL at the base URL the plugin already
+    knows is reachable.
+
+    Stash builds asset URLs (e.g. paths.screenshot) from its own configured
+    base address, which may be unreachable from the plugin's container (a
+    0.0.0.0 bind, an internal-only hostname, etc.) even when the plugin's
+    own stash_url is healthy. This swaps the scheme/host/port for the ones
+    from stash_url while preserving the asset's path, query and fragment.
+
+    Args:
+        asset_url: The URL Stash reported for the asset.
+        stash_url: The plugin's own configured/derived Stash base URL.
+
+    Returns:
+        The asset URL, re-pointed at stash_url's host when appropriate.
+    """
+    if not stash_url:
+        return asset_url
+
+    from urllib.parse import urlsplit, urlunsplit, urljoin
+
+    parsed_asset = urlsplit(asset_url)
+    parsed_stash = urlsplit(stash_url)
+
+    if not parsed_asset.scheme and not parsed_asset.netloc:
+        # Relative URL - join it onto the known-good base.
+        return urljoin(stash_url, asset_url)
+
+    if parsed_asset.netloc.lower() == parsed_stash.netloc.lower():
+        # Already pointed at the same host - nothing to rewrite.
+        return asset_url
+
+    return urlunsplit((
+        parsed_stash.scheme,
+        parsed_stash.netloc,
+        parsed_asset.path,
+        parsed_asset.query,
+        parsed_asset.fragment,
+    ))
+
+
+def redact_url_credentials(url: str) -> str:
+    """
+    Redact credential-bearing query parameters from a URL before logging.
+
+    Redacts apikey/api_key/token values (case-insensitive keys); leaves
+    everything else untouched.
+    """
+    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+
+    parsed = urlsplit(url)
+    if not parsed.query:
+        return url
+
+    params = parse_qsl(parsed.query, keep_blank_values=True)
+    redacted_any = False
+    new_params = []
+    for key, value in params:
+        if key.lower() in _CREDENTIAL_QUERY_PARAMS:
+            new_params.append((key, 'REDACTED'))
+            redacted_any = True
+        else:
+            new_params.append((key, value))
+
+    if not redacted_any:
+        return url
+
+    new_query = urlencode(new_params)
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
+
+
 class TransientError(Exception):
     """Retry-able errors (network, timeout, 5xx)"""
     pass
@@ -868,9 +944,22 @@ class SyncWorker:
         import urllib.request
         import urllib.error
 
+        # Stash's own paths.screenshot URL may be unreachable from the
+        # plugin's container even when the plugin's own Stash connection is
+        # healthy (0.0.0.0 bind, internal-only hostname, etc.) - re-point it
+        # at the base URL we know works.
+        stash_url = getattr(self.config, 'stash_url', None)
+        resolved_url = resolve_stash_asset_url(url, stash_url)
+        if resolved_url != url:
+            log_debug(
+                f"Rewrote Stash asset URL from {redact_url_credentials(url)} "
+                f"to {redact_url_credentials(resolved_url)}"
+            )
+        safe_url = redact_url_credentials(resolved_url)
+
         try:
             # Build request with authentication from Stash connection
-            req = urllib.request.Request(url)
+            req = urllib.request.Request(resolved_url)
 
             # Add API key header if available
             api_key = getattr(self.config, 'stash_api_key', None)
@@ -885,10 +974,12 @@ class SyncWorker:
             with urllib.request.urlopen(req, timeout=30) as response:
                 return response.read()
         except urllib.error.URLError as e:
-            log_warn(f" Failed to fetch image from Stash: {e}")
+            status = getattr(e, 'code', None)
+            status_part = f", status={status}" if status else ""
+            log_warn(f" Failed to fetch image from Stash: {e} (url={safe_url}{status_part})")
             return None
         except Exception as e:
-            log_warn(f" Image fetch error: {e}")
+            log_warn(f" Image fetch error: {e} (url={safe_url})")
             return None
 
     def _get_plex_client(self) -> 'PlexClient':
@@ -1530,7 +1621,9 @@ class SyncWorker:
             else:
                 result.add_warning(field_name, ValueError("No image data returned from Stash"))
         except Exception as e:
-            log_warn(f" Failed to upload {field_name}: {e}")
+            stash_url = getattr(self.config, 'stash_url', None)
+            safe_url = redact_url_credentials(resolve_stash_asset_url(url, stash_url))
+            log_warn(f" Failed to upload {field_name}: {e} (url={safe_url})")
             result.add_warning(field_name, e)
 
     def _sync_tags(self, plex_item, data: dict, result, _dbg: bool) -> bool:

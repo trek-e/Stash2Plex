@@ -419,8 +419,11 @@ def extract_config_from_input(input_data: dict, existing_stash=None) -> dict:
 
     # Extract Stash connection info for image fetching
     server_conn = input_data.get('server_connection', {})
+    derived_stash_url = None
+    derived_stash_api_key = None
     if server_conn:
-        config_dict['stash_url'] = build_stash_base_url(server_conn)
+        derived_stash_url = build_stash_base_url(server_conn)
+        config_dict['stash_url'] = derived_stash_url
 
         # Get session cookie/API key for authentication
         session_cookie = server_conn.get('SessionCookie', {})
@@ -434,6 +437,7 @@ def extract_config_from_input(input_data: dict, existing_stash=None) -> dict:
 
         api_key = server_conn.get('ApiKey', server_conn.get('apiKey', ''))
         if api_key:
+            derived_stash_api_key = api_key
             config_dict['stash_api_key'] = api_key
 
     # Primary path: direct urllib GraphQL call (stdlib only, immune to stashapi install issues).
@@ -467,6 +471,32 @@ def extract_config_from_input(input_data: dict, existing_stash=None) -> dict:
         env_token = os.getenv('PLEX_TOKEN')
         if env_token:
             config_dict['plex_token'] = env_token
+
+    # Precedence for stash_url/stash_api_key: a user-set value from plugin
+    # settings must WIN over the value auto-derived from server_connection
+    # above (issue #8/#12) - server_connection reflects Stash's own address,
+    # which may be unreachable, or an expiring session credential.
+    #
+    # We can't rely on dict.update() merge order alone: Stash returns every
+    # declared setting, so an unset STRING setting can come back as an empty
+    # string and would silently clobber a perfectly good derived value if we
+    # didn't check for blank explicitly. So resolve precedence explicitly
+    # here, after all merges (direct GQL, StashInterface, env) have happened.
+    settings_stash_url = config_dict.get('stash_url', '')
+    if isinstance(settings_stash_url, str) and settings_stash_url.strip():
+        # User provided a non-blank value via plugin settings - it wins.
+        config_dict['stash_url'] = settings_stash_url.strip().rstrip('/')
+    elif derived_stash_url:
+        # No usable user override - fall back to the server_connection value.
+        config_dict['stash_url'] = derived_stash_url
+
+    settings_stash_api_key = config_dict.get('stash_api_key', '')
+    if isinstance(settings_stash_api_key, str) and settings_stash_api_key.strip():
+        # User provided a non-blank value via plugin settings - it wins.
+        # (Never logged - this is a credential.)
+        config_dict['stash_api_key'] = settings_stash_api_key.strip()
+    elif derived_stash_api_key:
+        config_dict['stash_api_key'] = derived_stash_api_key
 
     return config_dict
 

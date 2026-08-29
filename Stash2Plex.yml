@@ -93,6 +93,14 @@ settings:
     displayName: Plex Library
     description: "Plex library name(s) to sync. Comma-separated for multiple (e.g., 'Adult' or 'Adult, Movies'). Leave empty to search all libraries."
     type: STRING
+  stash_url:
+    displayName: Stash URL (optional)
+    description: "Optional override for the Stash server URL used to fetch images (e.g., http://192.168.1.5:9999). Only needed when auto-detection picks an address the plugin cannot reach (e.g., Stash bound to 0.0.0.0). Leave empty to auto-detect."
+    type: STRING
+  stash_api_key:
+    displayName: Stash API Key (optional)
+    description: "Optional override for the Stash API key used to fetch images. Only needed for a stable, non-expiring credential; the auto-detected key/session may expire. Leave empty to auto-detect."
+    type: STRING
   enabled:
     displayName: Enabled
     description: "Enable or disable the plugin (default: true)"
