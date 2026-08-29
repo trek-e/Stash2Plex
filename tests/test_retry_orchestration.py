@@ -180,13 +180,13 @@ class TestPlexNotFoundRetryWindow:
             config=Mock(poll_interval=1.0),
         )
 
-        # PlexNotFound gets 30s base, 12 max retries
+        # PlexNotFound gets 30s base, 15 max retries (#12/D2: extended tail)
         max_not_found = worker._get_max_retries_for_error(PlexNotFound("test"))
 
         # PlexTemporaryError gets 5s base, 5 max retries
         max_temp = worker._get_max_retries_for_error(PlexTemporaryError("test"))
 
-        assert max_not_found == 12
+        assert max_not_found == 15
         assert max_temp == 5
         assert max_not_found > max_temp
 

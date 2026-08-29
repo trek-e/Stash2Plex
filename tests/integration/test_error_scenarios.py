@@ -138,14 +138,16 @@ class TestPlexNotFoundScenarios:
             worker._process_job(job)
 
     def test_plex_not_found_gets_more_retries(self, integration_worker_no_match):
-        """PlexNotFound gets 12 max retries (vs 5 for other transient)."""
+        """PlexNotFound gets 15 max retries (vs 5 for other transient) — #12/D2
+        extended the schedule with a long tail so a job survives roughly
+        until Plex's next scheduled library scan (up to ~24h away)."""
         from plex.exceptions import PlexNotFound
 
         worker = integration_worker_no_match
         error = PlexNotFound("Item not found")
 
         max_retries = worker._get_max_retries_for_error(error)
-        assert max_retries == 12
+        assert max_retries == 15
 
     def test_plex_not_found_does_not_trip_circuit_breaker(self, integration_worker_no_match, mock_queue_manager):
         """PlexNotFound should NOT count toward circuit breaker failures.

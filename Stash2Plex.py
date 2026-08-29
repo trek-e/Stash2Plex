@@ -608,67 +608,110 @@ def shutdown():
     log_trace("Shutdown complete")
 
 
-def trigger_plex_scan_for_scene(scene_id: int, stash) -> bool:
+def trigger_plex_scan_for_scene(
+    scene_id: int,
+    stash,
+    file_path: str | None = None,
+    data_dir: str | None = None,
+    cfg=None,
+) -> bool:
     """
     Trigger a Plex library scan for a scene's file location.
 
     Args:
         scene_id: Stash scene ID
-        stash: StashInterface for API calls
+        stash: StashInterface for API calls. Only used to look up the scene's
+            path when `file_path` isn't already known — pass None when the
+            caller already has it (e.g. the worker, after a PlexNotFound).
+        file_path: Already-resolved Stash-side file path. When provided,
+            skips the Stash lookup entirely.
+        data_dir: Plugin data dir for the scan throttle's persisted state.
+            Defaults to get_plugin_data_dir() when not supplied.
+        cfg: Config to use instead of the module-level `config` global.
+            Lets callers (and tests) that don't run through main() supply
+            their own config explicitly.
 
     Returns:
-        True if scan was triggered, False otherwise
+        True if at least one library scan was actually triggered (i.e. not
+        skipped due to being disabled, throttled, or failing), False
+        otherwise.
     """
-    if not config or not config.trigger_plex_scan:
+    cfg = cfg if cfg is not None else config
+    if not cfg or not cfg.trigger_plex_scan:
         return False
 
-    libraries = config.plex_libraries
+    libraries = cfg.plex_libraries
     if not libraries:
         log_warn("trigger_plex_scan enabled but plex_library not set")
         return False
 
-    if not stash:
-        log_warn("No Stash connection available for scene lookup")
-        return False
+    if file_path is None:
+        if not stash:
+            log_warn("No Stash connection available for scene lookup")
+            return False
+
+        try:
+            scene = stash.find_scene(scene_id)
+            if not scene:
+                log_warn(f"Scene {scene_id} not found")
+                return False
+
+            files = scene.get('files', [])
+            if not files:
+                log_warn(f"Scene {scene_id} has no files")
+                return False
+
+            file_path = files[0].get('path')
+            if not file_path:
+                log_warn(f"Scene {scene_id} file has no path")
+                return False
+        except Exception as e:
+            log_error(f"Failed to look up scene {scene_id} for Plex scan: {e}")
+            return False
 
     try:
-        # Get scene file path
-        scene = stash.find_scene(scene_id)
-        if not scene:
-            log_warn(f"Scene {scene_id} not found")
-            return False
-
-        files = scene.get('files', [])
-        if not files:
-            log_warn(f"Scene {scene_id} has no files")
-            return False
-
-        file_path = files[0].get('path')
-        if not file_path:
-            log_warn(f"Scene {scene_id} file has no path")
-            return False
-
         # Get the parent directory for partial scan
         import os
         scan_path = os.path.dirname(file_path)
 
+        # Translate Stash's view of the path to Plex's, when a mapping is
+        # configured (split-path deployments). No mapping configured ->
+        # path passed through unchanged.
+        from shared_lib.prefix_path_map import parse_prefix_mappings, map_stash_to_plex
+        mappings = parse_prefix_mappings(getattr(cfg, 'plex_unmatched_path_map', None))
+        if mappings:
+            scan_path = map_stash_to_plex(scan_path, mappings)
+
+        if data_dir is None:
+            data_dir = get_plugin_data_dir()
+
+        from worker.scan_throttle import ScanThrottle
+        throttle = ScanThrottle(data_dir)
+
         # Create Plex client and trigger scan
         from plex.client import PlexClient
         plex_client = PlexClient(
-            url=config.plex_url,
-            token=config.plex_token,
-            connect_timeout=config.plex_connect_timeout,
-            read_timeout=config.plex_read_timeout
+            url=cfg.plex_url,
+            token=cfg.plex_token,
+            connect_timeout=cfg.plex_connect_timeout,
+            read_timeout=cfg.plex_read_timeout
         )
 
-        # Scan all configured libraries
+        # Scan all configured libraries, one scan per section per throttle
+        # window (not one per job) — see worker.scan_throttle.
+        triggered_any = False
         for lib_name in libraries:
+            if not throttle.should_scan(lib_name):
+                log_trace(f"Skipping Plex scan of '{lib_name}' — throttled")
+                continue
             try:
                 plex_client.scan_library(lib_name, path=scan_path)
+                throttle.record_scan(lib_name)
+                triggered_any = True
                 log_info(f"Triggered Plex scan of '{lib_name}' for: {scan_path}")
             except Exception as e:
                 log_warn(f"Failed to scan library '{lib_name}': {e}")
-        return True
+        return triggered_any
 
     except Exception as e:
         from plex.exceptions import PlexServerDown
@@ -1369,6 +1412,87 @@ def handle_recover_outage_jobs():
         traceback.print_exc()
 
 
+def handle_retry_not_found_jobs():
+    """Re-queue DLQ jobs that failed with PlexNotFound, regardless of outage history.
+
+    PlexNotFound isn't tied to a Plex-down outage the way PlexServerDown is —
+    it means the scene simply wasn't in Plex's library yet when we looked.
+    By the time a user runs this task, Plex has very likely indexed it on a
+    subsequent scan. Unlike handle_recover_outage_jobs(), this skips the
+    outage-window filter entirely (it would exclude nearly everything, since
+    these entries usually have nothing to do with a recorded outage).
+    """
+    try:
+        data_dir = get_plugin_data_dir()
+
+        from sync_queue.dlq_recovery import (
+            get_dlq_entries_by_error_types,
+            recover_outage_jobs,
+        )
+        from sync_queue.dlq import DeadLetterQueue
+
+        error_types = ["PlexNotFound"]
+        log_info(f"Retry filter: {', '.join(error_types)}")
+
+        dlq = DeadLetterQueue(data_dir)
+        entries = get_dlq_entries_by_error_types(dlq, error_types)
+
+        if not entries:
+            log_info("No PlexNotFound DLQ entries found")
+            return
+
+        log_info(f"Found {len(entries)} DLQ entries to evaluate")
+
+        if not queue_manager:
+            log_error("Queue manager not initialized")
+            return
+
+        queue = queue_manager.get_queue()
+        if queue is None:
+            log_error("Queue not available")
+            return
+
+        if not config:
+            log_error("No config available for Plex client")
+            return
+
+        from plex.client import PlexClient
+
+        plex_client = PlexClient(
+            url=config.plex_url,
+            token=config.plex_token,
+            connect_timeout=5.0,
+            read_timeout=30.0
+        )
+
+        # Recover jobs — same three-gate validation (Plex health, dedup,
+        # scene existence) as handle_recover_outage_jobs(), just without the
+        # outage-window pre-filter on the DLQ query above.
+        result = recover_outage_jobs(
+            entries,
+            queue,
+            stash_interface,
+            plex_client,
+            data_dir
+        )
+
+        log_info(
+            f"Retry complete: {result.recovered} recovered, "
+            f"{result.skipped_already_queued} already queued, "
+            f"{result.skipped_plex_down} skipped (Plex down), "
+            f"{result.skipped_scene_missing} skipped (scene missing), "
+            f"{result.failed} failed"
+        )
+
+        if result.recovered > 0:
+            log_info(f"Re-queued scene IDs: {result.recovered_scene_ids}")
+
+    except Exception as e:
+        log_error(f"Failed to retry not-found jobs: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def handle_health_check():
     """Check Plex server connectivity and circuit breaker status."""
     try:
@@ -1441,6 +1565,7 @@ _MANAGEMENT_HANDLERS = {
     'health_check': lambda args: handle_health_check(),
     'outage_summary': lambda args: handle_outage_summary(),
     'recover_outage_jobs': lambda args: handle_recover_outage_jobs(),
+    'retry_not_found': lambda args: handle_retry_not_found_jobs(),
 }
 
 
@@ -1697,7 +1822,7 @@ def main():
     # task invocation or via 'Process Queue'.
     # Skip for management tasks that don't enqueue work
     # Skip if worker lock was not acquired (another process is draining)
-    management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status', 'process_queue', 'reconcile_all', 'reconcile_recent', 'reconcile_missing_metadata', 'reconcile_7days', 'health_check', 'outage_summary', 'recover_outage_jobs'}
+    management_modes = {'clear_queue', 'clear_dlq', 'purge_dlq', 'queue_status', 'process_queue', 'reconcile_all', 'reconcile_recent', 'reconcile_missing_metadata', 'reconcile_7days', 'health_check', 'outage_summary', 'recover_outage_jobs', 'retry_not_found'}
     task_mode = args.get("mode", "") if not is_hook else ""
     if is_hook:
         # Hooks: return immediately after enqueue. Worker drain happens on tasks.

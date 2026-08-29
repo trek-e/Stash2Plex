@@ -418,8 +418,9 @@ class SyncWorker:
         """
         from worker.backoff import calculate_delay, get_retry_params
 
-        base, cap, max_retries = get_retry_params(error)
-        retry_count = job.get('retry_count', 0) + 1
+        current_retry_count = job.get('retry_count', 0)
+        base, cap, max_retries = get_retry_params(error, current_retry_count)
+        retry_count = current_retry_count + 1
         delay = calculate_delay(retry_count - 1, base, cap)  # -1 because we just incremented
 
         job['retry_count'] = retry_count
@@ -483,6 +484,41 @@ class SyncWorker:
             'last_error_type': job.get('last_error_type'),
         }
         self.queue_manager.reenqueue(job, new_job)
+
+    def _trigger_scan_on_not_found(self, item: dict) -> None:
+        """
+        Best-effort: ask Plex to scan the library section for this scene's
+        path the moment we learn Plex is missing it.
+
+        This is the fix for #12/D1 — trigger_plex_scan_for_scene previously
+        had no callers. We already resolved the scene's file path during
+        _process_job, so we pass it straight through instead of making a
+        second Stash round-trip.
+
+        Never raises into the retry/DLQ pipeline: any failure here just
+        means we fall back to Plex's own scheduled scan, exactly as before
+        this fix existed.
+        """
+        try:
+            if not self.config or not getattr(self.config, 'trigger_plex_scan', False):
+                return
+            data = item.get('data') or {}
+            file_path = data.get('path')
+            scene_id = item.get('scene_id')
+            if not file_path or scene_id is None:
+                return
+
+            from Stash2Plex import trigger_plex_scan_for_scene
+
+            trigger_plex_scan_for_scene(
+                int(scene_id),
+                stash=None,
+                file_path=file_path,
+                data_dir=self.data_dir,
+                cfg=self.config,
+            )
+        except Exception as e:
+            log_debug(f"Plex scan trigger on PlexNotFound failed (non-fatal): {e}")
 
     def _handle_job(self, item: dict, recently_synced: set, sync_timestamps: dict) -> str:
         """
@@ -579,7 +615,13 @@ class SyncWorker:
 
         except PlexNotFound as e:
             _job_elapsed = time.perf_counter() - _job_start
-            if self.config and getattr(self.config, 'skip_not_found', False):
+            skip_not_found = bool(self.config and getattr(self.config, 'skip_not_found', False))
+            # Fire the scan on the FIRST PlexNotFound for this job (not on every
+            # retry), and never when skip_not_found is enabled — that setting
+            # means the user has deliberately declared a partial Plex library.
+            if not skip_not_found and retry_count == 0:
+                self._trigger_scan_on_not_found(item)
+            if skip_not_found:
                 self.queue_manager.ack(item)
                 log_info(f"Job {jid} skipped — scene {scene_id} not in Plex (skip_not_found enabled)")
                 self._stats.record_failure(type(e).__name__, _job_elapsed, to_dlq=False)

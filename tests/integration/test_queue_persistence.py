@@ -248,8 +248,9 @@ class TestDLQAfterMaxRetries:
 
         assert max_retries == 5
 
-    def test_plex_not_found_exhausts_after_12_retries(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
-        """PlexNotFound exhausts after 12 retries."""
+    def test_plex_not_found_exhausts_after_15_retries(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
+        """PlexNotFound exhausts after 15 retries (#12/D2: extended tail
+        reaches roughly 24h instead of the previous ~1.4h ceiling)."""
         from worker.processor import SyncWorker
         from plex.exceptions import PlexNotFound
 
@@ -263,7 +264,7 @@ class TestDLQAfterMaxRetries:
         error = PlexNotFound("item not found")
         max_retries = worker._get_max_retries_for_error(error)
 
-        assert max_retries == 12
+        assert max_retries == 15
 
     def test_job_sent_to_dlq_when_retries_exceeded(self, mock_queue, mock_dlq, mock_config, tmp_path, mock_queue_manager):
         """Job with retry_count >= max_retries should go to DLQ."""

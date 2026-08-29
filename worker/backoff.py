@@ -13,6 +13,22 @@ Functions:
 import random
 from typing import Optional, Tuple
 
+# PlexNotFound: number of "core" attempts using the original exponential
+# schedule (30s base, capped at 10 min) before the long tail kicks in.
+_PLEX_NOT_FOUND_CORE_RETRIES = 12
+
+# PlexNotFound: fixed delay caps for the long-tail attempts beyond
+# _PLEX_NOT_FOUND_CORE_RETRIES, so a job survives roughly until Plex's next
+# scheduled library scan (which can be ~24h away) instead of being written
+# off after ~1.4h. See get_retry_params() for the full rationale.
+_PLEX_NOT_FOUND_TAIL_CAPS_SECONDS: Tuple[float, ...] = (
+    6 * 3600.0,   # ~6h
+    12 * 3600.0,  # ~12h
+    24 * 3600.0,  # ~24h
+)
+
+_PLEX_NOT_FOUND_MAX_RETRIES = _PLEX_NOT_FOUND_CORE_RETRIES + len(_PLEX_NOT_FOUND_TAIL_CAPS_SECONDS)
+
 
 def calculate_delay(
     retry_count: int,
@@ -57,7 +73,7 @@ def calculate_delay(
     return rng.uniform(0, max_delay)
 
 
-def get_retry_params(error: Exception) -> Tuple[float, float, int]:
+def get_retry_params(error: Exception, retry_count: int = 0) -> Tuple[float, float, int]:
     """
     Get backoff parameters based on error type.
 
@@ -66,11 +82,23 @@ def get_retry_params(error: Exception) -> Tuple[float, float, int]:
 
     Args:
         error: The exception that triggered the retry
+        retry_count: Number of previous retry attempts (0 for the first
+            retry). Only affects PlexNotFound's cap — see below.
 
     Returns:
         Tuple of (base_delay, max_delay, max_retries)
-        - PlexNotFound: (30.0, 600.0, 12) for ~2 hour window
+        - PlexNotFound: (30.0, cap, 15) — see below for `cap`.
         - Other errors: (5.0, 80.0, 5) for standard backoff
+
+    PlexNotFound schedule:
+        Attempts 1-12 (retry_count 0-11) use the original exponential
+        schedule: 30s base -> 60 -> 120 -> 240 -> 480 -> capped at 600s
+        (10 min). Worst-case (unjittered) total across these 12 attempts is
+        5130s (~1.43h); with full jitter the average is ~43 minutes — far
+        short of a scheduled Plex library scan, which can be up to ~24h
+        away. Attempts 13-15 (retry_count 12-14) add a long tail at fixed
+        caps of ~6h, ~12h, ~24h so a job survives roughly until the next
+        scan instead of being written off first.
     """
     # Import lazily to avoid circular imports
     from plex.exceptions import PlexNotFound, PlexServerDown
@@ -80,10 +108,16 @@ def get_retry_params(error: Exception) -> Tuple[float, float, int]:
         # Large max_retries so jobs are never DLQ'd for being unreachable
         return (30.0, 300.0, 999)
     elif isinstance(error, PlexNotFound):
-        # Library scanning: longer delays, more retries
-        # 30s base -> 60 -> 120 -> 240 -> 480 -> capped at 600 (10 min)
-        # 12 retries gives ~2 hour total retry window
-        return (30.0, 600.0, 12)
+        base = 30.0
+        if retry_count < _PLEX_NOT_FOUND_CORE_RETRIES:
+            cap = 600.0
+        else:
+            tail_index = min(
+                retry_count - _PLEX_NOT_FOUND_CORE_RETRIES,
+                len(_PLEX_NOT_FOUND_TAIL_CAPS_SECONDS) - 1,
+            )
+            cap = _PLEX_NOT_FOUND_TAIL_CAPS_SECONDS[tail_index]
+        return (base, cap, _PLEX_NOT_FOUND_MAX_RETRIES)
     else:
         # Standard transient errors: normal backoff
         # 5s base -> 10 -> 20 -> 40 -> 80 (capped)
