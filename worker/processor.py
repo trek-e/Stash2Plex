@@ -832,7 +832,18 @@ class SyncWorker:
             total = stats['pending'] + stats['in_progress']
 
         if total == 0:
-            log_info("Queue is empty — nothing to process")
+            dlq_count = 0
+            try:
+                dlq_count = self.dlq.get_count()
+            except Exception as e:
+                log_debug(f"Could not check DLQ count for empty-queue message: {e}")
+            if dlq_count > 0:
+                log_info(
+                    f"Queue is empty — nothing to process ({dlq_count} entries in the "
+                    f"dead letter queue; run 'View Queue Status' for details)"
+                )
+            else:
+                log_info("Queue is empty — nothing to process")
             if progress_callback:
                 progress_callback(100)
             return {'processed': 0, 'failed': 0, 'skipped': 0}
@@ -1132,6 +1143,9 @@ class SyncWorker:
         def _mark(stage: str, started_at: float):
             _timings[stage] = _time.perf_counter() - started_at
 
+        import socket
+        import urllib.error
+
         from plex.exceptions import PlexTemporaryError, PlexPermanentError, PlexNotFound, translate_plex_exception
         from plex.matcher import find_plex_items_with_confidence
         from validation.obfuscation import obfuscate_path
@@ -1150,8 +1164,32 @@ class SyncWorker:
                 job['data'] = data
                 file_path = data.get('path')
                 log_trace(f"Deferred hydration succeeded for scene {scene_id}")
+            except PermanentError:
+                # Genuinely permanent conditions raised inside _hydrate_job_from_stash
+                # (missing stash_url, scene not found, no file path) — propagate as-is.
+                raise
+            except urllib.error.HTTPError as e:
+                if e.code in (401, 403, 408, 429) or 500 <= e.code < 600:
+                    log_warn(
+                        f"Job {scene_id} hydration failed with transient HTTP {e.code}, "
+                        f"will retry: {e}"
+                    )
+                    raise TransientError(
+                        f"Job {scene_id} hydration failed with HTTP {e.code}: {e}"
+                    ) from e
+                log_error(f"Job {scene_id} hydration failed with permanent HTTP {e.code}: {e}")
+                raise PermanentError(
+                    f"Job {scene_id} missing file path and hydration failed: {e}"
+                ) from e
+            except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError) as e:
+                log_warn(f"Job {scene_id} hydration failed with network error, will retry: {e}")
+                raise TransientError(f"Job {scene_id} hydration failed: {e}") from e
             except Exception as e:
-                raise PermanentError(f"Job {scene_id} missing file path and hydration failed: {e}")
+                log_error(
+                    f"Job {scene_id} hydration failed with unrecognized error, "
+                    f"treating as permanent: {e}"
+                )
+                raise PermanentError(f"Job {scene_id} missing file path and hydration failed: {e}") from e
 
         if not file_path:
             raise PermanentError(f"Job {scene_id} missing file path")
@@ -1363,6 +1401,45 @@ class SyncWorker:
 
         return issues
 
+    def _verify_field_write(
+        self, plex_item, result, field: str, attr: str, expected: list, success_log: str
+    ) -> None:
+        """
+        Confirm a batched indexed-tag write (actors/genres) actually took.
+
+        Plex can accept an indexed tag write and silently drop it on its next
+        refresh when the field isn't locked. Called after the single deferred
+        reload in _update_metadata for each pending performer/tag write, so we
+        report the real outcome instead of assuming success from the absence
+        of an exception at edit() time. The "Added N ..." success claim is only
+        logged here, once the write is confirmed — never at edit() time.
+
+        Args:
+            plex_item: Plex item, already reloaded
+            result: PartialSyncResult to record the verified outcome on
+            field: Result field name ('performers' or 'tags')
+            attr: plex_item attribute holding the tag objects ('actors' or 'genres')
+            expected: Names that were sent in this write and must now be present
+            success_log: Message to log at info level once the write is confirmed
+        """
+        actual = [t.tag for t in getattr(plex_item, attr, [])]
+        missing = [name for name in expected if name not in actual]
+        if missing:
+            log_warn(
+                f"Verification failed for {field}: expected {expected} to be present "
+                f"after write, but {missing} missing (actual: {actual})"
+            )
+            result.add_warning(
+                field,
+                RuntimeError(
+                    f"Expected {field} {expected} not found after write; "
+                    f"missing: {missing}, actual: {actual}"
+                ),
+            )
+        else:
+            log_info(success_log)
+            result.add_success(field)
+
     def _update_metadata(self, plex_item, data: dict):
         """
         Update Plex item metadata from sync job data with granular error handling.
@@ -1415,8 +1492,12 @@ class SyncWorker:
                 log_trace(f"No metadata fields to update for: {plex_item.title}")
 
         # Phase 2: Non-critical field syncs (failures logged as warnings)
+        # pending_verifications collects add-path writes (performers/tags) whose
+        # success can't be confirmed until after the single deferred reload below.
+        _pending_verifications: list = []
+
         if getattr(self.config, 'sync_performers', True) and 'performers' in data:
-            _needs_reload |= self._sync_performers(plex_item, data, result, _dbg)
+            _needs_reload |= self._sync_performers(plex_item, data, result, _dbg, _pending_verifications)
 
         if getattr(self.config, 'sync_poster', True) and data.get('poster_url'):
             self._upload_image(
@@ -1427,7 +1508,7 @@ class SyncWorker:
                 plex_item, data['background_url'], plex_item.uploadArt, 'background', result, _dbg)
 
         if getattr(self.config, 'sync_tags', True) and 'tags' in data:
-            _needs_reload |= self._sync_tags(plex_item, data, result, _dbg)
+            _needs_reload |= self._sync_tags(plex_item, data, result, _dbg, _pending_verifications)
 
         if getattr(self.config, 'sync_collection', True) and 'studio' in data:
             _needs_reload |= self._sync_collection(plex_item, data, result)
@@ -1440,8 +1521,20 @@ class SyncWorker:
                     validation_issues = self._validate_edit_result(plex_item, edits)
                     if validation_issues:
                         log_debug(f"Edit validation issues (may be expected): {validation_issues}")
+                # Confirm batched actor/genre writes actually took before claiming
+                # success — Plex can accept the edit and silently drop it on refresh.
+                for pending in _pending_verifications:
+                    self._verify_field_write(plex_item, result, **pending)
             except Exception as e:
                 log_debug(f"Post-edit reload failed (edits already applied): {e}")
+                for pending in _pending_verifications:
+                    log_warn(
+                        f"Could not verify {pending['field']} write — reload failed: {e}"
+                    )
+                    result.add_warning(
+                        pending['field'],
+                        RuntimeError(f"Could not verify {pending['field']} write after reload failure: {e}"),
+                    )
 
         if result.has_warnings:
             log_warn(f"Partial sync for {plex_item.title}: {result.warning_summary}")
@@ -1537,10 +1630,16 @@ class SyncWorker:
 
         return edits
 
-    def _sync_performers(self, plex_item, data: dict, result, _dbg: bool) -> bool:
+    def _sync_performers(self, plex_item, data: dict, result, _dbg: bool, pending_verifications: list) -> bool:
         """Sync performers as Plex actors. Returns True if reload needed.
 
         LOCKED: If 'performers' key exists with empty/None, clear all actors.
+
+        Args:
+            pending_verifications: Mutable list this appends to when it writes new
+                actor values, so the caller can verify the write took after the
+                single deferred reload instead of assuming success from a lack of
+                exception.
         """
         from validation.limits import MAX_PERFORMER_NAME_LENGTH, MAX_PERFORMERS
         from validation.sanitizers import sanitize_for_plex
@@ -1578,9 +1677,13 @@ class SyncWorker:
                     log_warn(f"Truncating combined actors list from {len(all_actors)} to {MAX_PERFORMERS}")
                     all_actors = all_actors[:MAX_PERFORMERS]
                 actor_edits = {f'actor[{i}].tag.tag': name for i, name in enumerate(all_actors)}
+                actor_edits['actor.locked'] = 1
                 plex_item.edit(**actor_edits)
-                log_info(f"Added {len(new_performers)} performers: {new_performers}")
-                result.add_success('performers')
+                log_trace(f"Wrote {len(new_performers)} performers, pending verification: {new_performers}")
+                pending_verifications.append({
+                    'field': 'performers', 'attr': 'actors', 'expected': new_performers,
+                    'success_log': f"Added {len(new_performers)} performers: {new_performers}",
+                })
                 return True
             else:
                 log_trace(f"Performers already in Plex: {sanitized}")
@@ -1626,10 +1729,16 @@ class SyncWorker:
             log_warn(f" Failed to upload {field_name}: {e} (url={safe_url})")
             result.add_warning(field_name, e)
 
-    def _sync_tags(self, plex_item, data: dict, result, _dbg: bool) -> bool:
+    def _sync_tags(self, plex_item, data: dict, result, _dbg: bool, pending_verifications: list) -> bool:
         """Sync tags as Plex genres. Returns True if reload needed.
 
         LOCKED: If 'tags' key exists with empty/None, clear all genres.
+
+        Args:
+            pending_verifications: Mutable list this appends to when it writes new
+                genre values, so the caller can verify the write took after the
+                single deferred reload instead of assuming success from a lack of
+                exception.
         """
         from validation.limits import MAX_TAG_NAME_LENGTH, MAX_TAGS
         from validation.sanitizers import sanitize_for_plex
@@ -1668,9 +1777,13 @@ class SyncWorker:
                     log_warn(f"Truncating combined tags list from {len(all_genres)} to {max_tags}")
                     all_genres = all_genres[:max_tags]
                 genre_edits = {f'genre[{i}].tag.tag': name for i, name in enumerate(all_genres)}
+                genre_edits['genre.locked'] = 1
                 plex_item.edit(**genre_edits)
-                log_info(f"Added {len(new_tags)} tags as genres: {new_tags}")
-                result.add_success('tags')
+                log_trace(f"Wrote {len(new_tags)} tags, pending verification: {new_tags}")
+                pending_verifications.append({
+                    'field': 'tags', 'attr': 'genres', 'expected': new_tags,
+                    'success_log': f"Added {len(new_tags)} tags as genres: {new_tags}",
+                })
                 return True
             else:
                 log_trace(f"Tags already in Plex: {sanitized}")
