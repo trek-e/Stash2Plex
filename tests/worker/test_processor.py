@@ -482,11 +482,12 @@ class TestFieldClearing:
 
         clearing_worker._update_metadata(mock_plex_item, data)
 
-        # Verify edit was called with empty studio
+        # Verify edit was called with empty studio. edit() is now also called
+        # a second time to clear the studio-based collection (issue #9 fix),
+        # so find the core-edit call rather than assuming it's the last call.
         mock_plex_item.edit.assert_called()
-        edit_kwargs = mock_plex_item.edit.call_args[1]
-        assert 'studio.value' in edit_kwargs
-        assert edit_kwargs['studio.value'] == ''
+        studio_call = next(c for c in mock_plex_item.edit.call_args_list if 'studio.value' in c.kwargs)
+        assert studio_call.kwargs['studio.value'] == ''
 
     def test_empty_string_studio_clears_plex_studio(self, clearing_worker):
         """When Stash sends studio='', existing Plex studio is cleared."""
@@ -503,11 +504,12 @@ class TestFieldClearing:
 
         clearing_worker._update_metadata(mock_plex_item, data)
 
-        # Verify edit was called with empty studio
+        # Verify edit was called with empty studio. edit() is now also called
+        # a second time to clear the studio-based collection (issue #9 fix),
+        # so find the core-edit call rather than assuming it's the last call.
         mock_plex_item.edit.assert_called()
-        edit_kwargs = mock_plex_item.edit.call_args[1]
-        assert 'studio.value' in edit_kwargs
-        assert edit_kwargs['studio.value'] == ''
+        studio_call = next(c for c in mock_plex_item.edit.call_args_list if 'studio.value' in c.kwargs)
+        assert studio_call.kwargs['studio.value'] == ''
 
     def test_field_not_in_data_preserves_plex_value(self, clearing_worker):
         """When field key not in data dict, existing Plex value is preserved."""

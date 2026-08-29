@@ -254,12 +254,16 @@ def on_scene_update(
     merged_data['path'] = file_path
     update_data = merged_data
 
-    # Don't sync if scene has no meaningful metadata to push.
-    # This prevents a race condition where Scene.Update.Post fires after file scan
-    # but before stash-box identification completes — syncing empty metadata would
-    # clear existing Plex values. The post-identification Scene.Update.Post will
-    # have the real metadata and sync correctly.
-    if not has_meaningful_metadata(update_data):
+    # Don't sync if scene has no meaningful metadata to push — UNLESS this scene
+    # has synced successfully before. This prevents a race condition where
+    # Scene.Update.Post fires after file scan but before stash-box identification
+    # completes — syncing empty metadata would clear existing Plex values on a
+    # scene that is still being identified. The post-identification
+    # Scene.Update.Post will have the real metadata and sync correctly.
+    # A scene present in sync_timestamps has synced before, so it is by
+    # definition past the identify race — a deliberate removal (e.g. the last
+    # tag deleted) must still reach Plex.
+    if not has_meaningful_metadata(update_data) and scene_id not in (sync_timestamps or {}):
         log_debug(f"Scene {scene_id} has no metadata beyond title/path, deferring sync (may still be identifying)")
         return False
 

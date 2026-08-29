@@ -1429,7 +1429,7 @@ class SyncWorker:
         if getattr(self.config, 'sync_tags', True) and 'tags' in data:
             _needs_reload |= self._sync_tags(plex_item, data, result, _dbg)
 
-        if getattr(self.config, 'sync_collection', True) and data.get('studio'):
+        if getattr(self.config, 'sync_collection', True) and 'studio' in data:
             _needs_reload |= self._sync_collection(plex_item, data, result)
 
         # Single deferred reload after all edits (reduces HTTP roundtrips from up to 6 to 1)
@@ -1682,8 +1682,24 @@ class SyncWorker:
             return False
 
     def _sync_collection(self, plex_item, data: dict, result) -> bool:
-        """Add item to studio-based Plex collection. Returns True if reload needed."""
+        """Add item to studio-based Plex collection. Returns True if reload needed.
+
+        LOCKED: If 'studio' key exists with empty/None, clear the collection
+        field (mirrors _sync_performers/_sync_tags "key present but empty =
+        clear" contract). Called only when 'studio' is present in data.
+        """
         studio = data.get('studio')
+        if not studio:
+            try:
+                plex_item.edit(**{'collection.locked': 1})
+                log_debug("Clearing collection (Stash studio is empty)")
+                result.add_success('collection')
+                return True
+            except Exception as e:
+                log_warn(f" Failed to clear collection: {e}")
+                result.add_warning('collection', e)
+                return False
+
         try:
             current_collections = [c.tag for c in getattr(plex_item, 'collections', [])]
             if studio not in current_collections:
