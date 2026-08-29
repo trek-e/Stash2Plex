@@ -132,14 +132,36 @@ jobs:
           git commit -m "chore: update plugin index and zip for v${{ steps.version.outputs.version }}"
           git push origin HEAD:${{ steps.branch.outputs.name }}
 
-      - name: Mirror index.yml and zip to main
+      - name: Mirror release branch to main
         run: |
+          RELEASE_BRANCH="${{ steps.branch.outputs.name }}"
+          if [ "$RELEASE_BRANCH" = "main" ]; then
+            echo "Release branch is main; nothing to mirror."
+            exit 0
+          fi
+
           BRANCH_COMMIT=$(git rev-parse HEAD)
           git fetch origin main
-          git checkout origin/main -b _main_mirror
-          git checkout "$BRANCH_COMMIT" -- index.yml Stash2Plex.yml Stash2Plex.zip
-          git commit -m "chore: update plugin index and zip for v${{ steps.version.outputs.version }}"
-          git push origin HEAD:main
+
+          MAIN_SHA=$(git rev-parse origin/main)
+
+          if [ "$MAIN_SHA" = "$BRANCH_COMMIT" ]; then
+            echo "main is already at ${BRANCH_COMMIT}. Nothing to mirror."
+            exit 0
+          fi
+
+          if ! git merge-base --is-ancestor origin/main "$BRANCH_COMMIT"; then
+            echo "::error::main has diverged from ${RELEASE_BRANCH} and cannot be fast-forwarded."
+            echo "main (${MAIN_SHA}) is not an ancestor of ${RELEASE_BRANCH}'s release"
+            echo "commit (${BRANCH_COMMIT}), which means a commit exists on main that"
+            echo "does not exist on ${RELEASE_BRANCH} (e.g. someone committed directly"
+            echo "to main). main must be reconciled with ${RELEASE_BRANCH} manually"
+            echo "before it can be mirrored automatically again. Refusing to force-push."
+            exit 1
+          fi
+
+          echo "Fast-forwarding main from ${MAIN_SHA} to ${BRANCH_COMMIT}."
+          git push origin "${BRANCH_COMMIT}:refs/heads/main"
 
       - name: Generate release notes
         id: notes
