@@ -307,12 +307,32 @@ def on_scene_update(
                 sanitized_data['rating100'] = validated.rating100
             if validated.date is not None:
                 sanitized_data['date'] = validated.date
+
+            # studio/performers/tags: a field the update genuinely emptied must
+            # still reach the worker as present-and-empty, not be dropped as if
+            # the caller never mentioned it (issue #9). SyncMetadata's
+            # sanitize_string_list field_validator collapses an emptied list to
+            # None by design (it also drops lists that are all-empty-strings
+            # after sanitization), so "was emptied" and "was never mentioned"
+            # are indistinguishable on validated.performers/validated.tags
+            # alone. Fall back to checking presence on update_data (the merged
+            # dict actually seen for this update) to recover that distinction,
+            # matching the "key absent = preserve, key present-and-empty =
+            # clear" contract already implemented in scene_extractor.py.
             if validated.studio is not None:
                 sanitized_data['studio'] = validated.studio
+            elif 'studio' in update_data:
+                sanitized_data['studio'] = None
+
             if validated.performers is not None:
                 sanitized_data['performers'] = validated.performers
+            elif 'performers' in update_data:
+                sanitized_data['performers'] = []
+
             if validated.tags is not None:
                 sanitized_data['tags'] = validated.tags
+            elif 'tags' in update_data:
+                sanitized_data['tags'] = []
 
             # Preserve any extra fields from original update_data that we don't validate
             for key in ['studio_id', 'performer_ids', 'tag_ids', 'rating', 'path', 'poster_url', 'background_url']:

@@ -910,3 +910,186 @@ class TestOnSceneUpdate:
         # Should return False because validated is None
         assert result is False
         mock_queue_manager.try_enqueue.assert_not_called()
+
+
+# =============================================================================
+# TestOnSceneUpdateEmptyCollectionPropagation - Issue #9 hook-path regression
+# =============================================================================
+#
+# These tests deliberately do NOT mock hooks.handlers.validate_metadata, so
+# the real SyncMetadata model (and its sanitize_string_list field_validator)
+# runs. That is the only way to reproduce the bug: sanitize_string_list
+# collapses an emptied list ([]) to None, and on_scene_update previously only
+# copied a field into the job data when it was not None — indistinguishable
+# from a field the caller never mentioned.
+
+class TestOnSceneUpdateEmptyCollectionPropagation:
+    """Emptied studio/performers/tags must reach the job data as present-and-empty."""
+
+    @pytest.fixture
+    def mock_queue_manager(self):
+        qm = MagicMock()
+        qm.try_enqueue.return_value = EnqueueResult(enqueued=True, job={"scene_id": 123}, reason=None)
+        return qm
+
+    def _stash_returning(self, scene_overrides: dict):
+        """Build a mock stash whose GQL findScene response is the given scene dict."""
+        stash = MagicMock()
+        base_scene = {
+            "id": "123",
+            "title": "Test Scene",
+            "details": None,
+            "date": None,
+            "rating100": None,
+            "files": [{"path": "/media/test.mp4"}],
+            "studio": None,
+            "performers": [],
+            "tags": [],
+            "paths": {},
+        }
+        base_scene.update(scene_overrides)
+        stash.call_GQL.return_value = {"findScene": base_scene}
+        return stash
+
+    def test_tags_present_and_empty_enqueues_empty_list(self, mock_queue_manager, mocker):
+        """Deleting the last tag must reach the job data as tags == [], not absent."""
+        mocker.patch('hooks.handlers.is_scan_running', return_value=False)
+        stash = self._stash_returning({
+            "details": "Some description",  # keeps has_meaningful_metadata satisfied
+            "studio": {"name": "Studio"},
+            "performers": [{"name": "Actor"}],
+            "tags": [],  # deliberately emptied
+        })
+
+        result = on_scene_update(
+            scene_id=123,
+            update_data={"title": "Test Scene"},
+            queue_manager=mock_queue_manager,
+            stash=stash,
+        )
+
+        assert result is True
+        enqueued_data = mock_queue_manager.try_enqueue.call_args[0][2]
+        assert "tags" in enqueued_data
+        assert enqueued_data["tags"] == []
+
+    def test_performers_present_and_empty_enqueues_empty_list(self, mock_queue_manager, mocker):
+        """Deleting the last performer must reach the job data as performers == []."""
+        mocker.patch('hooks.handlers.is_scan_running', return_value=False)
+        stash = self._stash_returning({
+            "details": "Some description",
+            "studio": {"name": "Studio"},
+            "performers": [],  # deliberately emptied
+            "tags": [{"name": "Tag"}],
+        })
+
+        result = on_scene_update(
+            scene_id=123,
+            update_data={"title": "Test Scene"},
+            queue_manager=mock_queue_manager,
+            stash=stash,
+        )
+
+        assert result is True
+        enqueued_data = mock_queue_manager.try_enqueue.call_args[0][2]
+        assert "performers" in enqueued_data
+        assert enqueued_data["performers"] == []
+
+    def test_studio_explicitly_cleared_enqueues_present_empty(self, mock_queue_manager, mocker):
+        """Clearing a scene's studio in Stash must reach the job data as present."""
+        mocker.patch('hooks.handlers.is_scan_running', return_value=False)
+        stash = self._stash_returning({
+            "studio": None,  # deliberately cleared
+            "performers": [{"name": "Actor"}],
+            "tags": [{"name": "Tag"}],
+        })
+
+        result = on_scene_update(
+            scene_id=123,
+            update_data={"title": "Test Scene"},
+            queue_manager=mock_queue_manager,
+            stash=stash,
+        )
+
+        assert result is True
+        enqueued_data = mock_queue_manager.try_enqueue.call_args[0][2]
+        assert "studio" in enqueued_data
+        assert not enqueued_data["studio"]  # None or '' both signal "clear"
+
+    def test_tags_never_mentioned_omits_key(self, mock_queue_manager, mocker):
+        """A field the caller never mentioned must stay absent, not be cleared.
+
+        This is the guard against over-clearing: extract_scene_metadata is
+        mocked here to simulate a caller that genuinely never mentions
+        studio/performers/tags, which must NOT be treated the same as an
+        explicit removal.
+        """
+        mocker.patch('hooks.handlers.is_scan_running', return_value=False)
+        mocker.patch(
+            'validation.scene_extractor.extract_scene_metadata',
+            return_value={
+                'title': 'Test Scene',
+                'details': 'Some description',  # keeps has_meaningful_metadata satisfied
+                'date': None,
+                'rating100': None,
+                # studio/performers/tags deliberately absent
+            },
+        )
+        stash = self._stash_returning({})
+
+        result = on_scene_update(
+            scene_id=123,
+            update_data={"title": "Test Scene"},
+            queue_manager=mock_queue_manager,
+            stash=stash,
+        )
+
+        assert result is True
+        enqueued_data = mock_queue_manager.try_enqueue.call_args[0][2]
+        assert "tags" not in enqueued_data
+        assert "performers" not in enqueued_data
+        assert "studio" not in enqueued_data
+
+    def test_non_empty_values_pass_through(self, mock_queue_manager, mocker):
+        """Populated studio/performers/tags still sync through as their sanitized values."""
+        mocker.patch('hooks.handlers.is_scan_running', return_value=False)
+        stash = self._stash_returning({
+            "studio": {"name": "Real Studio"},
+            "performers": [{"name": "Actor One"}, {"name": "Actor Two"}],
+            "tags": [{"name": "Tag One"}],
+        })
+
+        result = on_scene_update(
+            scene_id=123,
+            update_data={"title": "Test Scene"},
+            queue_manager=mock_queue_manager,
+            stash=stash,
+        )
+
+        assert result is True
+        enqueued_data = mock_queue_manager.try_enqueue.call_args[0][2]
+        assert enqueued_data["studio"] == "Real Studio"
+        assert enqueued_data["performers"] == ["Actor One", "Actor Two"]
+        assert enqueued_data["tags"] == ["Tag One"]
+
+    def test_never_synced_scene_with_no_metadata_still_skipped(self, mock_queue_manager, mocker):
+        """Identify-race protection: a scene never synced before with no meaningful
+        metadata beyond title/path must still be deferred, not enqueued."""
+        mocker.patch('hooks.handlers.is_scan_running', return_value=False)
+        stash = self._stash_returning({
+            "details": None,
+            "studio": None,
+            "performers": [],
+            "tags": [],
+        })
+
+        result = on_scene_update(
+            scene_id=123,
+            update_data={"title": "Test Scene"},
+            queue_manager=mock_queue_manager,
+            sync_timestamps={},  # scene_id 123 never synced before
+            stash=stash,
+        )
+
+        assert result is False
+        mock_queue_manager.try_enqueue.assert_not_called()
