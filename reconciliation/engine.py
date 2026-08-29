@@ -366,31 +366,18 @@ class GapDetectionEngine:
         """Parse plex_unmatched_path_map config into prefix pairs.
 
         Format: '/plex/prefix=>/stash/prefix; /plex2=>/stash2'
-        """
-        raw = (getattr(self.config, 'plex_unmatched_path_map', None) or '').strip()
-        if not raw:
-            return []
 
-        pairs: list[tuple[str, str]] = []
-        for item in [x.strip() for x in raw.split(';') if x.strip()]:
-            if '=>' not in item:
-                log_warn(f"Invalid plex_unmatched_path_map entry (missing '=>'): {item}")
-                continue
-            src, dst = item.split('=>', 1)
-            src = src.strip().rstrip('/')
-            dst = dst.strip().rstrip('/')
-            if not src or not dst:
-                continue
-            pairs.append((src, dst))
-        return pairs
+        Delegates to shared_lib.prefix_path_map so this logic exists in one
+        place (also used by Stash2Plex.trigger_plex_scan_for_scene for the
+        reverse Stash->Plex translation).
+        """
+        from shared_lib.prefix_path_map import parse_prefix_mappings
+        return parse_prefix_mappings(getattr(self.config, 'plex_unmatched_path_map', None))
 
     def _map_unmatched_path_to_stash(self, plex_path: str, mappings: list[tuple[str, str]]) -> str:
         """Apply configured prefix mapping from Plex path to Stash path."""
-        normalized = plex_path.replace('\\\\', '/')
-        for src, dst in mappings:
-            if normalized.startswith(src + '/') or normalized == src:
-                return dst + normalized[len(src):]
-        return normalized
+        from shared_lib.prefix_path_map import map_plex_to_stash
+        return map_plex_to_stash(plex_path, mappings)
 
     def _fetch_plex_unmatched_paths(self) -> set[str]:
         """Fetch file paths from Plex sections where unmatched=1.

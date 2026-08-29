@@ -15,7 +15,6 @@ hooks:
     description: Syncs scene metadata to Plex when a scene is manually updated
     triggeredBy:
       - Scene.Update.Post
-      - Scene.Create.Post
 
 tasks:
   - name: Sync All Scenes to Plex
@@ -63,6 +62,10 @@ tasks:
     description: Re-queue DLQ jobs that failed during last Plex outage (PlexServerDown errors only, requires Plex to be healthy)
     defaultArgs:
       mode: recover_outage_jobs
+  - name: Retry Not-Found Entries
+    description: Re-queue DLQ entries that failed because the scene wasn't yet in Plex (PlexNotFound), regardless of outage history — safe once Plex has re-scanned (requires Plex to be healthy)
+    defaultArgs:
+      mode: retry_not_found
   - name: Reconcile Library (All)
     description: Detect and queue metadata gaps for all scenes (empty metadata, stale syncs, missing from Plex)
     defaultArgs:
@@ -204,5 +207,5 @@ settings:
     type: BOOLEAN
   plex_unmatched_path_map:
     displayName: "Plex Unmatched Path Map"
-    description: "Optional path prefix mapping for Plex unmatched pre-filter. Format: '/plex/prefix=>/stash/prefix; /plex2=>/stash2'"
+    description: "Optional path prefix mapping for split-path deployments. Used by the Plex unmatched pre-filter and to translate the path used when triggering a Plex scan on PlexNotFound. Format: '/plex/prefix=>/stash/prefix; /plex2=>/stash2'"
     type: STRING

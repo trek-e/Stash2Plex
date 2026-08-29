@@ -194,7 +194,9 @@ class Stash2PlexConfig(BaseModel):
     )
     plex_unmatched_path_map: Optional[str] = Field(
         default=None,
-        description="Optional path prefix mappings for Plex unmatched pre-filter. Format: '/plex/prefix=>/stash/prefix; /plex2=>/stash2'"
+        description="Optional path prefix mappings for split-path deployments. Used both by "
+                    "the Plex unmatched pre-filter and to translate the path used when "
+                    "triggering a Plex scan on PlexNotFound. Format: '/plex/prefix=>/stash/prefix; /plex2=>/stash2'"
     )
 
     # Stash connection (for fetching images)

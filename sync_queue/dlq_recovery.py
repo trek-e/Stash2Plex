@@ -30,6 +30,7 @@ __all__ = [
     "PERMANENT_ERROR_TYPES",
     "get_error_types_for_recovery",
     "get_outage_dlq_entries",
+    "get_dlq_entries_by_error_types",
     "recover_outage_jobs",
     "RecoveryResult",
 ]
@@ -129,6 +130,46 @@ def get_outage_dlq_entries(
     with dlq._get_connection() as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.execute(query, params)
+        results = [dict(row) for row in cursor.fetchall()]
+
+    return results
+
+
+def get_dlq_entries_by_error_types(
+    dlq: "DeadLetterQueue",
+    error_types: List[str]
+) -> List[dict]:
+    """
+    Query DLQ for entries matching error types, with NO time-window filter.
+
+    Unlike get_outage_dlq_entries(), this isn't scoped to a recorded Plex
+    outage — used for error classes (e.g. PlexNotFound) whose recovery
+    isn't meaningfully tied to a Plex-down window at all: a PlexNotFound
+    entry can be recoverable regardless of when it failed, once Plex has
+    since indexed the file on a routine scan.
+
+    Args:
+        dlq: DeadLetterQueue instance
+        error_types: List of error type strings to match (e.g. ["PlexNotFound"])
+
+    Returns:
+        List of dicts with: id, scene_id, error_type, error_message, failed_at, job_data
+        Results ordered by failed_at ASC (oldest first). Empty list if no matches.
+    """
+    if not error_types:
+        return []
+
+    placeholders = ','.join('?' * len(error_types))
+    query = f'''
+        SELECT id, scene_id, error_type, error_message, failed_at, job_data
+        FROM dead_letters
+        WHERE error_type IN ({placeholders})
+        ORDER BY failed_at ASC
+    '''
+
+    with dlq._get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(query, error_types)
         results = [dict(row) for row in cursor.fetchall()]
 
     return results

@@ -99,7 +99,9 @@ class TestGetRetryParams:
     """Tests for get_retry_params function."""
 
     def test_plex_not_found_returns_longer_delays(self):
-        """PlexNotFound should return (30.0, 600.0, 12)."""
+        """PlexNotFound's core (early) attempts keep (30.0, 600.0), but
+        max_retries is now 15 to accommodate the long tail (#12/D2) that
+        extends the schedule to ~24h instead of exhausting at ~1.4h."""
         from worker.backoff import get_retry_params
         from plex.exceptions import PlexNotFound
 
@@ -108,7 +110,43 @@ class TestGetRetryParams:
 
         assert base == 30.0
         assert cap == 600.0
-        assert max_retries == 12
+        assert max_retries == 15
+
+    def test_plex_not_found_core_attempts_unchanged(self):
+        """Attempts 1-12 (retry_count 0-11) keep the original 30s/600s schedule."""
+        from worker.backoff import get_retry_params
+        from plex.exceptions import PlexNotFound
+
+        error = PlexNotFound("Item not found")
+        for retry_count in range(0, 12):
+            base, cap, max_retries = get_retry_params(error, retry_count)
+            assert base == 30.0
+            assert cap == 600.0
+            assert max_retries == 15
+
+    def test_plex_not_found_tail_extends_to_roughly_24h(self):
+        """Attempts 13-15 (retry_count 12-14) escalate to ~6h/12h/24h caps
+        so a job survives roughly until Plex's next scheduled scan."""
+        from worker.backoff import get_retry_params
+        from plex.exceptions import PlexNotFound
+
+        error = PlexNotFound("Item not found")
+
+        base, cap, max_retries = get_retry_params(error, retry_count=12)
+        assert base == 30.0
+        assert cap == 6 * 3600.0
+        assert max_retries == 15
+
+        base, cap, max_retries = get_retry_params(error, retry_count=13)
+        assert cap == 12 * 3600.0
+
+        base, cap, max_retries = get_retry_params(error, retry_count=14)
+        assert cap == 24 * 3600.0
+
+        # Beyond the defined tail, stay at the final (24h) cap rather than
+        # growing further or raising.
+        base, cap, max_retries = get_retry_params(error, retry_count=20)
+        assert cap == 24 * 3600.0
 
     def test_plex_temporary_error_returns_standard_delays(self):
         """PlexTemporaryError should return (5.0, 80.0, 5)."""
