@@ -29,17 +29,22 @@ def extract_scene_metadata(scene: dict[str, Any]) -> dict[str, Any]:
         'rating100': scene.get('rating100'),
     }
 
+    # These three keys are ALWAYS emitted, even when empty. The sync layer
+    # (worker/processor.py) distinguishes "key absent" (preserve existing Plex
+    # value) from "key present and empty" (clear it) — omitting the key here
+    # for an emptied field would make a deliberate removal in Stash look
+    # identical to a field the caller simply didn't mention, so Plex would
+    # never learn the field was cleared. The has_meaningful_metadata() quality
+    # gate (validation/quality.py) is what protects the stash-box identify
+    # race, not this extractor — do not reintroduce truthiness guards here.
     studio = scene.get('studio')
-    if studio:
-        data['studio'] = studio.get('name')
+    data['studio'] = studio.get('name') if studio else None
 
-    performers = scene.get('performers', [])
-    if performers:
-        data['performers'] = [p.get('name') for p in performers if p.get('name')]
+    performers = scene.get('performers') or []
+    data['performers'] = [p.get('name') for p in performers if p.get('name')]
 
-    tags = scene.get('tags', [])
-    if tags:
-        data['tags'] = [t.get('name') for t in tags if t.get('name')]
+    tags = scene.get('tags') or []
+    data['tags'] = [t.get('name') for t in tags if t.get('name')]
 
     paths = scene.get('paths', {})
     if paths:
