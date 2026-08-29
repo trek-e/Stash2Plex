@@ -1,0 +1,76 @@
+name: Release Drift Check
+
+on:
+  push:
+    branches:
+      - main
+      - v1.x.x
+  workflow_dispatch: {}
+  schedule:
+    # Every Monday at 06:00 UTC.
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  check-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch release branches
+        id: fetch
+        run: |
+          git fetch origin main || true
+          git fetch origin v1.x.x || true
+
+          if ! git rev-parse --verify origin/main >/dev/null 2>&1; then
+            echo "origin/main not found (fork or branch not pushed yet) - skipping drift check."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! git rev-parse --verify origin/v1.x.x >/dev/null 2>&1; then
+            echo "origin/v1.x.x not found (fork or branch not pushed yet) - skipping drift check."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Compare packaged source between main and v1.x.x
+        if: steps.fetch.outputs.skip != 'true'
+        run: |
+          # This must track the exact set of paths that .github/workflows/release.yml
+          # zips into Stash2Plex.zip. If that list changes, update it here too.
+          PACKAGED_PATHS="Stash2Plex.py Stash2Plex.yml requirements.txt worker/ sync_queue/ plex/ validation/ shared/ hooks/ reconciliation/"
+
+          DIFF=$(git diff --name-only origin/main origin/v1.x.x -- $PACKAGED_PATHS || true)
+
+          if [ -z "$DIFF" ]; then
+            echo "No drift: packaged source is identical between origin/main and origin/v1.x.x."
+            exit 0
+          fi
+
+          echo "::error::Packaged source has diverged between main and v1.x.x."
+          echo ""
+          echo "The release workflow builds Stash2Plex.zip from v1.x.x, then mirrors only"
+          echo "index.yml, Stash2Plex.yml and Stash2Plex.zip to main. Users install from"
+          echo "main's index.yml, so main is publishing an artifact whose source main does"
+          echo "not contain. A fix targeting only one of these branches will NOT reach"
+          echo "users of the other branch's published artifact."
+          echo ""
+          echo "Files that differ between origin/main and origin/v1.x.x (capped at 40):"
+          echo "$DIFF" | head -n 40
+          LINE_COUNT=$(echo "$DIFF" | wc -l | tr -d ' ')
+          if [ "$LINE_COUNT" -gt 40 ]; then
+            echo "... ($((LINE_COUNT - 40)) more file(s) not shown)"
+          fi
+          echo ""
+          echo "Reconciling the two branches is a maintainer decision. See CONTRIBUTING.md"
+          echo "for which branch to target when fixing a bug."
+          exit 1
