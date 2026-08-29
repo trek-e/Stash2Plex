@@ -43,8 +43,14 @@ jobs:
 
       - name: Build plugin zip
         run: |
+          cat > BUILD_INFO.txt <<EOF
+          branch: ${{ steps.branch.outputs.name }}
+          commit: $(git rev-parse HEAD)
+          tag: ${GITHUB_REF_NAME}
+          build_time_utc: $(date -u +"%Y-%m-%d %H:%M:%S")
+          EOF
           zip -r Stash2Plex.zip \
-            Stash2Plex.py Stash2Plex.yml requirements.txt \
+            Stash2Plex.py Stash2Plex.yml requirements.txt BUILD_INFO.txt \
             worker/ sync_queue/ plex/ validation/ shared/ hooks/ reconciliation/ \
             -x '*/test*' '*/__pycache__/*' '*.pyc' '*/.pytest*'
 
@@ -53,10 +59,14 @@ jobs:
           SHA=$(sha256sum Stash2Plex.zip | awk '{print $1}')
           DATE=$(date -u +"%Y-%m-%d %H:%M:%S")
           VERSION="${{ steps.version.outputs.version }}"
+          SOURCE_BRANCH="${{ steps.branch.outputs.name }}"
+          SOURCE_COMMIT=$(git rev-parse HEAD)
           sed -i "s/^  version: .*/  version: ${VERSION}/" index.yml
           sed -i "s/^  date: .*/  date: \"${DATE}\"/" index.yml
           sed -i "s|^  path: .*|  path: Stash2Plex.zip|" index.yml
           sed -i "s/^  sha256: .*/  sha256: ${SHA}/" index.yml
+          sed -i "s/^  source_branch: .*/  source_branch: \"${SOURCE_BRANCH}\"/" index.yml
+          sed -i "s/^  source_commit: .*/  source_commit: \"${SOURCE_COMMIT}\"/" index.yml
 
       - name: Commit updated files
         run: |
