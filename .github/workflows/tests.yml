@@ -15,7 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.11', '3.12']
+        # 3.13 is what the feederbox826/stash-s6 container actually ships,
+        # so it is the version most users run the plugin on.
+        python-version: ['3.11', '3.12', '3.13']
 
     steps:
       - name: Checkout

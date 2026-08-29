@@ -51,7 +51,7 @@ jobs:
           EOF
           zip -r Stash2Plex.zip \
             Stash2Plex.py Stash2Plex.yml requirements.txt BUILD_INFO.txt \
-            worker/ sync_queue/ plex/ validation/ shared/ hooks/ reconciliation/ \
+            worker/ sync_queue/ plex/ validation/ shared/ shared_lib/ hooks/ reconciliation/ \
             -x '*/test*' '*/__pycache__/*' '*.pyc' '*/.pytest*'
 
       - name: Update index.yml
